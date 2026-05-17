@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit } from 'lucide-react';
 import { AddLGUModal } from './AddLGUModal';
 import { EditLGUModal, LGUDelivery } from './EditLGUModal';
+import type { LGUPriorityReport } from '../hooks/useInventoryState';
 
 interface RecentActivity {
   id: string;
@@ -23,7 +24,13 @@ const FNFI_CATEGORIES = [
   'RTEF'
 ];
 
-export function LGUMonitoringNew() {
+interface LGUMonitoringNewProps {
+  inventoryState?: {
+    lguPriorityReports: LGUPriorityReport[];
+  };
+}
+
+export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -251,6 +258,7 @@ export function LGUMonitoringNew() {
     return matchesSearch && matchesType && matchesCategory;
   });
 
+  const priorityReports = inventoryState?.lguPriorityReports || [];
   const totalLGUs = lguDataList.length;
   const totalItemsReleased = lguDataList.reduce((sum, lgu) => sum + lgu.totalItemsReleased, 0);
   const totalDeliveries = lguDataList.reduce((sum, lgu) => sum + lgu.deliveryCount, 0);
@@ -308,6 +316,41 @@ export function LGUMonitoringNew() {
           <p className="text-sm font-semibold opacity-90 mt-1">Completion Rate</p>
         </div>
       </div>
+
+
+
+      {priorityReports.length > 0 && (
+        <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Stock-Based Prioritization Logic</h3>
+              <p className="text-sm text-gray-600">Red/Yellow/Green indicators are computed from LGU stock, affected families, and damage severity.</p>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">Immediate restocking: {priorityReports.filter(report => report.priorityColor === 'Red').length}</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {priorityReports.slice(0, 3).map(report => (
+              <div key={report.id} className={`rounded-lg border p-4 ${
+                report.priorityColor === 'Red' ? 'bg-red-50 border-red-200' :
+                report.priorityColor === 'Yellow' ? 'bg-yellow-50 border-yellow-200' :
+                'bg-green-50 border-green-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-sm text-gray-900">{report.municipality}</p>
+                  <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                    report.priorityColor === 'Red' ? 'bg-red-100 text-red-700' :
+                    report.priorityColor === 'Yellow' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-green-100 text-green-700'
+                  }`}>{report.priorityColor}</span>
+                </div>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{report.urgencyScore}</p>
+                <p className="text-xs text-gray-600 mt-1">Food packs: {report.foodPacks} • Affected families: {report.affectedFamilies}</p>
+                <p className="text-xs text-gray-700 mt-2">{report.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Search & Filters */}
       <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm">

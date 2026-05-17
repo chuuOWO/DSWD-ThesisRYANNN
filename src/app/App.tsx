@@ -21,10 +21,10 @@ export default function App() {
       case 'inventory':
         return <InventoryMonitoring inventoryState={inventoryState} />;
       case 'lgu-monitoring':
-        return <LGUMonitoringNew />;
+        return <LGUMonitoringNew inventoryState={inventoryState} />;
       case 'dashboard':
       default:
-        return <DashboardView />;
+        return <DashboardView inventoryState={inventoryState} />;
     }
   };
 
