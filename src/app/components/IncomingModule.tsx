@@ -9,7 +9,7 @@ interface InventoryState {
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
-  mintBatchToken: (id: string) => { ok: boolean; message: string };
+  mintBatchToken: (id: string) => Promise<{ ok: boolean; message: string }>;
   requestIncomingCorrection: (id: string, note: string) => void;
 }
 
@@ -115,7 +115,7 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
 
   const showResult = (message: string) => setActionModal({ type: 'message', message });
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     if (!actionModal?.item) return;
     const item = actionModal.item;
 
@@ -143,7 +143,7 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
     }
 
     if (actionModal.type === 'post') {
-      const result = mintBatchToken(item.id);
+      const result = await mintBatchToken(item.id);
       showResult(friendlyResult(result.message));
       return;
     }

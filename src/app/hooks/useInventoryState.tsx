@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { backendApi } from '../services/backendApi';
+import { blockchain } from '../services/blockchain';
 
 export interface InventoryItem {
   category: string;
@@ -106,131 +108,160 @@ const makeTxHash = (prefix: string) => `0x${prefix}${Math.random().toString(16).
 const isMainWarehouse = (warehouse: string): warehouse is WarehouseName =>
   warehouse === 'Oton Main Warehouse' || warehouse === 'Pototan Main Warehouse';
 
-export function useInventoryState() {
-  const [inventory, setInventory] = useState<InventoryItem[]>([
-    { category: 'Food Pack', warehouseA: 1500, warehouseB: 1200 },
-    { category: 'Hygiene Kit', warehouseA: 800, warehouseB: 500 },
-    { category: 'Sleeping Kit', warehouseA: 400, warehouseB: 300 },
-    { category: 'Kitchen Kit', warehouseA: 300, warehouseB: 200 },
-    { category: 'Family Kit', warehouseA: 600, warehouseB: 400 },
-    { category: 'Laminated Sack', warehouseA: 2000, warehouseB: 1500 },
-    { category: 'RTEF', warehouseA: 250, warehouseB: 150 }
-  ]);
+const isIncomingStatus = (status: unknown): status is IncomingStatus =>
+  typeof status === 'string' && ['Draft', 'Pending Verification', 'Verified', 'Minted', 'Correction Requested', 'Rejected'].includes(status);
 
-  const [incomingGoodsList, setIncomingGoodsList] = useState<IncomingGoods[]>(() => {
-    const seed: Omit<IncomingGoods, 'manifestHash' | 'auditTrail'>[] = [
-      {
-        id: 'INC-2026-001',
-        dateReceived: '2026-05-10',
-        fnfiCategory: 'Food Pack',
-        quantity: 1000,
-        unitType: 'pcs',
-        expirationDate: '2026-11-10',
-        source: 'VDRC',
-        destinationType: 'Warehouse',
-        destination: 'Oton Main Warehouse',
-        incidentCode: 'Good condition',
-        status: 'Minted',
-        batchTokenId: 'BATCH-2026-001',
-        blockchainTxHash: '0xBTCH001A9F4E',
-        verifiedBy: 'Warehouse Supervisor',
-        mintedAt: '2026-05-10 09:30'
-      },
-      {
-        id: 'INC-2026-002',
-        dateReceived: '2026-05-11',
-        fnfiCategory: 'Hygiene Kit',
-        quantity: 500,
-        unitType: 'pcs',
-        expirationDate: '2027-05-11',
-        source: 'Luzon Disaster Resource Center',
-        destinationType: 'LGU',
-        destination: 'Leon',
-        incidentCode: 'Direct LGU augmentation',
-        status: 'Pending Verification'
-      },
-      {
-        id: 'INC-2026-003',
-        dateReceived: '2026-05-12',
-        fnfiCategory: 'Sleeping Kit',
-        quantity: 300,
-        unitType: 'sets',
-        expirationDate: '2028-05-12',
-        source: 'Others',
-        destinationType: 'Warehouse',
-        destination: 'Pototan Main Warehouse',
-        incidentCode: 'For encoding review',
-        status: 'Draft'
-      }
-    ];
+const isOutgoingStatus = (status: unknown): status is OutgoingStatus =>
+  typeof status === 'string' && ['Draft', 'Allocating', 'Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed', 'Correction Requested', 'Cancelled'].includes(status);
 
-    return seed.map(item => ({
-      ...item,
-      manifestHash: makeManifestHash(item),
-      auditTrail: [makeAudit('Seed Record', `${item.id} initialized as ${item.status}`)]
-    }));
+type IncomingManifestRow = {
+  id: string;
+  manifest_number?: string | null;
+  date_received?: string | null;
+  category?: string | null;
+  quantity?: number | null;
+  unit_type?: string | null;
+  expiration_date?: string | null;
+  source?: string | null;
+  destination_type?: string | null;
+  destination?: string | null;
+  incident_code?: string | null;
+  status?: string | null;
+  manifest_hash?: string | null;
+  tx_hash?: string | null;
+  batch_token_id?: string | null;
+  minted_at?: string | null;
+  wallet_address?: string | null;
+  created_at?: string | null;
+};
+
+type OutgoingRequestRow = {
+  id: string;
+  dr_number?: string | null;
+  date_allocated?: string | null;
+  lgu_name?: string | null;
+  province?: string | null;
+  municipality?: string | null;
+  category?: string | null;
+  amount_requested?: number | null;
+  amount_approved?: number | null;
+  warehouse_source?: string | null;
+  delivery_mode?: string | null;
+  delivery_status?: string | null;
+  incident_code?: string | null;
+  sender_gps?: string | null;
+  receiver_gps?: string | null;
+  tx_hash?: string | null;
+  handover_contract_id?: string | null;
+  sender_signature?: string | null;
+  receiver_signature?: string | null;
+  wallet_address?: string | null;
+  created_at?: string | null;
+};
+
+const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
+  const item = {
+    id: row.manifest_number ?? row.id,
+    dateReceived: row.date_received ?? '',
+    fnfiCategory: row.category ?? '',
+    quantity: row.quantity ?? 0,
+    unitType: row.unit_type ?? '',
+    expirationDate: row.expiration_date ?? '',
+    source: row.source ?? '',
+    destinationType: row.destination_type === 'LGU' ? 'LGU' : 'Warehouse',
+    destination: row.destination ?? '',
+    incidentCode: row.incident_code ?? '',
+    status: isIncomingStatus(row.status) ? row.status : 'Draft',
+    manifestHash: row.manifest_hash ?? '',
+  batchTokenId: row.batch_token_id ?? undefined,
+  blockchainTxHash: row.tx_hash ?? undefined,
+    mintedAt: row.minted_at ?? undefined
+  } satisfies Omit<IncomingGoods, 'auditTrail'>;
+
+  return {
+    ...item,
+    manifestHash: item.manifestHash || makeManifestHash(item),
+    auditTrail: [makeAudit('Loaded from Supabase', `Incoming manifest restored from database as ${item.status}.`, item.blockchainTxHash)]
+  };
+};
+
+const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
+  drNumber: row.dr_number ?? row.id,
+  dateAllocated: row.date_allocated ?? '',
+  lguName: row.lgu_name ?? '',
+  province: row.province ?? '',
+  municipality: row.municipality ?? '',
+  fnfiCategory: row.category ?? '',
+  amountRequested: row.amount_requested ?? 0,
+  amountApproved: row.amount_approved ?? 0,
+  warehouseSource: row.warehouse_source ?? '',
+  deliveryMode: row.delivery_mode ?? '',
+  deliveryStatus: isOutgoingStatus(row.delivery_status) ? row.delivery_status : 'Allocating',
+  incidentCode: row.incident_code ?? '',
+  allocatedBatchTokenIds: [],
+  handoverContractId: row.handover_contract_id ?? undefined,
+  senderSignature: row.sender_signature ?? undefined,
+  receiverSignature: row.receiver_signature ?? undefined,
+  senderGps: row.sender_gps ?? undefined,
+  receiverGps: row.receiver_gps ?? undefined,
+  blockchainTxHash: row.tx_hash ?? undefined,
+  auditTrail: [makeAudit('Loaded from Supabase', `Outgoing request restored from database as ${row.delivery_status ?? 'Allocating'}.`, row.tx_hash ?? undefined)]
+});
+
+const emptyInventoryItem = (category: string): InventoryItem => ({
+  category,
+  warehouseA: 0,
+  warehouseB: 0
+});
+
+const calculateAvailableInventory = (incoming: IncomingGoods[], outgoing: OutgoingRelease[]): InventoryItem[] => {
+  const stock = new Map<string, InventoryItem>();
+
+  const ensureItem = (category: string) => {
+    if (!stock.has(category)) {
+      stock.set(category, emptyInventoryItem(category));
+    }
+    return stock.get(category)!;
+  };
+
+  incoming.forEach(item => {
+    if (item.status !== 'Minted' || item.destinationType !== 'Warehouse' || !isMainWarehouse(item.destination)) return;
+
+    const stockItem = ensureItem(item.fnfiCategory);
+    if (item.destination === 'Oton Main Warehouse') {
+      stockItem.warehouseA += item.quantity;
+    } else {
+      stockItem.warehouseB += item.quantity;
+    }
   });
 
-  const [outgoingReleasesList, setOutgoingReleasesList] = useState<OutgoingRelease[]>([
-    {
-      drNumber: 'DR-2026-001',
-      dateAllocated: '2026-05-12',
-      lguName: 'Leon Municipal Office',
-      province: 'Iloilo',
-      municipality: 'Leon',
-      fnfiCategory: 'Food Pack',
-      amountRequested: 500,
-      amountApproved: 500,
-      warehouseSource: 'Oton Main Warehouse',
-      deliveryMode: 'Truck',
-      deliveryStatus: 'Accepted',
-      incidentCode: 'Emergency relief',
-      allocatedBatchTokenIds: ['BATCH-2026-001'],
-      handoverContractId: 'HANDOVER-2026-001',
-      senderSignature: 'SIG-SENDER-LEON-001',
-      receiverSignature: 'SIG-RECEIVER-LEON-001',
-      senderGps: '10.6922, 122.4731',
-      receiverGps: '10.7808, 122.3895',
-      blockchainTxHash: '0xHAND0019C3B',
-      auditTrail: [makeAudit('Receiver Accepted', 'Leon LGU accepted 500 Food Packs with GPS proof.', '0xHAND0019C3B')]
-    },
-    {
-      drNumber: 'DR-2026-002',
-      dateAllocated: '2026-05-12',
-      lguName: 'Miag-ao Municipal Office',
-      province: 'Iloilo',
-      municipality: 'Miag-ao',
-      fnfiCategory: 'Hygiene Kit',
-      amountRequested: 300,
-      amountApproved: 300,
-      warehouseSource: 'Pototan Main Warehouse',
-      deliveryMode: 'Truck',
-      deliveryStatus: 'Released',
-      incidentCode: 'Flood response',
-      allocatedBatchTokenIds: [],
-      handoverContractId: 'HANDOVER-2026-002',
-      senderSignature: 'SIG-SENDER-MIAGAO-002',
-      senderGps: '11.0039, 122.5364',
-      blockchainTxHash: '0xHAND002A712',
-      auditTrail: [makeAudit('Sender Signed', 'Warehouse released goods; waiting for LGU acceptance.', '0xHAND002A712')]
-    },
-    {
-      drNumber: 'DR-2026-003',
-      dateAllocated: '2026-05-13',
-      lguName: 'Banate Municipal Office',
-      province: 'Iloilo',
-      municipality: 'Banate',
-      fnfiCategory: 'Sleeping Kit',
-      amountRequested: 200,
-      amountApproved: 0,
-      warehouseSource: 'Pototan Main Warehouse',
-      deliveryMode: 'Pick-up',
-      deliveryStatus: 'Allocating',
-      incidentCode: 'Stock-based prioritization request',
-      allocatedBatchTokenIds: [],
-      auditTrail: [makeAudit('Allocation Created', 'Request queued for stock validation and supervisor approval.')]
+  outgoing.forEach(release => {
+    const consumesStock = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'].includes(release.deliveryStatus);
+    if (!consumesStock || !isMainWarehouse(release.warehouseSource)) return;
+
+    const stockItem = ensureItem(release.fnfiCategory);
+    const quantity = release.amountApproved || release.amountRequested;
+    if (release.warehouseSource === 'Oton Main Warehouse') {
+      stockItem.warehouseA = Math.max(0, stockItem.warehouseA - quantity);
+    } else {
+      stockItem.warehouseB = Math.max(0, stockItem.warehouseB - quantity);
     }
-  ]);
+  });
+
+  return Array.from(stock.values()).sort((a, b) => a.category.localeCompare(b.category));
+};
+
+const logBackendError = (action: string) => (error: unknown) => {
+  console.error(`${action} did not persist to Supabase`, error);
+};
+
+export function useInventoryState() {
+  const [integrationMode, setIntegrationMode] = useState<'backend' | 'mock'>('mock');
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+
+  const [incomingGoodsList, setIncomingGoodsList] = useState<IncomingGoods[]>([]);
+
+  const [outgoingReleasesList, setOutgoingReleasesList] = useState<OutgoingRelease[]>([]);
 
   const lguPriorityReports: LGUPriorityReport[] = useMemo(() => {
     const reports = [
@@ -262,6 +293,10 @@ export function useInventoryState() {
       };
     }).sort((a, b) => b.urgencyScore - a.urgencyScore);
   }, []);
+
+  useEffect(() => {
+    setInventory(calculateAvailableInventory(incomingGoodsList, outgoingReleasesList));
+  }, [incomingGoodsList, outgoingReleasesList]);
 
   const addStock = (category: string, warehouse: WarehouseName, quantity: number) => {
     setInventory(prev => {
@@ -328,6 +363,17 @@ export function useInventoryState() {
       auditTrail: [makeAudit('Draft Created', 'Incoming manifest saved as editable draft. No blockchain minting yet.')]
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
+    backendApi.createIncoming({
+      ...newGoods,
+      manifestNumber: newId,
+      status: 'Draft',
+      manifestHash: goodsWithId.manifestHash
+    }).then(() => {
+      setIntegrationMode('backend');
+    }).catch(error => {
+      logBackendError('Create incoming manifest')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   const updateIncomingGoods = (id: string, patch: Partial<IncomingGoods>) => {
@@ -346,15 +392,23 @@ export function useInventoryState() {
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Draft'
       ? { ...item, status: 'Pending Verification', auditTrail: [makeAudit('Submitted for Verification', 'Draft locked for warehouse review.'), ...item.auditTrail] }
       : item));
+    backendApi.updateIncoming(id, { status: 'Pending Verification' }).catch(error => {
+      logBackendError('Submit incoming manifest')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   const verifyIncomingReceipt = (id: string) => {
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Pending Verification'
       ? { ...item, status: 'Verified', verifiedBy: 'Warehouse Supervisor', auditTrail: [makeAudit('Verified', 'Physical count and manifest details verified.'), ...item.auditTrail] }
       : item));
+    backendApi.updateIncoming(id, { status: 'Verified' }).catch(error => {
+      logBackendError('Verify incoming manifest')(error);
+      setIntegrationMode('mock');
+    });
   };
 
-  const mintBatchToken = (id: string) => {
+  const mintBatchToken = async (id: string) => {
     const item = incomingGoodsList.find(item => item.id === id);
     if (!item || item.status !== 'Verified') return { ok: false, message: 'Only verified manifests can be minted.' };
 
@@ -362,30 +416,58 @@ export function useInventoryState() {
     if (duplicate) return { ok: false, message: `Duplicate manifest detected. Existing token: ${duplicate.batchTokenId}` };
 
     const tokenId = `BATCH-2026-${String(incomingGoodsList.filter(i => i.batchTokenId).length + 1).padStart(3, '0')}`;
-    const txHash = makeTxHash('BATCH');
+    let proof;
 
-    if (item.destinationType === 'Warehouse' && isMainWarehouse(item.destination)) {
-      addStock(item.fnfiCategory, item.destination, item.quantity);
+    try {
+      proof = await blockchain.mintBatchToken({
+        manifestNumber: item.id,
+        batchTokenId: tokenId,
+        manifestHash: item.manifestHash,
+        category: item.fnfiCategory,
+        quantity: item.quantity,
+        destination: item.destination
+      });
+    } catch (error) {
+      logBackendError('Mint batch token with MetaMask')(error);
+      return { ok: false, message: error instanceof Error ? error.message : 'MetaMask minting was cancelled or failed.' };
     }
+
+    const mintedAt = nowStamp();
 
     setIncomingGoodsList(prev => prev.map(incoming => incoming.id === id
       ? {
           ...incoming,
           status: 'Minted',
           batchTokenId: tokenId,
-          blockchainTxHash: txHash,
-          mintedAt: nowStamp(),
-          auditTrail: [makeAudit('Batch Token Minted', `Manifest hash ${incoming.manifestHash} minted as ${tokenId}.`, txHash), ...incoming.auditTrail]
+          blockchainTxHash: proof.hash,
+          mintedAt,
+          auditTrail: [makeAudit('Batch Token Minted', `Manifest hash ${incoming.manifestHash} minted as ${tokenId}.`, proof.hash), ...incoming.auditTrail]
         }
       : incoming));
 
-    return { ok: true, message: `${tokenId} minted and stock posted.` };
+    backendApi.updateIncoming(id, {
+      status: 'Minted',
+      manifestHash: item.manifestHash,
+      txHash: proof.hash,
+      batchTokenId: tokenId,
+      mintedAt,
+      walletAddress: proof.walletAddress
+    }).catch(error => {
+      logBackendError('Mint incoming manifest')(error);
+      setIntegrationMode('mock');
+    });
+
+    return { ok: true, message: `${tokenId} minted and stock posted via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
   };
 
   const requestIncomingCorrection = (id: string, note: string) => {
     setIncomingGoodsList(prev => prev.map(item => item.id === id
       ? { ...item, status: 'Correction Requested', correctionNote: note, auditTrail: [makeAudit('Correction Requested', note), ...item.auditTrail] }
       : item));
+    backendApi.updateIncoming(id, { status: 'Correction Requested' }).catch(error => {
+      logBackendError('Request incoming correction')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatchTokenIds' | 'auditTrail'>) => {
@@ -400,6 +482,16 @@ export function useInventoryState() {
       auditTrail: [makeAudit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
+    backendApi.createOutgoing({
+      ...newRelease,
+      drNumber: newDR,
+      deliveryStatus: 'Allocating'
+    }).then(() => {
+      setIntegrationMode('backend');
+    }).catch(error => {
+      logBackendError('Create outgoing request')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   const updateOutgoingRelease = (drNumber: string, patch: Partial<OutgoingRelease>) => {
@@ -435,52 +527,136 @@ export function useInventoryState() {
           auditTrail: [makeAudit('Allocation Approved', 'Stock reserved and tokenized batches assigned; no custody transfer yet.'), ...item.auditTrail]
         }
       : item));
+    backendApi.updateOutgoing(drNumber, {
+      amountApproved,
+      deliveryStatus: 'Approved'
+    }).catch(error => {
+      logBackendError('Approve outgoing allocation')(error);
+      setIntegrationMode('mock');
+    });
     return { ok: true, message: 'Allocation approved and token batches assigned.' };
   };
 
-  const senderSignAndRelease = (drNumber: string) => {
+  const senderSignAndRelease = async (drNumber: string) => {
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release || !['Approved', 'Packed'].includes(release.deliveryStatus)) return { ok: false, message: 'Only approved/packed releases can be signed by sender.' };
 
-    if (isMainWarehouse(release.warehouseSource)) {
-      const success = deductStock(release.fnfiCategory, release.warehouseSource, release.amountApproved);
-      if (!success) return { ok: false, message: 'Insufficient stock during release.' };
+    const senderGps = release.warehouseSource === 'Pototan Main Warehouse' ? '11.0039, 122.5364' : '10.6922, 122.4731';
+    const handoverContractId = `HANDOVER-${drNumber.replace('DR-', '')}`;
+    let proof;
+
+    try {
+      proof = await blockchain.signRelease({
+        drNumber,
+        handoverContractId,
+        category: release.fnfiCategory,
+        quantity: release.amountApproved || release.amountRequested,
+        from: release.warehouseSource,
+        to: release.lguName,
+        gps: senderGps
+      });
+    } catch (error) {
+      logBackendError('Sign release with MetaMask')(error);
+      return { ok: false, message: error instanceof Error ? error.message : 'MetaMask release signing was cancelled or failed.' };
     }
 
-    const txHash = makeTxHash('HAND');
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? {
           ...item,
           deliveryStatus: 'Released',
-          handoverContractId: `HANDOVER-${drNumber.replace('DR-', '')}`,
-          senderSignature: `SIG-SENDER-${drNumber}`,
-          senderGps: item.warehouseSource === 'Pototan Main Warehouse' ? '11.0039, 122.5364' : '10.6922, 122.4731',
-          blockchainTxHash: txHash,
-          auditTrail: [makeAudit('Sender Signed Handover', 'Warehouse signed release; GPS origin captured and custody transfer opened.', txHash), ...item.auditTrail]
+          handoverContractId,
+          senderSignature: proof.hash,
+          senderGps,
+          blockchainTxHash: proof.hash,
+          auditTrail: [makeAudit('Sender Signed Handover', 'Warehouse signed release; GPS origin captured and custody transfer opened.', proof.hash), ...item.auditTrail]
         }
       : item));
-    return { ok: true, message: 'Sender signature recorded and handover contract opened.' };
+    backendApi.updateOutgoing(drNumber, {
+      deliveryStatus: 'Released',
+      senderGps,
+      txHash: proof.hash,
+      handoverContractId,
+      senderSignature: proof.hash,
+      walletAddress: proof.walletAddress
+    }).catch(error => {
+      logBackendError('Sign outgoing release')(error);
+      setIntegrationMode('mock');
+    });
+    return { ok: true, message: `Sender signature recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
   };
 
   const markInTransit = (drNumber: string) => {
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber && item.deliveryStatus === 'Released'
       ? { ...item, deliveryStatus: 'In Transit', auditTrail: [makeAudit('In Transit', 'Shipment is moving to destination LGU.'), ...item.auditTrail] }
       : item));
+    backendApi.updateOutgoing(drNumber, { deliveryStatus: 'In Transit' }).catch(error => {
+      logBackendError('Mark outgoing in transit')(error);
+      setIntegrationMode('mock');
+    });
   };
 
-  const receiverAcceptWithGps = (drNumber: string) => {
-    const txHash = makeTxHash('ACPT');
+  const receiverAcceptWithGps = async (drNumber: string) => {
+    const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
+    if (!release) return { ok: false, message: 'Release not found.' };
+    const latestGps = release?.municipality === 'Miag-ao' ? '10.6415, 122.2352' : release?.municipality === 'Banate' ? '11.0022, 122.8174' : '10.7202, 122.5621';
+    const handoverContractId = release.handoverContractId ?? `HANDOVER-${drNumber.replace('DR-', '')}`;
+    let proof;
+
+    try {
+      proof = await blockchain.confirmReceipt({
+        drNumber,
+        handoverContractId,
+        category: release.fnfiCategory,
+        quantity: release.amountApproved || release.amountRequested,
+        from: release.warehouseSource,
+        to: release.lguName,
+        gps: latestGps
+      });
+    } catch (error) {
+      logBackendError('Confirm receipt with MetaMask')(error);
+      return { ok: false, message: error instanceof Error ? error.message : 'MetaMask receipt confirmation was cancelled or failed.' };
+    }
+
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber && ['Released', 'In Transit', 'Delivered'].includes(item.deliveryStatus)
       ? {
           ...item,
           deliveryStatus: 'Accepted',
-          receiverSignature: `SIG-RECEIVER-${drNumber}`,
-          receiverGps: item.municipality === 'Miag-ao' ? '10.6415, 122.2352' : item.municipality === 'Banate' ? '11.0022, 122.8174' : '10.7202, 122.5621',
-          blockchainTxHash: txHash,
-          auditTrail: [makeAudit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', txHash), ...item.auditTrail]
+          handoverContractId,
+          receiverSignature: proof.hash,
+          receiverGps: latestGps,
+          blockchainTxHash: proof.hash,
+          auditTrail: [makeAudit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', proof.hash), ...item.auditTrail]
         }
       : item));
+    backendApi.updateOutgoing(drNumber, {
+      deliveryStatus: 'Accepted',
+      receiverGps: latestGps,
+      txHash: proof.hash,
+      handoverContractId,
+      receiverSignature: proof.hash,
+      walletAddress: proof.walletAddress
+    }).catch(error => {
+      logBackendError('Accept outgoing handover')(error);
+      setIntegrationMode('mock');
+    });
+
+    return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
   };
+
+  useEffect(() => {
+    const loadDashboard = () => backendApi.getDashboard()
+      .then(({ incoming, outgoing }) => {
+        setIncomingGoodsList(incoming.map(mapIncomingManifest));
+        setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
+        setIntegrationMode('backend');
+      })
+      .catch(() => setIntegrationMode('mock'));
+
+    loadDashboard();
+    const unsubscribe = backendApi.subscribeDashboard(loadDashboard);
+
+    return unsubscribe;
+  }, []);
 
   const requestOutgoingCorrection = (drNumber: string, note: string) => {
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
@@ -509,5 +685,7 @@ export function useInventoryState() {
     markInTransit,
     receiverAcceptWithGps,
     requestOutgoingCorrection
+    ,
+    integrationMode
   };
 }

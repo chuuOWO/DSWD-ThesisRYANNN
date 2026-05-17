@@ -9,9 +9,9 @@ interface InventoryState {
   addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatchTokenIds' | 'auditTrail'>) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => { ok: boolean; message: string };
-  senderSignAndRelease: (drNumber: string) => { ok: boolean; message: string };
+  senderSignAndRelease: (drNumber: string) => Promise<{ ok: boolean; message: string }>;
   markInTransit: (drNumber: string) => void;
-  receiverAcceptWithGps: (drNumber: string) => void;
+  receiverAcceptWithGps: (drNumber: string) => Promise<{ ok: boolean; message: string }>;
   requestOutgoingCorrection: (drNumber: string, note: string) => void;
 }
 
@@ -134,7 +134,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
 
   const showResult = (message: string) => setActionModal({ type: 'message', message });
 
-  const handleConfirmReleaseAction = () => {
+  const handleConfirmReleaseAction = async () => {
     if (!actionModal?.release) return;
     const release = actionModal.release;
 
@@ -150,7 +150,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
     }
 
     if (actionModal.type === 'senderSign') {
-      const result = senderSignAndRelease(release.drNumber);
+      const result = await senderSignAndRelease(release.drNumber);
       showResult(result.message.replace('handover contract opened', 'release record signed'));
       return;
     }
@@ -162,8 +162,8 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
     }
 
     if (actionModal.type === 'receiverAccept') {
-      receiverAcceptWithGps(release.drNumber);
-      closeActionModal();
+      const result = await receiverAcceptWithGps(release.drNumber);
+      showResult(result.message);
       return;
     }
 
