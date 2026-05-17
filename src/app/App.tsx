@@ -24,7 +24,7 @@ export default function App() {
         return <LGUMonitoringNew inventoryState={inventoryState} />;
       case 'dashboard':
       default:
-        return <DashboardView inventoryState={inventoryState} />;
+        return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} />;
     }
   };
 
