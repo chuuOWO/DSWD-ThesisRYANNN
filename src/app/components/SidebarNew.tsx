@@ -1,4 +1,4 @@
-import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings } from 'lucide-react';
+import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck } from 'lucide-react';
 
 interface SidebarProps {
   currentView: string;
@@ -11,7 +11,8 @@ export function SidebarNew({ currentView, onNavigate }: SidebarProps) {
     { id: 'incoming', label: 'Incoming', icon: PackagePlus },
     { id: 'outgoing', label: 'Outgoing', icon: PackageMinus },
     { id: 'inventory', label: 'Inventory', icon: Package },
-    { id: 'lgu-monitoring', label: 'LGU Monitor', icon: MapPin }
+    { id: 'lgu-monitoring', label: 'LGU Monitor', icon: MapPin },
+    { id: 'truck-tracking', label: 'Trucking', icon: Truck }
   ];
 
   return (

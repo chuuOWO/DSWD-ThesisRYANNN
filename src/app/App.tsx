@@ -6,6 +6,7 @@ import { IncomingModule } from './components/IncomingModule';
 import { OutgoingModuleNew } from './components/OutgoingModuleNew';
 import { InventoryMonitoring } from './components/InventoryMonitoring';
 import { LGUMonitoringNew } from './components/LGUMonitoringNew';
+import { TruckTracking } from './components/TruckTracking';
 import { useInventoryState } from './hooks/useInventoryState';
 
 export default function App() {
@@ -22,6 +23,8 @@ export default function App() {
         return <InventoryMonitoring inventoryState={inventoryState} />;
       case 'lgu-monitoring':
         return <LGUMonitoringNew inventoryState={inventoryState} />;
+      case 'truck-tracking':
+        return <TruckTracking />;
       case 'dashboard':
       default:
         return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} />;
