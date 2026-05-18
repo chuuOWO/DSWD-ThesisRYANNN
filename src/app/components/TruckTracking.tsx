@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
-import { CheckCircle, ChevronDown, Clock, Flag, MapPin, Navigation, PackageCheck, Truck } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import L from 'leaflet';
+import 'leaflet-routing-machine';
+import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
+import { CheckCircle, ChevronDown, Clock, Flag, MapPin, Navigation, PackageCheck, Route, Truck } from 'lucide-react';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';
 
@@ -14,6 +16,7 @@ interface TruckRoute {
   cargo: string;
   eta: string;
   updatedAt: string;
+  originPosition: [number, number];
   position: [number, number];
   destinationPosition: [number, number];
   progress: number;
@@ -37,6 +40,7 @@ const truckRoutes: TruckRoute[] = [
     cargo: '850 Family Food Packs',
     eta: '35 mins',
     updatedAt: '16 Jan 2026, 12:26:05',
+    originPosition: [10.6912, 122.4728],
     position: [10.7435, 122.4858],
     destinationPosition: [10.787, 122.3892],
     progress: 68,
@@ -64,6 +68,7 @@ const truckRoutes: TruckRoute[] = [
     cargo: '320 Hygiene Kits',
     eta: '52 mins',
     updatedAt: '16 Jan 2026, 12:26:05',
+    originPosition: [10.6912, 122.4728],
     position: [10.7058, 122.5165],
     destinationPosition: [10.6445, 122.2367],
     progress: 42,
@@ -91,6 +96,7 @@ const truckRoutes: TruckRoute[] = [
     cargo: '140 Sleeping Kits',
     eta: '1 hr 10 mins',
     updatedAt: '16 Jan 2026, 12:26:05',
+    originPosition: [10.9435, 122.6369],
     position: [10.7233, 122.5558],
     destinationPosition: [10.894, 122.7042],
     progress: 31,
@@ -116,18 +122,145 @@ const statusColors: Record<TruckStatus, string> = {
   Delivered: '#16a34a'
 };
 
+interface RouteMetrics {
+  distanceKm: number;
+  durationMinutes: number;
+}
+
+interface RouteData extends RouteMetrics {
+  snappedPosition: [number, number];
+}
+
+type RoutingControlWithEvents = L.Routing.Control & {
+  on: (eventName: 'routesfound' | 'routingerror', handler: (event: {
+    routes?: Array<{
+      coordinates?: L.LatLng[];
+      summary?: {
+        totalDistance?: number;
+        totalTime?: number;
+      };
+    }>;
+  }) => void) => RoutingControlWithEvents;
+};
+
+const getPointAlongRoute = (coordinates: L.LatLng[], progress: number): [number, number] | null => {
+  if (coordinates.length === 0) return null;
+  if (coordinates.length === 1) return [coordinates[0].lat, coordinates[0].lng];
+
+  const clampedProgress = Math.min(100, Math.max(0, progress));
+  const segmentDistances = coordinates.slice(1).map((point, index) => coordinates[index].distanceTo(point));
+  const totalDistance = segmentDistances.reduce((sum, distance) => sum + distance, 0);
+  let remainingDistance = totalDistance * (clampedProgress / 100);
+
+  for (let index = 0; index < segmentDistances.length; index += 1) {
+    const segmentDistance = segmentDistances[index];
+    const start = coordinates[index];
+    const end = coordinates[index + 1];
+
+    if (remainingDistance <= segmentDistance) {
+      const ratio = segmentDistance === 0 ? 0 : remainingDistance / segmentDistance;
+      return [
+        start.lat + (end.lat - start.lat) * ratio,
+        start.lng + (end.lng - start.lng) * ratio
+      ];
+    }
+
+    remainingDistance -= segmentDistance;
+  }
+
+  const lastPoint = coordinates[coordinates.length - 1];
+  return [lastPoint.lat, lastPoint.lng];
+};
+
+function RoadSnappedRoute({
+  route,
+  onRouteDataChange
+}: {
+  route: TruckRoute;
+  onRouteDataChange: (data: RouteData | null) => void;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    onRouteDataChange(null);
+
+    const control = L.Routing.control({
+      waypoints: [
+        L.latLng(route.originPosition[0], route.originPosition[1]),
+        L.latLng(route.destinationPosition[0], route.destinationPosition[1])
+      ],
+      router: L.Routing.osrmv1({
+        serviceUrl: 'https://router.project-osrm.org/route/v1',
+        profile: 'driving'
+      }),
+      lineOptions: {
+        styles: [
+          { color: statusColors[route.status], opacity: 0.95, weight: 5 }
+        ],
+        extendToWaypoints: true,
+        missingRouteTolerance: 0
+      },
+      addWaypoints: false,
+      routeWhileDragging: false,
+      draggableWaypoints: false,
+      fitSelectedRoutes: true,
+      show: false,
+      createMarker: () => null
+    } as L.Routing.RoutingControlOptions).addTo(map) as RoutingControlWithEvents;
+
+    control.on('routesfound', (event) => {
+      const osrmRoute = event.routes?.[0];
+      const summary = osrmRoute?.summary;
+      if (!summary?.totalDistance || !summary?.totalTime) return;
+
+      const snappedPosition = getPointAlongRoute(osrmRoute.coordinates ?? [], route.progress) ?? route.position;
+
+      onRouteDataChange({
+        distanceKm: summary.totalDistance / 1000,
+        durationMinutes: Math.round(summary.totalTime / 60),
+        snappedPosition
+      });
+    });
+
+    control.on('routingerror', () => {
+      onRouteDataChange(null);
+    });
+
+    return () => {
+      map.removeControl(control);
+    };
+  }, [map, onRouteDataChange, route]);
+
+  return null;
+}
+
+const formatDuration = (minutes: number) => {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+};
+
 function RouteMap({
   routes,
   selectedRoute,
-  heightClass
+  heightClass,
+  onRouteDataChange,
+  selectedSnappedPosition
 }: {
   routes: TruckRoute[];
   selectedRoute?: TruckRoute;
   heightClass: string;
+  onRouteDataChange: (data: RouteData | null) => void;
+  selectedSnappedPosition?: [number, number];
 }) {
   const center = selectedRoute?.position ?? [10.72, 122.51];
   const zoom = selectedRoute ? 13 : 13;
-  const selectedRoutes = selectedRoute ? [selectedRoute] : routes;
+  const displayRoutes = routes.map((route) =>
+    selectedRoute && selectedSnappedPosition && route.id === selectedRoute.id
+      ? { ...route, position: selectedSnappedPosition }
+      : route
+  );
 
   return (
     <MapContainer
@@ -142,17 +275,7 @@ function RouteMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      {selectedRoutes.map((route) => (
-        <Polyline
-          key={`${route.id}-route`}
-          positions={route.path}
-          pathOptions={{
-            color: statusColors[route.status],
-            weight: selectedRoute?.id === route.id ? 5 : 4,
-            opacity: selectedRoute && selectedRoute.id !== route.id ? 0.35 : 0.9
-          }}
-        />
-      ))}
+      {selectedRoute && <RoadSnappedRoute route={selectedRoute} onRouteDataChange={onRouteDataChange} />}
 
       {selectedRoute && (
         <CircleMarker
@@ -175,7 +298,7 @@ function RouteMap({
         </CircleMarker>
       )}
 
-      {routes.map((route) => (
+      {displayRoutes.map((route) => (
         <CircleMarker
           key={route.id}
           center={route.position}
@@ -207,8 +330,15 @@ export function TruckTracking() {
   const [selectedTruckId, setSelectedTruckId] = useState(truckRoutes[0].id);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
+  const [routeMetrics, setRouteMetrics] = useState<RouteMetrics | null>(null);
+  const [selectedSnappedPosition, setSelectedSnappedPosition] = useState<[number, number] | undefined>();
   const selectedTruck = truckRoutes.find((route) => route.id === selectedTruckId) ?? truckRoutes[0];
   const mapRoutes = isMapOpen ? truckRoutes : [selectedTruck];
+
+  const handleRouteDataChange = useCallback((data: RouteData | null) => {
+    setRouteMetrics(data ? { distanceKm: data.distanceKm, durationMinutes: data.durationMinutes } : null);
+    setSelectedSnappedPosition(data?.snappedPosition);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -252,7 +382,13 @@ export function TruckTracking() {
           </div>
 
           <div className="rounded-lg border border-gray-200 overflow-hidden mb-4">
-            <RouteMap routes={[selectedTruck]} selectedRoute={selectedTruck} heightClass="h-56" />
+            <RouteMap
+              routes={[selectedTruck]}
+              selectedRoute={selectedTruck}
+              heightClass="h-56"
+              onRouteDataChange={handleRouteDataChange}
+              selectedSnappedPosition={selectedSnappedPosition}
+            />
           </div>
 
           <button
@@ -280,7 +416,13 @@ export function TruckTracking() {
             </button>
           </div>
 
-          <RouteMap routes={mapRoutes} selectedRoute={selectedTruck} heightClass="h-[520px]" />
+          <RouteMap
+            routes={mapRoutes}
+            selectedRoute={selectedTruck}
+            heightClass="h-[520px]"
+            onRouteDataChange={handleRouteDataChange}
+            selectedSnappedPosition={selectedSnappedPosition}
+          />
 
           <div className="p-6 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
             <div>
@@ -340,6 +482,27 @@ export function TruckTracking() {
                   <div className="flex items-center gap-2 text-sm font-bold text-blue-800">
                     <Flag className="w-4 h-4 text-red-600" />
                     <span>{selectedTruck.destination}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <div className="rounded-lg bg-white border border-blue-100 p-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase">
+                      <Route className="w-4 h-4 text-blue-700" />
+                      Road Distance
+                    </div>
+                    <p className="text-xl font-bold text-gray-900 mt-1">
+                      {routeMetrics ? `${routeMetrics.distanceKm.toFixed(1)} km` : 'Calculating...'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-white border border-blue-100 p-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase">
+                      <Clock className="w-4 h-4 text-amber-600" />
+                      OSRM Drive Time
+                    </div>
+                    <p className="text-xl font-bold text-gray-900 mt-1">
+                      {routeMetrics ? formatDuration(routeMetrics.durationMinutes) : 'Calculating...'}
+                    </p>
                   </div>
                 </div>
 
