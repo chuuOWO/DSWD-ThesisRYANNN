@@ -38,8 +38,8 @@ const statusStyles: Record<IncomingStatus, string> = {
 
 const statusLabels: Record<IncomingStatus, string> = {
   Draft: 'Draft',
-  'Pending Verification': 'For Checking',
-  Verified: 'Checked',
+  'Pending Verification': 'For Verification',
+  Verified: 'Verified',
   Minted: 'Posted',
   'Correction Requested': 'Correction Filed',
   Rejected: 'Rejected'
@@ -113,7 +113,16 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
 
   const closeActionModal = () => setActionModal(null);
 
-  const showResult = (message: string) => setActionModal({ type: 'message', message });
+  const autoCloseDelayMs = 1800;
+
+  const showResult = (message: string, autoClose = false) => {
+    setActionModal({ type: 'message', message });
+    if (autoClose) {
+      setTimeout(() => {
+        setActionModal(null);
+      }, autoCloseDelayMs);
+    }
+  };
 
   const handleConfirmAction = async () => {
     if (!actionModal?.item) return;
@@ -144,7 +153,7 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
 
     if (actionModal.type === 'post') {
       const result = await mintBatchToken(item.id);
-      showResult(friendlyResult(result.message));
+      showResult(friendlyResult(result.message), result.ok);
       return;
     }
 
@@ -288,16 +297,15 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="max-h-[560px] overflow-auto">
           <table className="w-full min-w-[1200px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Manifest</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Posting Record</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Latest Update</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Actions</th>
               </tr>
             </thead>
@@ -309,7 +317,6 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
                       <Calendar className="w-3 h-3" /> {item.dateReceived}
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">Record ref: {item.manifestHash}</p>
                   </td>
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-gray-900">{item.fnfiCategory}</p>
@@ -333,17 +340,11 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
                     {item.batchTokenId ? (
                       <div className="space-y-1">
                         <p className="font-bold text-sm text-green-700">{item.batchTokenId}</p>
-                        <p className="text-xs text-gray-600 break-all">Receipt ref: {item.blockchainTxHash}</p>
                         <p className="text-xs text-gray-500">Posted: {item.mintedAt}</p>
                       </div>
                     ) : (
                       <p className="text-sm text-gray-400">Not posted yet</p>
                     )}
-                  </td>
-                  <td className="px-4 py-4 max-w-xs">
-                    <p className="text-xs font-bold text-gray-700">{item.auditTrail[0]?.action}</p>
-                    <p className="text-xs text-gray-500 mt-1">{friendlyAuditDetails(item.auditTrail[0]?.details)}</p>
-                    {item.correctionNote && <p className="text-xs text-orange-700 mt-1">Correction: {item.correctionNote}</p>}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">

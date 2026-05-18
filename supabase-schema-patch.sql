@@ -44,6 +44,9 @@ add column if not exists receiver_signature text;
 alter table public.outgoing_requests
 add column if not exists wallet_address text;
 
+alter table public.outgoing_requests
+add column if not exists allocated_batches jsonb;
+
 create unique index if not exists outgoing_requests_dr_number_key
 on public.outgoing_requests (dr_number);
 

@@ -43,6 +43,11 @@ export interface IncomingGoods {
   auditTrail: AuditEvent[];
 }
 
+export interface BatchAllocation {
+  batchTokenId: string;
+  quantity: number;
+}
+
 export interface OutgoingRelease {
   drNumber: string;
   dateAllocated: string;
@@ -56,7 +61,7 @@ export interface OutgoingRelease {
   deliveryMode: string;
   deliveryStatus: OutgoingStatus;
   incidentCode: string;
-  allocatedBatchTokenIds: string[];
+  allocatedBatches: BatchAllocation[];
   handoverContractId?: string;
   senderSignature?: string;
   receiverSignature?: string;
@@ -149,6 +154,7 @@ type OutgoingRequestRow = {
   delivery_mode?: string | null;
   delivery_status?: string | null;
   incident_code?: string | null;
+  allocated_batches?: { batchTokenId?: string | null; quantity?: number | null }[] | null;
   sender_gps?: string | null;
   receiver_gps?: string | null;
   tx_hash?: string | null;
@@ -198,7 +204,10 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   deliveryMode: row.delivery_mode ?? '',
   deliveryStatus: isOutgoingStatus(row.delivery_status) ? row.delivery_status : 'Allocating',
   incidentCode: row.incident_code ?? '',
-  allocatedBatchTokenIds: [],
+  allocatedBatches: (row.allocated_batches ?? []).flatMap(entry => {
+    if (!entry?.batchTokenId || !entry.quantity) return [];
+    return [{ batchTokenId: entry.batchTokenId, quantity: entry.quantity }];
+  }),
   handoverContractId: row.handover_contract_id ?? undefined,
   senderSignature: row.sender_signature ?? undefined,
   receiverSignature: row.receiver_signature ?? undefined,
@@ -470,7 +479,7 @@ export function useInventoryState() {
     });
   };
 
-  const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatchTokenIds' | 'auditTrail'>) => {
+  const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => {
     const newDR = `DR-2026-${String(outgoingReleasesList.length + 1).padStart(3, '0')}`;
     const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus;
     const releaseWithDR: OutgoingRelease = {
@@ -478,7 +487,7 @@ export function useInventoryState() {
       deliveryStatus: status,
       drNumber: newDR,
       amountApproved: status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved,
-      allocatedBatchTokenIds: [],
+      allocatedBatches: [],
       auditTrail: [makeAudit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
@@ -513,44 +522,82 @@ export function useInventoryState() {
       return { ok: false, message: 'Insufficient available warehouse stock.' };
     }
 
-    const availableTokens = incomingGoodsList
-      .filter(item => item.status === 'Minted' && item.fnfiCategory === release.fnfiCategory)
-      .map(item => item.batchTokenId!)
-      .filter(Boolean);
+    const reserveStatuses: OutgoingStatus[] = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'];
+    const reservedByBatch = new Map<string, number>();
+    outgoingReleasesList.forEach(item => {
+      if (item.drNumber === drNumber || !reserveStatuses.includes(item.deliveryStatus)) return;
+      item.allocatedBatches.forEach(allocation => {
+        reservedByBatch.set(
+          allocation.batchTokenId,
+          (reservedByBatch.get(allocation.batchTokenId) ?? 0) + allocation.quantity
+        );
+      });
+    });
+
+    const candidateBatches = incomingGoodsList
+      .filter(item => item.status === 'Minted' && item.fnfiCategory === release.fnfiCategory && item.destinationType === 'Warehouse' && item.batchTokenId)
+      .slice()
+      .sort((a, b) => {
+        const aTime = a.mintedAt ? Date.parse(a.mintedAt) : 0;
+        const bTime = b.mintedAt ? Date.parse(b.mintedAt) : 0;
+        return aTime - bTime;
+      });
+
+    let remaining = amountApproved;
+    const allocations: BatchAllocation[] = [];
+
+    candidateBatches.forEach(batch => {
+      if (!batch.batchTokenId || remaining <= 0) return;
+      const reserved = reservedByBatch.get(batch.batchTokenId) ?? 0;
+      const available = Math.max(0, batch.quantity - reserved);
+      if (available <= 0) return;
+      const take = Math.min(available, remaining);
+      allocations.push({ batchTokenId: batch.batchTokenId, quantity: take });
+      remaining -= take;
+    });
+
+    if (remaining > 0) {
+      return { ok: false, message: 'Insufficient tokenized stock to cover the approved release quantity.' };
+    }
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? {
           ...item,
           amountApproved,
           deliveryStatus: 'Approved',
-          allocatedBatchTokenIds: availableTokens.slice(0, 2),
-          auditTrail: [makeAudit('Allocation Approved', 'Stock reserved and tokenized batches assigned; no custody transfer yet.'), ...item.auditTrail]
+          allocatedBatches: allocations,
+          auditTrail: [makeAudit('Allocation Approved', 'Stock reserved and ERC-1155 batch balances allocated; custody transfer happens on receipt confirmation.'), ...item.auditTrail]
         }
       : item));
     backendApi.updateOutgoing(drNumber, {
       amountApproved,
-      deliveryStatus: 'Approved'
+      deliveryStatus: 'Approved',
+      allocatedBatches: allocations
     }).catch(error => {
       logBackendError('Approve outgoing allocation')(error);
       setIntegrationMode('mock');
     });
-    return { ok: true, message: 'Allocation approved and token batches assigned.' };
+    return { ok: true, message: 'Allocation approved and ERC-1155 batch balances reserved.' };
   };
 
   const senderSignAndRelease = async (drNumber: string) => {
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release || !['Approved', 'Packed'].includes(release.deliveryStatus)) return { ok: false, message: 'Only approved/packed releases can be signed by sender.' };
+    if (release.allocatedBatches.length === 0) return { ok: false, message: 'No batch allocations found for this release.' };
 
     const senderGps = release.warehouseSource === 'Pototan Main Warehouse' ? '11.0039, 122.5364' : '10.6922, 122.4731';
     const handoverContractId = `HANDOVER-${drNumber.replace('DR-', '')}`;
     let proof;
 
     try {
+      await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
       proof = await blockchain.signRelease({
         drNumber,
         handoverContractId,
         category: release.fnfiCategory,
         quantity: release.amountApproved || release.amountRequested,
+        batchTokenIds: release.allocatedBatches.map(batch => batch.batchTokenId),
+        batchQuantities: release.allocatedBatches.map(batch => batch.quantity),
         from: release.warehouseSource,
         to: release.lguName,
         gps: senderGps
@@ -606,10 +653,7 @@ export function useInventoryState() {
       proof = await blockchain.confirmReceipt({
         drNumber,
         handoverContractId,
-        category: release.fnfiCategory,
-        quantity: release.amountApproved || release.amountRequested,
-        from: release.warehouseSource,
-        to: release.lguName,
+        destination: release.lguName,
         gps: latestGps
       });
     } catch (error) {

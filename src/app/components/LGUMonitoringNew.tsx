@@ -326,7 +326,15 @@ export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
               <h3 className="text-lg font-bold text-gray-900">Stock-Based Prioritization Logic</h3>
               <p className="text-sm text-gray-600">Red/Yellow/Green indicators are computed from LGU stock, affected families, and damage severity.</p>
             </div>
-            <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">Immediate restocking: {priorityReports.filter(report => report.priorityColor === 'Red').length}</span>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-xs font-semibold text-gray-600 border-b border-dashed border-gray-400"
+                title="Urgency score = stock score + demand score + damage score"
+              >
+                Score formula
+              </span>
+              <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">Immediate restocking: {priorityReports.filter(report => report.priorityColor === 'Red').length}</span>
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {priorityReports.slice(0, 3).map(report => (

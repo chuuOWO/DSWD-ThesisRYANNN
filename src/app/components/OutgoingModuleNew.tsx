@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { CheckCircle, Edit, FileSignature, MapPin, PackageCheck, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal } from './AddReleaseModal';
+import { blockchain } from '../services/blockchain';
 import type { InventoryItem, OutgoingRelease, OutgoingStatus } from '../hooks/useInventoryState';
 
 interface InventoryState {
   inventory: InventoryItem[];
   outgoingReleasesList: OutgoingRelease[];
-  addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatchTokenIds' | 'auditTrail'>) => void;
+  addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => { ok: boolean; message: string };
   senderSignAndRelease: (drNumber: string) => Promise<{ ok: boolean; message: string }>;
@@ -77,9 +78,14 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showCustodyModal, setShowCustodyModal] = useState(false);
   const [selectedRelease, setSelectedRelease] = useState<OutgoingRelease | null>(null);
   const [approvalAmount, setApprovalAmount] = useState(0);
   const [actionModal, setActionModal] = useState<ReleaseActionModalState | null>(null);
+  const [senderWallet, setSenderWallet] = useState('');
+  const [custodyMessage, setCustodyMessage] = useState<string | null>(null);
+  const autoCloseDelayMs = 1800;
+  const showSenderAuthorization = false;
 
   const handleAddRelease = (newRelease: AddReleaseForm) => {
     addOutgoingRelease({
@@ -132,7 +138,14 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
 
   const closeActionModal = () => setActionModal(null);
 
-  const showResult = (message: string) => setActionModal({ type: 'message', message });
+  const showResult = (message: string, autoClose = false) => {
+    setActionModal({ type: 'message', message });
+    if (autoClose) {
+      setTimeout(() => {
+        setActionModal(null);
+      }, autoCloseDelayMs);
+    }
+  };
 
   const handleConfirmReleaseAction = async () => {
     if (!actionModal?.release) return;
@@ -151,7 +164,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
 
     if (actionModal.type === 'senderSign') {
       const result = await senderSignAndRelease(release.drNumber);
-      showResult(result.message.replace('handover contract opened', 'release record signed'));
+      showResult(result.message.replace('handover contract opened', 'release record signed'), result.ok);
       return;
     }
 
@@ -163,13 +176,37 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
 
     if (actionModal.type === 'receiverAccept') {
       const result = await receiverAcceptWithGps(release.drNumber);
-      showResult(result.message);
+      showResult(result.message, result.ok);
       return;
     }
 
     if (actionModal.type === 'correction') {
       if (actionModal.note) requestOutgoingCorrection(release.drNumber, actionModal.note);
       closeActionModal();
+    }
+  };
+
+  const openCustodyModal = () => {
+    setSenderWallet('');
+    setCustodyMessage(null);
+    setShowCustodyModal(true);
+  };
+
+  const handleApproveCustody = async () => {
+    if (!senderWallet.trim()) {
+      setCustodyMessage('Enter the sender wallet address.');
+      return;
+    }
+
+    try {
+      const proof = await blockchain.approveSenderOperator(senderWallet.trim());
+      setCustodyMessage(`Sender approved via ${proof.mode === 'contract' ? 'blockchain transaction' : 'signature proof'}.`);
+      setTimeout(() => {
+        setShowCustodyModal(false);
+      }, autoCloseDelayMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Approval failed. Please try again.';
+      setCustodyMessage(message);
     }
   };
 
@@ -180,7 +217,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
       release.fnfiCategory.toLowerCase().includes(searchTerm.toLowerCase()) ||
       release.drNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.handoverContractId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.allocatedBatchTokenIds.join(' ').toLowerCase().includes(searchTerm.toLowerCase());
+      release.allocatedBatches.map(batch => batch.batchTokenId).join(' ').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesWarehouse = selectedWarehouse === 'All' || release.warehouseSource === selectedWarehouse;
     const matchesStatus = selectedStatus === 'All' || release.deliveryStatus === selectedStatus;
@@ -203,13 +240,24 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
               Approve stock, release goods from the warehouse, and confirm LGU receipt with location details.
             </p>
           </div>
-          <button
-            onClick={() => setShowReleaseModal(true)}
-            className="flex items-center justify-center gap-2 bg-white text-green-700 px-6 py-3 rounded-lg font-semibold hover:bg-green-50 transition-all shadow-sm"
-          >
-            <Plus className="w-5 h-5" />
-            New Release Draft
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            {showSenderAuthorization && (
+              <button
+                onClick={openCustodyModal}
+                className="flex items-center justify-center gap-2 bg-white/15 text-white px-5 py-3 rounded-lg font-semibold hover:bg-white/25 transition-all shadow-sm"
+              >
+                <ShieldCheck className="w-5 h-5" />
+                Authorize Sender Wallet
+              </button>
+            )}
+            <button
+              onClick={() => setShowReleaseModal(true)}
+              className="flex items-center justify-center gap-2 bg-white text-green-700 px-6 py-3 rounded-lg font-semibold hover:bg-green-50 transition-all shadow-sm"
+            >
+              <Plus className="w-5 h-5" />
+              New Release Draft
+            </button>
+          </div>
         </div>
       </div>
 
@@ -324,23 +372,29 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[release.deliveryStatus]}`}>
                       {release.deliveryStatus}
                     </span>
+                    {release.receiverGps && (
+                      <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-bold">
+                        <MapPin className="w-3 h-3" /> GPS verified
+                      </div>
+                    )}
                     {release.correctionNote && <p className="text-xs text-red-700 mt-2">Correction: {release.correctionNote}</p>}
                   </td>
                   <td className="px-4 py-4 max-w-xs">
-                    {release.allocatedBatchTokenIds.length > 0 ? (
+                    {release.allocatedBatches.length > 0 ? (
                       <div className="flex flex-wrap gap-1 mb-2">
-                        {release.allocatedBatchTokenIds.map(token => (
-                          <span key={token} className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-bold">{token}</span>
+                        {release.allocatedBatches.map(batch => (
+                          <span key={batch.batchTokenId} className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-bold">
+                            {batch.batchTokenId} ({batch.quantity})
+                          </span>
                         ))}
                       </div>
                     ) : <p className="text-xs text-gray-400 mb-2">No batch record assigned</p>}
-                    <p className="text-xs text-gray-600">Release agreement: {release.handoverContractId || '-'}</p>
-                    <p className="text-xs text-gray-500 break-all">Receipt ref: {release.blockchainTxHash || '-'}</p>
+                    <p className="text-xs text-gray-600">Release agreement: {release.handoverContractId ? 'On file' : 'Not set'}</p>
                   </td>
                   <td className="px-4 py-4 max-w-xs">
-                    <p className="text-xs"><span className="font-bold">Sender:</span> {release.senderSignature || '-'}</p>
+                    <p className="text-xs"><span className="font-bold">Sender:</span> Warehouse Dispatch</p>
                     <p className="text-xs text-gray-600">GPS: {release.senderGps || '-'}</p>
-                    <p className="text-xs mt-2"><span className="font-bold">Receiver:</span> {release.receiverSignature || '-'}</p>
+                    <p className="text-xs mt-2"><span className="font-bold">Receiver:</span> {release.lguName}</p>
                     <p className="text-xs text-gray-600">GPS: {release.receiverGps || '-'}</p>
                   </td>
                   <td className="px-4 py-4">
@@ -410,6 +464,50 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
           onSubmit={handleAddRelease}
           availableStock={inventory}
         />
+      )}
+
+      {showSenderAuthorization && showCustodyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Authorize Sender Wallet</h2>
+                <p className="text-sm text-gray-500 mt-1">Approve a sender wallet to move ERC-1155 batches from the DSWD admin wallet.</p>
+              </div>
+              <button onClick={() => setShowCustodyModal(false)} className="p-2 rounded-lg hover:bg-gray-100">
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Sender Wallet Address</label>
+                <input
+                  type="text"
+                  value={senderWallet}
+                  onChange={(e) => setSenderWallet(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="0x..."
+                />
+                <p className="text-xs text-gray-500 mt-2">Connect the admin wallet in MetaMask before approving the sender.</p>
+              </div>
+              {custodyMessage && <p className="text-sm text-gray-700">{custodyMessage}</p>}
+            </div>
+            <div className="flex gap-3 px-6 pb-6">
+              <button
+                onClick={() => setShowCustodyModal(false)}
+                className="flex-1 px-5 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleApproveCustody}
+                className="flex-1 px-5 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700"
+              >
+                Approve Sender
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showApprovalModal && selectedRelease && (

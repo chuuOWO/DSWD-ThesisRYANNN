@@ -39,6 +39,7 @@ export interface OutgoingPayload {
   deliveryMode: string;
   deliveryStatus?: string;
   incidentCode: string;
+  allocatedBatches?: { batchTokenId: string; quantity: number }[];
   senderGps?: string;
   receiverGps?: string;
   txHash?: string;
@@ -48,6 +49,7 @@ export interface OutgoingPayload {
 export interface OutgoingUpdatePayload {
   amountApproved?: number;
   deliveryStatus?: string;
+  allocatedBatches?: { batchTokenId: string; quantity: number }[];
   senderGps?: string;
   receiverGps?: string;
   txHash?: string;
@@ -144,6 +146,7 @@ export const backendApi = {
         delivery_mode: payload.deliveryMode,
         delivery_status: payload.deliveryStatus ?? 'Allocating',
         incident_code: payload.incidentCode,
+        allocated_batches: payload.allocatedBatches,
         sender_gps: payload.senderGps,
         receiver_gps: payload.receiverGps,
         tx_hash: payload.txHash,
@@ -160,6 +163,7 @@ export const backendApi = {
     const updates = definedOnly({
       amount_approved: payload.amountApproved,
       delivery_status: payload.deliveryStatus,
+      allocated_batches: payload.allocatedBatches,
       sender_gps: payload.senderGps,
       receiver_gps: payload.receiverGps,
       tx_hash: payload.txHash,

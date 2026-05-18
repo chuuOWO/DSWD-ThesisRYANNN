@@ -144,7 +144,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleas
     } else {
       // Only validate stock for main warehouses
       if (formData.sourceType === 'Warehouse' && formData.amountRequested > availableQty) {
-        newErrors.amountRequested = `Cannot request more than available stock (${availableQty} units)`;
+        newErrors.amountRequested = 'Insufficient stock in the warehouse.';
       }
     }
 
@@ -464,8 +464,8 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleas
               </label>
               <input
                 type="number"
-                min="1"
-                max={availableQty}
+                min={availableQty > 0 ? 1 : 0}
+                max={availableQty > 0 ? availableQty : undefined}
                 value={formData.amountRequested || ''}
                 onChange={(e) => handleChange('amountRequested', parseInt(e.target.value) || 0)}
                 placeholder="Enter amount"

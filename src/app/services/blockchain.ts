@@ -25,13 +25,22 @@ export interface MintBatchInput {
   destination: string;
 }
 
-export interface HandoverInput {
+export interface SignReleaseInput {
   drNumber: string;
   handoverContractId: string;
   category: string;
   quantity: number;
+  batchTokenIds: string[];
+  batchQuantities: number[];
   from: string;
   to: string;
+  gps: string;
+}
+
+export interface ConfirmReceiptInput {
+  drNumber: string;
+  handoverContractId: string;
+  destination: string;
   gps: string;
 }
 
@@ -42,11 +51,14 @@ const targetChainName = import.meta.env.VITE_BLOCKCHAIN_CHAIN_NAME ?? 'Sepolia';
 const targetRpcUrl = import.meta.env.VITE_BLOCKCHAIN_RPC_URL;
 
 const batchTokenAbi = [
-  'function mintBatchToken(string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination) returns (uint256)'
+  'function mintBatchToken(string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination) returns (uint256)',
+  'function getBatchByTokenId(string batchTokenId) view returns (tuple(uint256 batchId,string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination,address mintedBy,uint256 mintedAt))',
+  'function setApprovalForAll(address operator,bool approved)',
+  'function isApprovedForAll(address account,address operator) view returns (bool)'
 ];
 
 const handoverAbi = [
-  'function signRelease(string drNumber,string handoverContractId,string category,uint256 quantity,string fromLocation,string destination,string senderGps) returns (uint256)',
+  'function signRelease(string drNumber,string handoverContractId,string category,uint256 quantity,string[] batchTokenIds,uint256[] batchQuantities,string fromLocation,string destination,string senderGps) returns (uint256)',
   'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)'
 ];
 
@@ -103,6 +115,40 @@ const signFallbackProof = async (message: string): Promise<BlockchainProof> => {
 };
 
 export const blockchain = {
+  async assertBatchTokensExist(batchTokenIds: string[]): Promise<void> {
+    if (!batchTokenContractAddress || batchTokenIds.length === 0) return;
+
+    const signer = await getSigner();
+    const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+
+    await Promise.all(batchTokenIds.map(async (batchTokenId) => {
+      try {
+        await contract.getBatchByTokenId(batchTokenId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Batch token not found on current contract: ${batchTokenId}. ${message}`);
+      }
+    }));
+  },
+  async approveSenderOperator(operatorAddress: string): Promise<BlockchainProof> {
+    if (!ethers.isAddress(operatorAddress)) {
+      throw new Error('Invalid wallet address for sender operator.');
+    }
+
+    const signer = await getSigner();
+    const walletAddress = await signer.getAddress();
+
+    if (batchTokenContractAddress) {
+      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+      const tx = await contract.setApprovalForAll(operatorAddress, true);
+      const receipt = await tx.wait();
+      return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+    }
+
+    return signFallbackProof(
+      `Approve sender operator\nOperator: ${operatorAddress}`
+    );
+  },
   async mintBatchToken(input: MintBatchInput): Promise<BlockchainProof> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
@@ -126,7 +172,7 @@ export const blockchain = {
     );
   },
 
-  async signRelease(input: HandoverInput): Promise<BlockchainProof> {
+  async signRelease(input: SignReleaseInput): Promise<BlockchainProof> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
 
@@ -137,6 +183,8 @@ export const blockchain = {
         input.handoverContractId,
         input.category,
         input.quantity,
+        input.batchTokenIds,
+        input.batchQuantities,
         input.from,
         input.to,
         input.gps
@@ -146,23 +194,23 @@ export const blockchain = {
     }
 
     return signFallbackProof(
-      `Sign release\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
+      `Sign release\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
     );
   },
 
-  async confirmReceipt(input: HandoverInput): Promise<BlockchainProof> {
+  async confirmReceipt(input: ConfirmReceiptInput): Promise<BlockchainProof> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
 
     if (handoverContractAddress) {
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
-      const tx = await contract.confirmReceipt(input.drNumber, input.handoverContractId, input.to, input.gps);
+      const tx = await contract.confirmReceipt(input.drNumber, input.handoverContractId, input.destination, input.gps);
       const receipt = await tx.wait();
       return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
     }
 
     return signFallbackProof(
-      `Confirm receipt\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
+      `Confirm receipt\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nDestination: ${input.destination}\nGPS: ${input.gps}`
     );
   }
 };
