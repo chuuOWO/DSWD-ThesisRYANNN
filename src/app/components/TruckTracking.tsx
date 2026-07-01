@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet-routing-machine';
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
 import { CheckCircle, ChevronDown, Clock, Flag, MapPin, Navigation, PackageCheck, Route, Truck } from 'lucide-react';
+import { backendApi, TruckLiveLocation } from '../services/backendApi';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';
 
@@ -19,6 +20,8 @@ interface TruckRoute {
   originPosition: [number, number];
   position: [number, number];
   destinationPosition: [number, number];
+  isLive?: boolean;
+  accuracy?: number | null;
   progress: number;
   path: [number, number][];
   checkpoints: {
@@ -122,6 +125,28 @@ const statusColors: Record<TruckStatus, string> = {
   Delivered: '#16a34a'
 };
 
+const toLiveRoute = (route: TruckRoute, location?: TruckLiveLocation): TruckRoute => {
+  if (!location) return route;
+
+  return {
+    ...route,
+    status: 'In Transit',
+    position: [location.latitude, location.longitude],
+    isLive: true,
+    accuracy: location.accuracy,
+    updatedAt: location.updated_at ? new Date(location.updated_at).toLocaleString() : route.updatedAt,
+    checkpoints: [
+      {
+        label: 'Live phone GPS',
+        time: location.updated_at ? new Date(location.updated_at).toLocaleString() : 'Just now',
+        note: `Captured at ${location.gps_text}${location.accuracy ? `, accuracy ${Math.round(location.accuracy)}m` : ''}`,
+        completed: true
+      },
+      ...route.checkpoints
+    ]
+  };
+};
+
 interface RouteMetrics {
   distanceKm: number;
   durationMinutes: number;
@@ -180,14 +205,24 @@ function RoadSnappedRoute({
   onRouteDataChange: (data: RouteData | null) => void;
 }) {
   const map = useMap();
+  const routeId = route.id;
+  const routeColor = statusColors[route.status];
+  const isLiveRoute = Boolean(route.isLive);
+  const originLat = route.originPosition[0];
+  const originLng = route.originPosition[1];
+  const destinationLat = route.destinationPosition[0];
+  const destinationLng = route.destinationPosition[1];
+  const currentLat = route.position[0];
+  const currentLng = route.position[1];
+  const progress = route.progress;
 
   useEffect(() => {
     onRouteDataChange(null);
 
     const control = L.Routing.control({
       waypoints: [
-        L.latLng(route.originPosition[0], route.originPosition[1]),
-        L.latLng(route.destinationPosition[0], route.destinationPosition[1])
+        L.latLng(originLat, originLng),
+        L.latLng(destinationLat, destinationLng)
       ],
       router: L.Routing.osrmv1({
         serviceUrl: 'https://router.project-osrm.org/route/v1',
@@ -195,7 +230,7 @@ function RoadSnappedRoute({
       }),
       lineOptions: {
         styles: [
-          { color: statusColors[route.status], opacity: 0.95, weight: 5 }
+          { color: routeColor, opacity: 0.95, weight: 5 }
         ],
         extendToWaypoints: true,
         missingRouteTolerance: 0
@@ -203,7 +238,7 @@ function RoadSnappedRoute({
       addWaypoints: false,
       routeWhileDragging: false,
       draggableWaypoints: false,
-      fitSelectedRoutes: true,
+      fitSelectedRoutes: !isLiveRoute,
       show: false,
       createMarker: () => null
     } as L.Routing.RoutingControlOptions).addTo(map) as RoutingControlWithEvents;
@@ -213,12 +248,12 @@ function RoadSnappedRoute({
       const summary = osrmRoute?.summary;
       if (!summary?.totalDistance || !summary?.totalTime) return;
 
-      const snappedPosition = getPointAlongRoute(osrmRoute.coordinates ?? [], route.progress) ?? route.position;
+      const snappedPosition = getPointAlongRoute(osrmRoute.coordinates ?? [], progress) ?? [currentLat, currentLng];
 
       onRouteDataChange({
         distanceKm: summary.totalDistance / 1000,
         durationMinutes: Math.round(summary.totalTime / 60),
-        snappedPosition
+        snappedPosition: isLiveRoute ? [currentLat, currentLng] : snappedPosition
       });
     });
 
@@ -229,7 +264,18 @@ function RoadSnappedRoute({
     return () => {
       map.removeControl(control);
     };
-  }, [map, onRouteDataChange, route]);
+  }, [
+    map,
+    onRouteDataChange,
+    routeId,
+    originLat,
+    originLng,
+    destinationLat,
+    destinationLng,
+    routeColor,
+    isLiveRoute,
+    progress
+  ]);
 
   return null;
 }
@@ -240,6 +286,22 @@ const formatDuration = (minutes: number) => {
   const remainingMinutes = minutes % 60;
   return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
 };
+
+function LiveTruckMapFocus({ route }: { route?: TruckRoute }) {
+  const map = useMap();
+  const liveLat = route?.position[0];
+  const liveLng = route?.position[1];
+
+  useEffect(() => {
+    if (!route?.isLive || liveLat === undefined || liveLng === undefined) return;
+
+    map.setView([liveLat, liveLng], Math.max(map.getZoom(), 15), {
+      animate: true
+    });
+  }, [map, route?.id, route?.isLive, liveLat, liveLng]);
+
+  return null;
+}
 
 function RouteMap({
   routes,
@@ -257,7 +319,7 @@ function RouteMap({
   const center = selectedRoute?.position ?? [10.72, 122.51];
   const zoom = selectedRoute ? 13 : 13;
   const displayRoutes = routes.map((route) =>
-    selectedRoute && selectedSnappedPosition && route.id === selectedRoute.id
+    selectedRoute && selectedSnappedPosition && !route.isLive && route.id === selectedRoute.id
       ? { ...route, position: selectedSnappedPosition }
       : route
   );
@@ -274,6 +336,7 @@ function RouteMap({
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
+      <LiveTruckMapFocus route={selectedRoute} />
 
       {selectedRoute && <RoadSnappedRoute route={selectedRoute} onRouteDataChange={onRouteDataChange} />}
 
@@ -316,6 +379,8 @@ function RouteMap({
               <p className="text-sm text-gray-700">{route.driver}</p>
               <p className="text-sm text-gray-700 mt-2">To {route.destination}</p>
               <p className="text-sm font-semibold text-gray-900 mt-2">{route.cargo}</p>
+              {route.isLive && <p className="text-xs text-green-700 font-semibold mt-1">Live phone GPS</p>}
+              {route.accuracy && <p className="text-xs text-gray-500 mt-1">Accuracy: {Math.round(route.accuracy)}m</p>}
               <p className="text-xs text-gray-500 mt-1">Progress: {route.progress}%</p>
               <p className="text-xs text-gray-500 mt-1">ETA: {route.eta}</p>
             </div>
@@ -327,13 +392,32 @@ function RouteMap({
 }
 
 export function TruckTracking() {
+  const [liveLocations, setLiveLocations] = useState<Record<string, TruckLiveLocation>>({});
   const [selectedTruckId, setSelectedTruckId] = useState(truckRoutes[0].id);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [routeMetrics, setRouteMetrics] = useState<RouteMetrics | null>(null);
   const [selectedSnappedPosition, setSelectedSnappedPosition] = useState<[number, number] | undefined>();
-  const selectedTruck = truckRoutes.find((route) => route.id === selectedTruckId) ?? truckRoutes[0];
-  const mapRoutes = isMapOpen ? truckRoutes : [selectedTruck];
+  useEffect(() => {
+    backendApi.getTruckLiveLocations()
+      .then((locations) => {
+        setLiveLocations(Object.fromEntries(locations.map((location) => [location.truck_id, location])));
+      })
+      .catch((error) => {
+        console.error('Failed to load truck live locations', error);
+      });
+
+    return backendApi.subscribeTruckLiveLocations((location) => {
+      setLiveLocations((current) => ({
+        ...current,
+        [location.truck_id]: location
+      }));
+    });
+  }, []);
+
+  const liveTruckRoutes = truckRoutes.map((route) => toLiveRoute(route, liveLocations[route.id]));
+  const selectedTruck = liveTruckRoutes.find((route) => route.id === selectedTruckId) ?? liveTruckRoutes[0];
+  const mapRoutes = isMapOpen ? liveTruckRoutes : [selectedTruck];
 
   const handleRouteDataChange = useCallback((data: RouteData | null) => {
     setRouteMetrics(data ? { distanceKm: data.distanceKm, durationMinutes: data.durationMinutes } : null);
@@ -359,7 +443,7 @@ export function TruckTracking() {
 
             {isDropdownOpen && (
               <div className="absolute z-[1000] mt-2 w-full bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden">
-                {truckRoutes.map((route) => (
+                {liveTruckRoutes.map((route) => (
                   <button
                     key={route.id}
                     type="button"
@@ -450,7 +534,7 @@ export function TruckTracking() {
               <div className="border-t border-gray-200 pt-4">
                 <p className="text-xs font-bold text-gray-500 uppercase">Select Truck</p>
                 <div className="mt-3 space-y-2">
-                  {truckRoutes.map((route) => (
+                  {liveTruckRoutes.map((route) => (
                     <button
                       key={route.id}
                       type="button"
@@ -521,7 +605,7 @@ export function TruckTracking() {
               <h2 className="text-lg font-bold text-blue-800">Current Trucks</h2>
               <p className="text-sm font-semibold text-blue-800 mb-1">Incoming Deliveries:</p>
               <ul className="space-y-1">
-                {truckRoutes.map((route) => (
+                {liveTruckRoutes.map((route) => (
                   <li key={route.id} className="text-sm font-semibold text-blue-800">
                     {route.truckName} En Route To {route.destination}
                   </li>
@@ -529,7 +613,7 @@ export function TruckTracking() {
               </ul>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
-                {truckRoutes.map((route) => (
+                {liveTruckRoutes.map((route) => (
                 <button
                   key={route.id}
                   type="button"

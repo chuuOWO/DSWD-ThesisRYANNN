@@ -7,11 +7,16 @@ import { OutgoingModuleNew } from './components/OutgoingModuleNew';
 import { InventoryMonitoring } from './components/InventoryMonitoring';
 import { LGUMonitoringNew } from './components/LGUMonitoringNew';
 import { TruckTracking } from './components/TruckTracking';
+import { TruckerLocationPage } from './components/TruckerLocationPage';
 import { useInventoryState } from './hooks/useInventoryState';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
   const inventoryState = useInventoryState();
+
+  if (window.location.pathname === '/trucker') {
+    return <TruckerLocationPage />;
+  }
 
   const renderView = () => {
     switch (currentView) {

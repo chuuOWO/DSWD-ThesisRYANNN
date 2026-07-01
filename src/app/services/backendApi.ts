@@ -59,6 +59,16 @@ export interface OutgoingUpdatePayload {
   walletAddress?: string;
 }
 
+export interface TruckLiveLocation {
+  truck_id: string;
+  dr_number?: string | null;
+  latitude: number;
+  longitude: number;
+  gps_text: string;
+  accuracy?: number | null;
+  updated_at?: string | null;
+}
+
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -192,6 +202,31 @@ export const backendApi = {
     return { ok: true };
   },
 
+  async getTruckLiveLocations() {
+    const response = await fetch('/api/truck-live-locations');
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch truck live locations: ${response.statusText}`);
+    }
+
+    return await response.json() as TruckLiveLocation[];
+  },
+
+  async upsertTruckLiveLocation(payload: TruckLiveLocation) {
+    const response = await fetch('/api/truck-live-locations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => null);
+      throw new Error(errorPayload?.error ?? `Failed to save truck live location: ${response.statusText}`);
+    }
+
+    return { ok: true };
+  },
+
   subscribeDashboard(onChange: () => void) {
     const channel = supabase
       .channel('dashboard-db-changes')
@@ -201,6 +236,35 @@ export const backendApi = {
 
     return () => {
       supabase.removeChannel(channel);
+    };
+  },
+
+  subscribeTruckLiveLocations(onChange: (location: TruckLiveLocation) => void) {
+    let previousSnapshot = '';
+    let isStopped = false;
+
+    const poll = async () => {
+      try {
+        const locations = await backendApi.getTruckLiveLocations();
+        const nextSnapshot = JSON.stringify(locations);
+
+        if (nextSnapshot !== previousSnapshot) {
+          previousSnapshot = nextSnapshot;
+          locations.forEach(onChange);
+        }
+      } catch (error) {
+        console.error('Failed to poll truck live locations', error);
+      }
+
+      if (!isStopped) {
+        window.setTimeout(poll, 1500);
+      }
+    };
+
+    poll();
+
+    return () => {
+      isStopped = true;
     };
   }
 };
