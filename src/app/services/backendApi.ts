@@ -66,6 +66,9 @@ export interface TruckLiveLocation {
   longitude: number;
   gps_text: string;
   accuracy?: number | null;
+  tx_hash?: string | null;
+  wallet_address?: string | null;
+  proof_mode?: string | null;
   updated_at?: string | null;
 }
 

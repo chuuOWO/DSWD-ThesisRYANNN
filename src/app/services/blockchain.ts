@@ -1,4 +1,5 @@
 import { BrowserProvider, Contract, ethers } from 'ethers';
+import { EthereumProvider as WalletConnectProvider } from '@walletconnect/ethereum-provider';
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -49,6 +50,9 @@ const handoverContractAddress = import.meta.env.VITE_HANDOVER_CONTRACT_ADDRESS;
 const targetChainId = Number(import.meta.env.VITE_BLOCKCHAIN_CHAIN_ID ?? 11155111);
 const targetChainName = import.meta.env.VITE_BLOCKCHAIN_CHAIN_NAME ?? 'Sepolia';
 const targetRpcUrl = import.meta.env.VITE_BLOCKCHAIN_RPC_URL;
+const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://localhost';
+let walletConnectProviderPromise: Promise<EthereumProvider> | null = null;
 
 const batchTokenAbi = [
   'function mintBatchToken(string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination) returns (uint256)',
@@ -62,15 +66,36 @@ const handoverAbi = [
   'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)'
 ];
 
-const requireEthereum = () => {
-  if (!window.ethereum) {
-    throw new Error('MetaMask is not installed or not available in this browser.');
+const getWalletConnectProvider = async () => {
+  if (!walletConnectProjectId) {
+    throw new Error('WalletConnect project ID is missing. Add VITE_WALLETCONNECT_PROJECT_ID to your .env file.');
   }
-  return window.ethereum;
+
+  if (!walletConnectProviderPromise) {
+    walletConnectProviderPromise = WalletConnectProvider.init({
+      projectId: walletConnectProjectId,
+      optionalChains: [targetChainId],
+      showQrModal: true,
+      metadata: {
+        name: 'DSWD Relief Tracker',
+        description: 'GPS-backed FNFI delivery and handover tracker',
+        url: appUrl,
+        icons: [`${appUrl}/vite.svg`]
+      },
+      rpcMap: targetRpcUrl ? { [targetChainId]: targetRpcUrl } : undefined
+    }) as Promise<EthereumProvider>;
+  }
+
+  return walletConnectProviderPromise;
+};
+
+const getEthereum = async () => {
+  if (window.ethereum) return window.ethereum;
+  return await getWalletConnectProvider();
 };
 
 const getSigner = async () => {
-  const ethereum = requireEthereum();
+  const ethereum = await getEthereum();
   const provider = new BrowserProvider(ethereum);
   await provider.send('eth_requestAccounts', []);
 

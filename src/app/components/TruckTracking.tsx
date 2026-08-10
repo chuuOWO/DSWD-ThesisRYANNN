@@ -125,6 +125,56 @@ const statusColors: Record<TruckStatus, string> = {
   Delivered: '#16a34a'
 };
 
+const ADMIN_MAX_ACCEPTED_ACCURACY_METERS = 120;
+const ADMIN_STATIONARY_THRESHOLD_METERS = 12;
+const ADMIN_SMOOTHING_DISTANCE_METERS = 90;
+const ADMIN_SMOOTHING_FACTOR = 0.35;
+
+const getTruckDistanceMeters = (
+  from: Pick<TruckLiveLocation, 'latitude' | 'longitude'>,
+  to: Pick<TruckLiveLocation, 'latitude' | 'longitude'>
+) => L.latLng(from.latitude, from.longitude).distanceTo(L.latLng(to.latitude, to.longitude));
+
+const stabilizeLiveLocation = (
+  previous: TruckLiveLocation | undefined,
+  incoming: TruckLiveLocation
+): TruckLiveLocation => {
+  if (!previous) return incoming;
+
+  if (incoming.accuracy && incoming.accuracy > ADMIN_MAX_ACCEPTED_ACCURACY_METERS) {
+    return {
+      ...previous,
+      accuracy: incoming.accuracy,
+      updated_at: incoming.updated_at
+    };
+  }
+
+  const distanceMoved = getTruckDistanceMeters(previous, incoming);
+
+  if (distanceMoved < ADMIN_STATIONARY_THRESHOLD_METERS) {
+    return {
+      ...incoming,
+      latitude: previous.latitude,
+      longitude: previous.longitude,
+      gps_text: previous.gps_text
+    };
+  }
+
+  if (distanceMoved < ADMIN_SMOOTHING_DISTANCE_METERS) {
+    const latitude = previous.latitude + (incoming.latitude - previous.latitude) * ADMIN_SMOOTHING_FACTOR;
+    const longitude = previous.longitude + (incoming.longitude - previous.longitude) * ADMIN_SMOOTHING_FACTOR;
+
+    return {
+      ...incoming,
+      latitude,
+      longitude,
+      gps_text: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+    };
+  }
+
+  return incoming;
+};
+
 const toLiveRoute = (route: TruckRoute, location?: TruckLiveLocation): TruckRoute => {
   if (!location) return route;
 
@@ -295,9 +345,14 @@ function LiveTruckMapFocus({ route }: { route?: TruckRoute }) {
   useEffect(() => {
     if (!route?.isLive || liveLat === undefined || liveLng === undefined) return;
 
-    map.setView([liveLat, liveLng], Math.max(map.getZoom(), 15), {
-      animate: true
-    });
+    const livePosition = L.latLng(liveLat, liveLng);
+    const distanceFromCenter = map.getCenter().distanceTo(livePosition);
+
+    if (distanceFromCenter > 35) {
+      map.setView(livePosition, Math.max(map.getZoom(), 15), {
+        animate: true
+      });
+    }
   }, [map, route?.id, route?.isLive, liveLat, liveLng]);
 
   return null;
@@ -410,7 +465,7 @@ export function TruckTracking() {
     return backendApi.subscribeTruckLiveLocations((location) => {
       setLiveLocations((current) => ({
         ...current,
-        [location.truck_id]: location
+        [location.truck_id]: stabilizeLiveLocation(current[location.truck_id], location)
       }));
     });
   }, []);
