@@ -3,6 +3,9 @@ import { EthereumProvider as WalletConnectProvider } from '@walletconnect/ethere
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  connect?: () => Promise<unknown>;
+  accounts?: string[];
+  selectedAddress?: string;
 };
 
 declare global {
@@ -54,6 +57,46 @@ const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
 const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://localhost';
 let walletConnectProviderPromise: Promise<EthereumProvider> | null = null;
 
+export const getWalletErrorMessage = (error: unknown, fallback = 'MetaMask request failed.') => {
+  const readMessage = (value: unknown, depth = 0): string | null => {
+    if (depth > 5 || value === null || value === undefined) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value !== 'object') return null;
+
+    const record = value as Record<string, unknown>;
+    const code = record.code;
+
+    if (code === 4001 || code === 'ACTION_REJECTED') {
+      return 'MetaMask request was cancelled by the user.';
+    }
+
+    for (const key of ['shortMessage', 'reason']) {
+      const message = record[key];
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+
+    for (const key of ['error', 'info', 'data', 'payload', 'cause']) {
+      const nestedMessage = readMessage(record[key], depth + 1);
+      if (nestedMessage && !/could not coalesce error/i.test(nestedMessage)) {
+        return nestedMessage;
+      }
+    }
+
+    const message = record.message;
+    if (typeof message === 'string' && message.trim()) {
+      return message.replace(/^could not coalesce error\s*/i, '').trim() || message;
+    }
+
+    return null;
+  };
+
+  return readMessage(error) || fallback;
+};
+
+const throwWalletError = (error: unknown, fallback: string): never => {
+  throw new Error(getWalletErrorMessage(error, fallback));
+};
+
 const batchTokenAbi = [
   'function mintBatchToken(string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination) returns (uint256)',
   'function getBatchByTokenId(string batchTokenId) view returns (tuple(uint256 batchId,string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination,address mintedBy,uint256 mintedAt))',
@@ -74,8 +117,19 @@ const getWalletConnectProvider = async () => {
   if (!walletConnectProviderPromise) {
     walletConnectProviderPromise = WalletConnectProvider.init({
       projectId: walletConnectProjectId,
+      chains: [targetChainId],
       optionalChains: [targetChainId],
       showQrModal: true,
+      methods: [
+        'eth_requestAccounts',
+        'eth_sendTransaction',
+        'personal_sign',
+        'eth_signTypedData',
+        'eth_signTypedData_v4',
+        'wallet_switchEthereumChain',
+        'wallet_addEthereumChain'
+      ],
+      events: ['accountsChanged', 'chainChanged', 'disconnect'],
       metadata: {
         name: 'DSWD Relief Tracker',
         description: 'GPS-backed FNFI delivery and handover tracker',
@@ -83,7 +137,15 @@ const getWalletConnectProvider = async () => {
         icons: [`${appUrl}/vite.svg`]
       },
       rpcMap: targetRpcUrl ? { [targetChainId]: targetRpcUrl } : undefined
-    }) as Promise<EthereumProvider>;
+    }).then(async (provider) => {
+      if (!provider.accounts?.length) {
+        await provider.connect?.();
+      }
+      return provider as EthereumProvider;
+    }).catch((error) => {
+      walletConnectProviderPromise = null;
+      throw error;
+    });
   }
 
   return walletConnectProviderPromise;
@@ -94,10 +156,43 @@ const getEthereum = async () => {
   return await getWalletConnectProvider();
 };
 
+const getConnectedWalletAddress = async (ethereum: EthereumProvider) => {
+  const readFirstAddress = (result: unknown) => (
+    Array.isArray(result) && typeof result[0] === 'string' ? result[0] : null
+  );
+
+  try {
+    const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+    const walletAddress = readFirstAddress(accounts);
+    if (walletAddress) return walletAddress;
+  } catch (error) {
+    const message = getWalletErrorMessage(error, '');
+    if (/cancelled|rejected/i.test(message)) throwWalletError(error, 'MetaMask connection was cancelled.');
+  }
+
+  try {
+    const accounts = await ethereum.request({ method: 'eth_accounts' });
+    const walletAddress = readFirstAddress(accounts);
+    if (walletAddress) return walletAddress;
+  } catch (error) {
+    throwWalletError(error, 'MetaMask account lookup failed.');
+  }
+
+  if (ethereum.selectedAddress) return ethereum.selectedAddress;
+  if (ethereum.accounts?.[0]) return ethereum.accounts[0];
+
+  throw new Error('MetaMask connected, but no wallet address was returned.');
+};
+
 const getSigner = async () => {
   const ethereum = await getEthereum();
   const provider = new BrowserProvider(ethereum);
-  await provider.send('eth_requestAccounts', []);
+
+  try {
+    await ethereum.request({ method: 'eth_requestAccounts' });
+  } catch (error) {
+    throwWalletError(error, 'MetaMask connection failed.');
+  }
 
   const network = await provider.getNetwork();
   if (Number(network.chainId) !== targetChainId) {
@@ -109,18 +204,22 @@ const getSigner = async () => {
     } catch (error) {
       const switchError = error as { code?: number };
       if (switchError.code !== 4902 || !targetRpcUrl) {
-        throw error;
+        throwWalletError(error, `Please switch MetaMask to ${targetChainName}.`);
       }
 
-      await ethereum.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: ethers.toBeHex(targetChainId),
-          chainName: targetChainName,
-          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-          rpcUrls: [targetRpcUrl]
-        }]
-      });
+      try {
+        await ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: ethers.toBeHex(targetChainId),
+            chainName: targetChainName,
+            nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+            rpcUrls: [targetRpcUrl]
+          }]
+        });
+      } catch (addChainError) {
+        throwWalletError(addChainError, `MetaMask could not add ${targetChainName}.`);
+      }
     }
   }
 
@@ -128,9 +227,19 @@ const getSigner = async () => {
 };
 
 const signFallbackProof = async (message: string): Promise<BlockchainProof> => {
-  const signer = await getSigner();
-  const walletAddress = await signer.getAddress();
-  const signature = await signer.signMessage(message);
+  const ethereum = await getEthereum();
+  const walletAddress = await getConnectedWalletAddress(ethereum);
+  const encodedMessage = ethers.hexlify(ethers.toUtf8Bytes(message));
+  let signature: string;
+
+  try {
+    signature = String(await ethereum.request({
+      method: 'personal_sign',
+      params: [encodedMessage, walletAddress]
+    }));
+  } catch (error) {
+    throwWalletError(error, 'MetaMask could not sign the GPS proof.');
+  }
 
   return {
     hash: signature,
@@ -220,6 +329,12 @@ export const blockchain = {
 
     return signFallbackProof(
       `Sign release\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
+    );
+  },
+
+  async signReleaseProof(input: SignReleaseInput): Promise<BlockchainProof> {
+    return signFallbackProof(
+      `Sign trucker GPS proof\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
     );
   },
 

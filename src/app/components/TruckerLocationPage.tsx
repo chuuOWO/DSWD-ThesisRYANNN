@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle, LocateFixed, MapPin, Navigation, Radio, Truck } from 'lucide-react';
 import { backendApi } from '../services/backendApi';
-import { blockchain, BlockchainProof } from '../services/blockchain';
+import { blockchain, BlockchainProof, getWalletErrorMessage } from '../services/blockchain';
 
 interface LiveLocationPayload {
   truck_id: string;
@@ -68,7 +68,6 @@ const MAX_ACCEPTED_ACCURACY_METERS = 100;
 const MIN_STATIONARY_MOVE_METERS = 10;
 const MIN_STATIONARY_UPDATE_MS = 15000;
 const SMOOTHING_FACTOR = 0.35;
-const MAX_SHARED_GPS_AGE_MS = 5 * 60 * 1000;
 
 const formatCoordinates = (latitude: number, longitude: number) => `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
 
@@ -115,7 +114,7 @@ const getGpsErrorMessage = (error: unknown) => {
   const gpsError = error as GeolocationPositionError;
 
   if (gpsError?.code === 1) {
-    return 'GPS permission was denied. In phone settings, allow Location for MetaMask, then reload this page.';
+    return 'GPS permission was denied. Allow Location for this browser, then reload this page.';
   }
 
   if (gpsError?.code === 2) {
@@ -130,16 +129,7 @@ const getGpsErrorMessage = (error: unknown) => {
 };
 
 const getSigningErrorMessage = (error: unknown) => {
-  const ethereumError = error as { code?: number; shortMessage?: string; reason?: string; message?: string };
-
-  if (ethereumError?.code === 4001) {
-    return 'MetaMask signing was cancelled by the user.';
-  }
-
-  return ethereumError?.shortMessage
-    || ethereumError?.reason
-    || ethereumError?.message
-    || 'MetaMask signing failed.';
+  return getWalletErrorMessage(error, 'MetaMask signing failed.');
 };
 
 export function TruckerLocationPage() {
@@ -246,7 +236,7 @@ export function TruckerLocationPage() {
   };
 
   const signReleaseWithGps = async (gps: string) => {
-    const proof = await blockchain.signRelease({
+    const proof = await blockchain.signReleaseProof({
       drNumber: truckInfo.drNumber,
       handoverContractId: truckInfo.handoverContractId,
       category: truckInfo.category,
@@ -341,24 +331,6 @@ export function TruckerLocationPage() {
     await savePayload(makeLocationPayload(latitude, longitude, roundedAccuracy, proof));
   };
 
-  const getLatestSharedGps = async () => {
-    const locations = await backendApi.getTruckLiveLocations();
-    const location = locations.find((item) => item.truck_id === truckId);
-
-    if (!location) {
-      throw new Error('No shared GPS found yet. Open this same trucker link in Chrome/Safari and tap Start GPS Only first.');
-    }
-
-    const updatedAt = location.updated_at ? new Date(location.updated_at).getTime() : 0;
-    const ageMs = Date.now() - updatedAt;
-
-    if (!updatedAt || ageMs > MAX_SHARED_GPS_AGE_MS) {
-      throw new Error('The shared GPS is too old. Refresh it from Chrome/Safari, then sign again in MetaMask.');
-    }
-
-    return location;
-  };
-
   const startLiveWatch = (proof = releaseProofRef.current) => {
     const id = navigator.geolocation.watchPosition(
       (nextPosition) => {
@@ -379,29 +351,6 @@ export function TruckerLocationPage() {
     setIsSharing(true);
   };
 
-  const startGpsOnlySharing = () => {
-    if (!navigator.geolocation) {
-      setMessage({ type: 'error', text: 'This browser does not support GPS location sharing.' });
-      return;
-    }
-
-    setIsSigning(true);
-    setMessage({ type: 'info', text: 'Starting GPS-only sharing for MetaMask signing.' });
-
-    captureBestGpsPosition()
-      .then(async (position) => {
-        await saveLocation(position, releaseProofRef.current);
-        startLiveWatch(releaseProofRef.current);
-        setMessage({ type: 'success', text: 'GPS-only sharing is live. Open this same link in MetaMask and sign with latest GPS.' });
-      })
-      .catch((error) => {
-        setMessage({ type: 'error', text: getGpsErrorMessage(error) });
-      })
-      .finally(() => {
-        setIsSigning(false);
-      });
-  };
-
   const startSharing = async () => {
     if (!navigator.geolocation) {
       setMessage({ type: 'error', text: 'This browser does not support GPS location sharing.' });
@@ -409,73 +358,28 @@ export function TruckerLocationPage() {
     }
 
     setIsSigning(true);
-    setMessage({ type: 'info', text: 'Capturing phone GPS before opening MetaMask...' });
+    setMessage({ type: 'info', text: 'Capturing phone GPS before opening wallet...' });
 
     try {
       const position = await captureBestGpsPosition();
       const gps = formatCoordinates(position.coords.latitude, position.coords.longitude);
-      setMessage({ type: 'info', text: 'GPS captured. Starting live tracking, then opening MetaMask.' });
+      setMessage({ type: 'info', text: 'GPS captured. Confirm the release in MetaMask.' });
       await saveLocation(position, releaseProofRef.current);
       startLiveWatch(releaseProofRef.current);
 
       try {
         const proof = releaseProofRef.current ?? await signReleaseWithGps(gps);
         await saveLocation(position, proof);
-        setMessage({ type: 'success', text: 'MetaMask proof recorded. Live GPS is sharing to admin tracking.' });
+        setMessage({ type: 'success', text: 'MetaMask GPS proof recorded. Live GPS is sharing to admin tracking.' });
       } catch (signingError) {
         console.error('MetaMask signing failed', signingError);
         setMessage({
           type: 'error',
-          text: `Live GPS is sharing, but MetaMask proof failed: ${getSigningErrorMessage(signingError)}`
+              text: `Live GPS is sharing, but MetaMask GPS proof failed: ${getSigningErrorMessage(signingError)}`
         });
       }
     } catch (error) {
-      const gpsErrorText = getGpsErrorMessage(error);
-
-      try {
-        const location = await getLatestSharedGps();
-        const gps = location.gps_text || formatCoordinates(location.latitude, location.longitude);
-        setMessage({ type: 'info', text: 'Using latest shared GPS. Confirm the release in MetaMask.' });
-
-        const proof = releaseProofRef.current ?? await signReleaseWithGps(gps);
-        await savePayload({
-          ...location,
-          dr_number: truckInfo.drNumber,
-          tx_hash: proof.hash,
-          wallet_address: proof.walletAddress,
-          proof_mode: proof.mode,
-          updated_at: new Date().toISOString()
-        });
-        setMessage({ type: 'success', text: 'MetaMask proof recorded with latest shared GPS.' });
-      } catch (fallbackError) {
-        const fallbackText = fallbackError instanceof Error ? fallbackError.message : getSigningErrorMessage(fallbackError);
-        setMessage({ type: 'error', text: `${gpsErrorText} ${fallbackText}` });
-      }
-    } finally {
-      setIsSigning(false);
-    }
-  };
-
-  const signWithLatestSharedGps = async () => {
-    setIsSigning(true);
-    setMessage({ type: 'info', text: 'Loading latest shared GPS, then opening MetaMask.' });
-
-    try {
-      const location = await getLatestSharedGps();
-      const gps = location.gps_text || formatCoordinates(location.latitude, location.longitude);
-      const proof = releaseProofRef.current ?? await signReleaseWithGps(gps);
-      await savePayload({
-        ...location,
-        dr_number: truckInfo.drNumber,
-        tx_hash: proof.hash,
-        wallet_address: proof.walletAddress,
-        proof_mode: proof.mode,
-        updated_at: new Date().toISOString()
-      });
-      setMessage({ type: 'success', text: 'MetaMask proof recorded with latest shared GPS.' });
-    } catch (error) {
-      const text = error instanceof Error ? error.message : getSigningErrorMessage(error);
-      setMessage({ type: 'error', text });
+      setMessage({ type: 'error', text: getGpsErrorMessage(error) });
     } finally {
       setIsSigning(false);
     }
@@ -544,38 +448,15 @@ export function TruckerLocationPage() {
 
           <button
             type="button"
-            onClick={isSharing ? stopSharing : startSharing}
+            onClick={releaseProof && isSharing ? stopSharing : startSharing}
             className={`w-full min-h-14 rounded-lg text-white font-bold flex items-center justify-center gap-2 ${
-              isSharing ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-700 hover:bg-blue-800'
+              releaseProof && isSharing ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-700 hover:bg-blue-800'
             }`}
             disabled={isSigning}
           >
             <LocateFixed className="w-5 h-5" />
-            {isSigning ? 'Opening MetaMask...' : isSharing ? 'Stop Sharing Location' : 'Sign & Share Location'}
+            {isSigning ? 'Getting GPS / Opening Wallet...' : releaseProof && isSharing ? 'Stop Sharing Location' : 'Sign & Share Location'}
           </button>
-
-          <div className="rounded-lg border border-gray-200 p-4 space-y-3">
-            <p className="text-xs font-bold text-gray-500 uppercase">No-Typing GPS Bridge</p>
-            <button
-              type="button"
-              onClick={startGpsOnlySharing}
-              disabled={isSigning}
-              className="w-full min-h-11 rounded-lg border border-blue-700 text-blue-700 text-sm font-bold hover:bg-blue-50 disabled:opacity-60"
-            >
-              Start GPS Only
-            </button>
-            <button
-              type="button"
-              onClick={signWithLatestSharedGps}
-              disabled={isSigning}
-              className="w-full min-h-11 rounded-lg bg-blue-700 text-white text-sm font-bold hover:bg-blue-800 disabled:opacity-60"
-            >
-              Sign Latest Shared GPS
-            </button>
-            <p className="text-xs text-gray-500">
-              Use GPS Only in Chrome/Safari, then sign the latest shared GPS in MetaMask.
-            </p>
-          </div>
 
           {message && (
             <div className={`rounded-lg border p-4 flex gap-3 ${
