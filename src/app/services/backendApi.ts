@@ -72,6 +72,23 @@ export interface TruckLiveLocation {
   updated_at?: string | null;
 }
 
+export interface TruckerReleaseRecord {
+  dr_number: string;
+  date_allocated?: string | null;
+  lgu_name?: string | null;
+  province?: string | null;
+  municipality?: string | null;
+  category?: string | null;
+  amount_requested?: number | null;
+  amount_approved?: number | null;
+  warehouse_source?: string | null;
+  delivery_mode?: string | null;
+  delivery_status?: string | null;
+  incident_code?: string | null;
+  allocated_batches?: { batchTokenId?: string | null; quantity?: number | null }[] | null;
+  handover_contract_id?: string | null;
+}
+
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -205,28 +222,39 @@ export const backendApi = {
     return { ok: true };
   },
 
-  async getTruckLiveLocations() {
-    const response = await fetch('/api/truck-live-locations');
+  async getTruckerReleases(drNumber?: string | null) {
+    let query = supabase
+      .from('outgoing_requests')
+      .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id')
+      .ilike('delivery_mode', 'truck')
+      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
+      .order('created_at', { ascending: false });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch truck live locations: ${response.statusText}`);
+    if (drNumber) {
+      query = query.eq('dr_number', drNumber);
     }
 
-    return await response.json() as TruckLiveLocation[];
+    const { data, error } = await query;
+    throwIfError(error, 'Failed to fetch trucker releases');
+    return (data ?? []) as TruckerReleaseRecord[];
+  },
+
+  async getTruckLiveLocations() {
+    const { data, error } = await supabase
+      .from('truck_live_locations')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    throwIfError(error, 'Failed to fetch truck live locations');
+    return (data ?? []) as TruckLiveLocation[];
   },
 
   async upsertTruckLiveLocation(payload: TruckLiveLocation) {
-    const response = await fetch('/api/truck-live-locations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const { error } = await supabase
+      .from('truck_live_locations')
+      .upsert(payload, { onConflict: 'truck_id' });
 
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => null);
-      throw new Error(errorPayload?.error ?? `Failed to save truck live location: ${response.statusText}`);
-    }
-
+    throwIfError(error, 'Failed to save truck live location');
     return { ok: true };
   },
 
@@ -243,31 +271,19 @@ export const backendApi = {
   },
 
   subscribeTruckLiveLocations(onChange: (location: TruckLiveLocation) => void) {
-    let previousSnapshot = '';
-    let isStopped = false;
+    const channel = supabase
+      .channel('truck-live-location-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, (payload) => {
+        if (payload.new) onChange(payload.new as TruckLiveLocation);
+      })
+      .subscribe();
 
-    const poll = async () => {
-      try {
-        const locations = await backendApi.getTruckLiveLocations();
-        const nextSnapshot = JSON.stringify(locations);
-
-        if (nextSnapshot !== previousSnapshot) {
-          previousSnapshot = nextSnapshot;
-          locations.forEach(onChange);
-        }
-      } catch (error) {
-        console.error('Failed to poll truck live locations', error);
-      }
-
-      if (!isStopped) {
-        window.setTimeout(poll, 1500);
-      }
-    };
-
-    poll();
+    backendApi.getTruckLiveLocations()
+      .then((locations) => locations.forEach(onChange))
+      .catch((error) => console.error('Failed to load truck live locations', error));
 
     return () => {
-      isStopped = true;
+      supabase.removeChannel(channel);
     };
   }
 };

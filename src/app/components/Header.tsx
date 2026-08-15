@@ -1,4 +1,10 @@
-export function Header() {
+interface HeaderProps {
+  email?: string;
+  roleLabel?: string;
+  onSignOut?: () => void;
+}
+
+export function Header({ email = 'novrindept@swsu.com', roleLabel = 'DSWD Admin', onSignOut }: HeaderProps) {
   return (
     <div className="bg-blue-700 h-16 px-6 flex items-center justify-between shadow-sm">
       <div className="flex items-center gap-3">
@@ -15,7 +21,19 @@ export function Header() {
             <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
           </svg>
         </div>
-        <span className="text-white text-sm font-medium">novrindept@swsu.com</span>
+        <div className="text-right">
+          <p className="text-white text-sm font-medium">{email}</p>
+          <p className="text-blue-100 text-xs">{roleLabel}</p>
+        </div>
+        {onSignOut && (
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="h-9 px-3 rounded-lg bg-white/10 text-white text-xs font-bold hover:bg-white/20"
+          >
+            Sign Out
+          </button>
+        )}
       </div>
     </div>
   );

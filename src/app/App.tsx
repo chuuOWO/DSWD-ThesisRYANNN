@@ -8,14 +8,44 @@ import { InventoryMonitoring } from './components/InventoryMonitoring';
 import { LGUMonitoringNew } from './components/LGUMonitoringNew';
 import { TruckTracking } from './components/TruckTracking';
 import { TruckerLocationPage } from './components/TruckerLocationPage';
+import { AuthPage } from './components/AuthPage';
+import { LGUReceiptPage } from './components/LGUReceiptPage';
 import { useInventoryState } from './hooks/useInventoryState';
+import { useAuth } from './contexts/AuthContext';
+import { authApi } from './services/authApi';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
-  const inventoryState = useInventoryState();
+  const { session, profile, isLoading, signOut } = useAuth();
+  const inventoryState = useInventoryState(Boolean(session));
 
-  if (window.location.pathname === '/trucker') {
-    return <TruckerLocationPage />;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="rounded-lg bg-white border border-gray-200 px-6 py-4 text-sm font-bold text-gray-700 shadow-sm">
+          Loading secure session...
+        </div>
+      </div>
+    );
+  }
+
+  if (!session || !profile) {
+    return <AuthPage />;
+  }
+
+  if (profile.role === 'trucker' || window.location.pathname === '/trucker') {
+    return <TruckerLocationPage profile={profile} onSignOut={signOut} />;
+  }
+
+  if (profile.role === 'lgu') {
+    return (
+      <LGUReceiptPage
+        profile={profile}
+        releases={inventoryState.outgoingReleasesList}
+        onAccept={inventoryState.receiverAcceptWithGps}
+        onSignOut={signOut}
+      />
+    );
   }
 
   const renderView = () => {
@@ -38,7 +68,11 @@ export default function App() {
 
   return (
     <div className="size-full flex flex-col bg-gray-50">
-      <Header />
+      <Header
+        email={profile.email}
+        roleLabel={authApi.roleLabels[profile.role]}
+        onSignOut={signOut}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <SidebarNew currentView={currentView} onNavigate={setCurrentView} />

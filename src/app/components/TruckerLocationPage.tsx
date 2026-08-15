@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle, LocateFixed, MapPin, Navigation, Radio, Truck } from 'lucide-react';
 import { backendApi } from '../services/backendApi';
 import { blockchain, BlockchainProof, getWalletErrorMessage } from '../services/blockchain';
+import type { UserProfile } from '../services/authApi';
 
 interface LiveLocationPayload {
   truck_id: string;
@@ -94,6 +95,29 @@ const getReleaseDetailsFromParams = (params: URLSearchParams, fallback: ReleaseD
   };
 };
 
+const mapTruckerReleaseRecord = (record: Awaited<ReturnType<typeof backendApi.getTruckerReleases>>[number], fallback: ReleaseDetails): ReleaseDetails => {
+  const approvedQuantity = record.amount_approved || record.amount_requested || fallback.quantity;
+  const allocatedBatches = record.allocated_batches ?? [];
+  const batchTokenIds = allocatedBatches
+    .map((batch) => batch.batchTokenId)
+    .filter((batchTokenId): batchTokenId is string => Boolean(batchTokenId));
+  const batchQuantities = allocatedBatches
+    .map((batch) => Number(batch.quantity))
+    .filter((quantity) => Number.isFinite(quantity) && quantity > 0);
+
+  return {
+    drNumber: record.dr_number || fallback.drNumber,
+    handoverContractId: record.handover_contract_id || `HANDOVER-${(record.dr_number || fallback.drNumber).replace('DR-', '')}`,
+    destination: record.lgu_name || fallback.destination,
+    cargo: `${approvedQuantity} ${record.category || fallback.category}`,
+    category: record.category || fallback.category,
+    quantity: approvedQuantity,
+    batchTokenIds: batchTokenIds.length > 0 ? batchTokenIds : fallback.batchTokenIds,
+    batchQuantities: batchQuantities.length > 0 ? batchQuantities : fallback.batchQuantities,
+    from: record.warehouse_source || fallback.from
+  };
+};
+
 const getDistanceMeters = (
   from: Pick<LiveLocationPayload, 'latitude' | 'longitude'>,
   to: Pick<LiveLocationPayload, 'latitude' | 'longitude'>
@@ -132,10 +156,19 @@ const getSigningErrorMessage = (error: unknown) => {
   return getWalletErrorMessage(error, 'MetaMask signing failed.');
 };
 
-export function TruckerLocationPage() {
-  const params = new URLSearchParams(window.location.search);
-  const truckId = params.get('truckId') || 'TRK-001';
-  const truckInfo = getReleaseDetailsFromParams(params, DEFAULT_TRUCKS[truckId] ?? DEFAULT_TRUCKS['TRK-001']);
+interface TruckerLocationPageProps {
+  profile?: UserProfile | null;
+  onSignOut?: () => void;
+}
+
+export function TruckerLocationPage({ profile, onSignOut }: TruckerLocationPageProps) {
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const truckId = params.get('truckId') || profile?.truckId || 'TRK-001';
+  const fallbackTruckInfo = useMemo(
+    () => getReleaseDetailsFromParams(params, DEFAULT_TRUCKS[truckId] ?? DEFAULT_TRUCKS['TRK-001']),
+    [params, truckId]
+  );
+  const [truckInfo, setTruckInfo] = useState<ReleaseDetails>(fallbackTruckInfo);
   const [isSharing, setIsSharing] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
   const [watchId, setWatchId] = useState<number | null>(null);
@@ -158,6 +191,19 @@ export function TruckerLocationPage() {
       if (watchId !== null) navigator.geolocation.clearWatch(watchId);
     };
   }, [watchId]);
+
+  useEffect(() => {
+    const requestedDrNumber = params.get('drNumber');
+
+    backendApi.getTruckerReleases(requestedDrNumber)
+      .then((records) => {
+        const selectedRecord = records[0];
+        if (selectedRecord) setTruckInfo(mapTruckerReleaseRecord(selectedRecord, fallbackTruckInfo));
+      })
+      .catch((error) => {
+        console.warn('Using fallback truck release details because Supabase release lookup failed', error);
+      });
+  }, [fallbackTruckInfo, params]);
 
   const getCurrentGpsPosition = () =>
     new Promise<GeolocationPosition>((resolve, reject) => {
@@ -399,11 +445,18 @@ export function TruckerLocationPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-blue-100">Trucker View</p>
-              <h1 className="text-lg font-bold">{truckId}</h1>
+              <h1 className="text-lg font-bold">{profile?.fullName || truckId}</h1>
+              <p className="text-xs text-blue-100">{truckId}</p>
             </div>
-            <div className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center">
-              <Truck className="w-6 h-6" />
-            </div>
+            {onSignOut ? (
+              <button type="button" onClick={onSignOut} className="h-9 px-3 rounded-lg bg-white/10 text-xs font-bold hover:bg-white/20">
+                Sign Out
+              </button>
+            ) : (
+              <div className="w-11 h-11 rounded-full bg-white/15 flex items-center justify-center">
+                <Truck className="w-6 h-6" />
+              </div>
+            )}
           </div>
         </div>
 

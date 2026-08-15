@@ -264,7 +264,7 @@ const logBackendError = (action: string) => (error: unknown) => {
   console.error(`${action} did not persist to Supabase`, error);
 };
 
-export function useInventoryState() {
+export function useInventoryState(enabled = true) {
   const [integrationMode, setIntegrationMode] = useState<'backend' | 'mock'>('mock');
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
@@ -688,6 +688,8 @@ export function useInventoryState() {
   };
 
   useEffect(() => {
+    if (!enabled) return;
+
     const loadDashboard = () => backendApi.getDashboard()
       .then(({ incoming, outgoing }) => {
         setIncomingGoodsList(incoming.map(mapIncomingManifest));
@@ -700,7 +702,7 @@ export function useInventoryState() {
     const unsubscribe = backendApi.subscribeDashboard(loadDashboard);
 
     return unsubscribe;
-  }, []);
+  }, [enabled]);
 
   const requestOutgoingCorrection = (drNumber: string, note: string) => {
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
