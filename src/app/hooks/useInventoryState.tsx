@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { backendApi } from '../services/backendApi';
+import { useEffect, useState } from 'react';
+import { backendApi, LGUPriorityReportRow } from '../services/backendApi';
 import { blockchain } from '../services/blockchain';
 
 export interface InventoryItem {
@@ -217,6 +217,25 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   auditTrail: [makeAudit('Loaded from Supabase', `Outgoing request restored from database as ${row.delivery_status ?? 'Allocating'}.`, row.tx_hash ?? undefined)]
 });
 
+const isPriorityColor = (color: unknown): color is PriorityColor =>
+  typeof color === 'string' && ['Red', 'Yellow', 'Green'].includes(color);
+
+const mapLGUPriorityReport = (row: LGUPriorityReportRow): LGUPriorityReport => ({
+  id: row.id,
+  municipality: row.municipality,
+  province: row.province,
+  lguName: row.lgu_name,
+  reportedAt: row.reported_at ?? '',
+  foodPacks: row.food_packs ?? 0,
+  hygieneKits: row.hygiene_kits ?? 0,
+  familyKits: row.family_kits ?? 0,
+  affectedFamilies: row.affected_families ?? 0,
+  damageIndex: row.damage_index ?? 0,
+  urgencyScore: row.urgency_score ?? 0,
+  priorityColor: isPriorityColor(row.priority_color) ? row.priority_color : 'Green',
+  recommendation: row.recommendation ?? ''
+});
+
 const emptyInventoryItem = (category: string): InventoryItem => ({
   category,
   warehouseA: 0,
@@ -271,37 +290,7 @@ export function useInventoryState(enabled = true) {
   const [incomingGoodsList, setIncomingGoodsList] = useState<IncomingGoods[]>([]);
 
   const [outgoingReleasesList, setOutgoingReleasesList] = useState<OutgoingRelease[]>([]);
-
-  const lguPriorityReports: LGUPriorityReport[] = useMemo(() => {
-    const reports = [
-      { id: 'LGU-001', lguName: 'Leon Municipal Office', municipality: 'Leon', province: 'Iloilo', foodPacks: 95, hygieneKits: 80, familyKits: 50, affectedFamilies: 920, damageIndex: 88 },
-      { id: 'LGU-002', lguName: 'Miag-ao Municipal Office', municipality: 'Miag-ao', province: 'Iloilo', foodPacks: 220, hygieneKits: 180, familyKits: 120, affectedFamilies: 610, damageIndex: 62 },
-      { id: 'LGU-003', lguName: 'Banate Municipal Office', municipality: 'Banate', province: 'Iloilo', foodPacks: 180, hygieneKits: 120, familyKits: 90, affectedFamilies: 750, damageIndex: 73 },
-      { id: 'LGU-004', lguName: 'Guinhol Municipal Office', municipality: 'Guinhol', province: 'Iloilo', foodPacks: 130, hygieneKits: 90, familyKits: 70, affectedFamilies: 840, damageIndex: 81 },
-      { id: 'LGU-005', lguName: 'Iloilo City Government', municipality: 'Iloilo City', province: 'Iloilo', foodPacks: 700, hygieneKits: 500, familyKits: 350, affectedFamilies: 480, damageIndex: 35 }
-    ];
-
-    return reports.map(report => {
-      const stockScore = report.foodPacks < 150 ? 45 : report.foodPacks < 300 ? 25 : 8;
-      const demandScore = Math.min(35, Math.round(report.affectedFamilies / 30));
-      const damageScore = Math.round(report.damageIndex * 0.2);
-      const urgencyScore = Math.min(100, stockScore + demandScore + damageScore);
-      const priorityColor: PriorityColor = urgencyScore >= 75 ? 'Red' : urgencyScore >= 50 ? 'Yellow' : 'Green';
-
-      return {
-        ...report,
-        reportedAt: '2026-05-15 08:00',
-        urgencyScore,
-        priorityColor,
-        recommendation:
-          priorityColor === 'Red'
-            ? 'Immediate restocking and dispatch recommended.'
-            : priorityColor === 'Yellow'
-            ? 'Prepare allocation; monitor within 24 hours.'
-            : 'Sufficient stock; continue monitoring.'
-      };
-    }).sort((a, b) => b.urgencyScore - a.urgencyScore);
-  }, []);
+  const [lguPriorityReports, setLguPriorityReports] = useState<LGUPriorityReport[]>([]);
 
   useEffect(() => {
     setInventory(calculateAvailableInventory(incomingGoodsList, outgoingReleasesList));
@@ -691,9 +680,10 @@ export function useInventoryState(enabled = true) {
     if (!enabled) return;
 
     const loadDashboard = () => backendApi.getDashboard()
-      .then(({ incoming, outgoing }) => {
+      .then(({ incoming, outgoing, lguPriorityReports: priorityRows }) => {
         setIncomingGoodsList(incoming.map(mapIncomingManifest));
         setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
+        setLguPriorityReports(priorityRows.map(mapLGUPriorityReport));
         setIntegrationMode('backend');
       })
       .catch(() => setIntegrationMode('mock'));

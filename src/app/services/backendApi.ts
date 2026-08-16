@@ -89,6 +89,22 @@ export interface TruckerReleaseRecord {
   handover_contract_id?: string | null;
 }
 
+export interface LGUPriorityReportRow {
+  id: string;
+  lgu_name: string;
+  municipality: string;
+  province: string;
+  reported_at?: string | null;
+  food_packs?: number | null;
+  hygiene_kits?: number | null;
+  family_kits?: number | null;
+  affected_families?: number | null;
+  damage_index?: number | null;
+  urgency_score?: number | null;
+  priority_color?: string | null;
+  recommendation?: string | null;
+}
+
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -101,17 +117,20 @@ const definedOnly = <T extends Record<string, unknown>>(values: T) =>
 
 export const backendApi = {
   async getDashboard() {
-    const [incomingResult, outgoingResult] = await Promise.all([
+    const [incomingResult, outgoingResult, lguPriorityResult] = await Promise.all([
       supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
-      supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false })
+      supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }),
+      supabase.from('lgu_priority_reports').select('*').order('urgency_score', { ascending: false })
     ]);
 
     throwIfError(incomingResult.error, 'Failed to fetch incoming manifests');
     throwIfError(outgoingResult.error, 'Failed to fetch outgoing requests');
+    throwIfError(lguPriorityResult.error, 'Failed to fetch LGU priority reports');
 
     return {
       incoming: incomingResult.data ?? [],
-      outgoing: outgoingResult.data ?? []
+      outgoing: outgoingResult.data ?? [],
+      lguPriorityReports: (lguPriorityResult.data ?? []) as LGUPriorityReportRow[]
     };
   },
 
@@ -263,6 +282,7 @@ export const backendApi = {
       .channel('dashboard-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incoming_manifests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_requests' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lgu_priority_reports' }, onChange)
       .subscribe();
 
     return () => {

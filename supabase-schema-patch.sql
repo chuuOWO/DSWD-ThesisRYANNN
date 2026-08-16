@@ -1,6 +1,75 @@
 -- Run this once in Supabase SQL Editor.
 -- It adds a user-facing incoming manifest number while keeping the UUID id internal.
 
+create extension if not exists pgcrypto;
+
+create table if not exists public.incoming_manifests (
+  id uuid primary key default gen_random_uuid(),
+  date_received text,
+  category text,
+  quantity integer not null default 0,
+  unit_type text,
+  expiration_date text,
+  source text,
+  destination_type text,
+  destination text,
+  incident_code text,
+  status text not null default 'Draft',
+  manifest_hash text,
+  tx_hash text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.outgoing_requests (
+  id uuid primary key default gen_random_uuid(),
+  date_allocated text,
+  lgu_name text,
+  province text,
+  municipality text,
+  category text,
+  amount_requested integer not null default 0,
+  amount_approved integer not null default 0,
+  warehouse_source text,
+  delivery_mode text,
+  delivery_status text not null default 'Allocating',
+  incident_code text,
+  sender_gps text,
+  receiver_gps text,
+  tx_hash text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.lgu_priority_reports (
+  id uuid primary key default gen_random_uuid(),
+  lgu_name text not null,
+  municipality text not null,
+  province text not null,
+  reported_at timestamptz not null default now(),
+  food_packs integer not null default 0,
+  hygiene_kits integer not null default 0,
+  family_kits integer not null default 0,
+  affected_families integer not null default 0,
+  damage_index integer not null default 0,
+  urgency_score integer not null default 0,
+  priority_color text not null default 'Green' check (priority_color in ('Red', 'Yellow', 'Green')),
+  recommendation text not null default ''
+);
+
+create table if not exists public.lgu_delivery_summaries (
+  id uuid primary key default gen_random_uuid(),
+  lgu_name text not null,
+  municipality text not null,
+  province text not null,
+  total_items_released integer not null default 0,
+  delivery_count integer not null default 0,
+  completed_deliveries integer not null default 0,
+  pending_deliveries integer not null default 0,
+  last_delivery_date text,
+  current_stock jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.incoming_manifests
 add column if not exists manifest_number text;
 
@@ -64,8 +133,24 @@ exception
   when duplicate_object then null;
 end $$;
 
+do $$
+begin
+  alter publication supabase_realtime add table public.lgu_priority_reports;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.lgu_delivery_summaries;
+exception
+  when duplicate_object then null;
+end $$;
+
 alter table public.incoming_manifests enable row level security;
 alter table public.outgoing_requests enable row level security;
+alter table public.lgu_priority_reports enable row level security;
+alter table public.lgu_delivery_summaries enable row level security;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -170,6 +255,44 @@ on public.outgoing_requests for update
 to authenticated
 using (public.current_user_role() in ('dswd_admin', 'trucker', 'lgu'))
 with check (public.current_user_role() in ('dswd_admin', 'trucker', 'lgu'));
+
+drop policy if exists "Allow authenticated read lgu priority reports" on public.lgu_priority_reports;
+create policy "Allow authenticated read lgu priority reports"
+on public.lgu_priority_reports for select
+to authenticated
+using (true);
+
+drop policy if exists "Allow admin insert lgu priority reports" on public.lgu_priority_reports;
+create policy "Allow admin insert lgu priority reports"
+on public.lgu_priority_reports for insert
+to authenticated
+with check (public.current_user_role() = 'dswd_admin');
+
+drop policy if exists "Allow admin update lgu priority reports" on public.lgu_priority_reports;
+create policy "Allow admin update lgu priority reports"
+on public.lgu_priority_reports for update
+to authenticated
+using (public.current_user_role() = 'dswd_admin')
+with check (public.current_user_role() = 'dswd_admin');
+
+drop policy if exists "Allow authenticated read lgu delivery summaries" on public.lgu_delivery_summaries;
+create policy "Allow authenticated read lgu delivery summaries"
+on public.lgu_delivery_summaries for select
+to authenticated
+using (true);
+
+drop policy if exists "Allow admin insert lgu delivery summaries" on public.lgu_delivery_summaries;
+create policy "Allow admin insert lgu delivery summaries"
+on public.lgu_delivery_summaries for insert
+to authenticated
+with check (public.current_user_role() = 'dswd_admin');
+
+drop policy if exists "Allow admin update lgu delivery summaries" on public.lgu_delivery_summaries;
+create policy "Allow admin update lgu delivery summaries"
+on public.lgu_delivery_summaries for update
+to authenticated
+using (public.current_user_role() = 'dswd_admin')
+with check (public.current_user_role() = 'dswd_admin');
 
 drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
