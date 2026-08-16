@@ -156,11 +156,22 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   full_name text not null default '',
-  role text not null check (role in ('dswd_admin', 'trucker', 'lgu')),
+  role text not null check (role in ('dswd_admin', 'receiver')),
   truck_id text,
   lgu_name text,
   created_at timestamptz not null default now()
 );
+
+alter table public.profiles
+drop constraint if exists profiles_role_check;
+
+update public.profiles
+set role = 'receiver'
+where role in ('trucker', 'lgu');
+
+alter table public.profiles
+add constraint profiles_role_check
+check (role in ('dswd_admin', 'receiver'));
 
 create table if not exists public.truck_live_locations (
   truck_id text primary key,
@@ -189,9 +200,15 @@ begin
     new.id,
     coalesce(new.email, ''),
     coalesce(new.raw_user_meta_data->>'full_name', ''),
-    coalesce(new.raw_user_meta_data->>'role', 'trucker'),
-    new.raw_user_meta_data->>'truck_id',
-    new.raw_user_meta_data->>'lgu_name'
+    case
+      when new.raw_user_meta_data->>'role' = 'dswd_admin' then 'dswd_admin'
+      else 'receiver'
+    end,
+    case
+      when new.raw_user_meta_data->>'role' = 'dswd_admin' then null
+      else new.raw_user_meta_data->>'truck_id'
+    end,
+    null
   )
   on conflict (id) do update set
     email = excluded.email,
@@ -253,8 +270,8 @@ drop policy if exists "Allow anon update outgoing" on public.outgoing_requests;
 create policy "Allow anon update outgoing"
 on public.outgoing_requests for update
 to authenticated
-using (public.current_user_role() in ('dswd_admin', 'trucker', 'lgu'))
-with check (public.current_user_role() in ('dswd_admin', 'trucker', 'lgu'));
+using (public.current_user_role() in ('dswd_admin', 'receiver'))
+with check (public.current_user_role() in ('dswd_admin', 'receiver'));
 
 drop policy if exists "Allow authenticated read lgu priority reports" on public.lgu_priority_reports;
 create policy "Allow authenticated read lgu priority reports"
@@ -323,14 +340,14 @@ drop policy if exists "Allow authenticated upsert truck live locations" on publi
 create policy "Allow authenticated upsert truck live locations"
 on public.truck_live_locations for insert
 to authenticated
-with check (public.current_user_role() in ('dswd_admin', 'trucker'));
+with check (public.current_user_role() in ('dswd_admin', 'receiver'));
 
 drop policy if exists "Allow authenticated update truck live locations" on public.truck_live_locations;
 create policy "Allow authenticated update truck live locations"
 on public.truck_live_locations for update
 to authenticated
-using (public.current_user_role() in ('dswd_admin', 'trucker'))
-with check (public.current_user_role() in ('dswd_admin', 'trucker'));
+using (public.current_user_role() in ('dswd_admin', 'receiver'))
+with check (public.current_user_role() in ('dswd_admin', 'receiver'));
 
 do $$
 begin

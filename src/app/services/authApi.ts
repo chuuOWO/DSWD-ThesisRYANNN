@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 
-export type UserRole = 'dswd_admin' | 'trucker' | 'lgu';
+export type UserRole = 'dswd_admin' | 'receiver';
 
 export interface UserProfile {
   id: string;
@@ -18,20 +18,22 @@ export interface SignUpPayload {
   fullName: string;
   role: UserRole;
   truckId?: string;
-  lguName?: string;
 }
 
 const roleLabels: Record<UserRole, string> = {
   dswd_admin: 'DSWD Admin',
-  trucker: 'Truck Driver',
-  lgu: 'LGU'
+  receiver: 'Receiver'
 };
+
+const normalizeRole = (role: unknown): UserRole => (
+  role === 'dswd_admin' ? 'dswd_admin' : 'receiver'
+);
 
 const mapProfile = (row: Record<string, unknown>): UserProfile => ({
   id: String(row.id),
   email: String(row.email ?? ''),
   fullName: String(row.full_name ?? ''),
-  role: (row.role as UserRole) ?? 'trucker',
+  role: normalizeRole(row.role),
   truckId: row.truck_id ? String(row.truck_id) : null,
   lguName: row.lgu_name ? String(row.lgu_name) : null,
   createdAt: row.created_at ? String(row.created_at) : null
@@ -65,8 +67,8 @@ export const authApi = {
         data: {
           full_name: payload.fullName,
           role: payload.role,
-          truck_id: payload.truckId,
-          lgu_name: payload.lguName
+          truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
+          lgu_name: null
         }
       }
     });
@@ -79,8 +81,8 @@ export const authApi = {
         email: payload.email,
         full_name: payload.fullName,
         role: payload.role,
-        truck_id: payload.role === 'trucker' ? payload.truckId || null : null,
-        lgu_name: payload.role === 'lgu' ? payload.lguName || null : null
+        truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
+        lgu_name: null
       });
 
       if (profileError) throw new Error(`Account created, but profile save failed: ${profileError.message}`);

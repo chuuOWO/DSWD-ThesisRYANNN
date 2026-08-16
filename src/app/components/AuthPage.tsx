@@ -1,13 +1,17 @@
 import { FormEvent, useState } from 'react';
-import { LockKeyhole, Mail, ShieldCheck, Truck, Users } from 'lucide-react';
+import { LockKeyhole, Mail, ShieldCheck, Users } from 'lucide-react';
 import { authApi, UserRole } from '../services/authApi';
 import { useAuth } from '../contexts/AuthContext';
 
 const roleOptions: Array<{ value: UserRole; label: string; helper: string }> = [
   { value: 'dswd_admin', label: 'DSWD Admin', helper: 'Dashboard, inventory, releases, and tracking map.' },
-  { value: 'trucker', label: 'Truck Driver', helper: 'Mobile GPS sharing and MetaMask pickup signing.' },
-  { value: 'lgu', label: 'LGU', helper: 'Package receipt confirmation with MetaMask.' }
+  { value: 'receiver', label: 'Receiver', helper: 'Mobile GPS sharing, MetaMask pickup signing, and LGU receipt confirmation.' }
 ];
+
+const generateTruckId = () => {
+  const number = Math.floor(1 + Math.random() * 9999);
+  return `RCVR-${String(number).padStart(4, '0')}`;
+};
 
 export function AuthPage() {
   const { refreshProfile } = useAuth();
@@ -16,8 +20,7 @@ export function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [truckId, setTruckId] = useState('TRK-001');
-  const [lguName, setLguName] = useState('');
+  const [truckId] = useState(generateTruckId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
 
@@ -35,8 +38,7 @@ export function AuthPage() {
           password,
           fullName: fullName.trim(),
           role,
-          truckId: truckId.trim(),
-          lguName: lguName.trim()
+          truckId: role === 'receiver' ? truckId.trim() : undefined
         });
 
         if (!data.session) {
@@ -64,7 +66,7 @@ export function AuthPage() {
             </div>
             <h1 className="text-3xl font-bold">DSWD FNFI Access</h1>
             <p className="text-blue-100 mt-3 leading-relaxed">
-              Temporary role-based login for admin dashboard, trucker GPS signing, and LGU receipt confirmation.
+              Temporary role-based signup for admin dashboard access and receiver mobile custody workflows.
             </p>
           </div>
 
@@ -96,18 +98,20 @@ export function AuthPage() {
             </button>
           </div>
 
-          <div>
-            <label className="text-sm font-bold text-gray-700">User Role</label>
-            <select
-              value={role}
-              onChange={(event) => setRole(event.target.value as UserRole)}
-              className="mt-2 w-full h-12 rounded-lg border border-gray-300 px-4 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-600"
-            >
-              {roleOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </div>
+          {mode === 'signup' && (
+            <div>
+              <label className="text-sm font-bold text-gray-700">User Role</label>
+              <select
+                value={role}
+                onChange={(event) => setRole(event.target.value as UserRole)}
+                className="mt-2 w-full h-12 rounded-lg border border-gray-300 px-4 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-600"
+              >
+                {roleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {mode === 'signup' && (
             <div>
@@ -155,33 +159,6 @@ export function AuthPage() {
               />
             </div>
           </div>
-
-          {mode === 'signup' && role === 'trucker' && (
-            <div>
-              <label className="text-sm font-bold text-gray-700">Truck ID</label>
-              <div className="mt-2 relative">
-                <Truck className="w-5 h-5 text-gray-400 absolute left-3 top-3.5" />
-                <input
-                  value={truckId}
-                  onChange={(event) => setTruckId(event.target.value)}
-                  className="w-full h-12 rounded-lg border border-gray-300 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  placeholder="TRK-001"
-                />
-              </div>
-            </div>
-          )}
-
-          {mode === 'signup' && role === 'lgu' && (
-            <div>
-              <label className="text-sm font-bold text-gray-700">LGU Name</label>
-              <input
-                value={lguName}
-                onChange={(event) => setLguName(event.target.value)}
-                className="mt-2 w-full h-12 rounded-lg border border-gray-300 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                placeholder="Leon Municipal Office"
-              />
-            </div>
-          )}
 
           {message && (
             <div className={`rounded-lg border p-3 text-sm font-semibold ${message.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>

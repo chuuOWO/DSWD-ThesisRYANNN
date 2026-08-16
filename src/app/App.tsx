@@ -33,11 +33,7 @@ export default function App() {
     return <AuthPage />;
   }
 
-  if (profile.role === 'trucker' || window.location.pathname === '/trucker') {
-    return <TruckerLocationPage profile={profile} onSignOut={signOut} />;
-  }
-
-  if (profile.role === 'lgu') {
+  if (profile.role === 'receiver' && ['/lgu', '/lgu-receipt'].includes(window.location.pathname)) {
     return (
       <LGUReceiptPage
         profile={profile}
@@ -46,6 +42,10 @@ export default function App() {
         onSignOut={signOut}
       />
     );
+  }
+
+  if (profile.role === 'receiver' || window.location.pathname === '/trucker') {
+    return <TruckerLocationPage profile={profile} onSignOut={signOut} />;
   }
 
   const renderView = () => {
