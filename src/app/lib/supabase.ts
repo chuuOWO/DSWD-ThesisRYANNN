@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim();
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
+const rawSupabaseUrl = import.meta.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+const supabaseAnonKey = import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
 
 const normalizeSupabaseUrl = (value?: string) => {
   if (!value) return null;
@@ -22,11 +22,7 @@ const normalizeSupabaseUrl = (value?: string) => {
 const supabaseUrl = normalizeSupabaseUrl(rawSupabaseUrl);
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // App can still run in mock mode while envs are being prepared.
-  console.warn('Supabase environment variables are missing or invalid. Falling back to mock mode.');
+  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env');
 }
 
-export const supabase = createClient(
-  supabaseUrl ?? 'https://placeholder.supabase.co',
-  supabaseAnonKey ?? 'placeholder-anon-key'
-);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);

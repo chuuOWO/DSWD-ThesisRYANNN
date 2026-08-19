@@ -169,6 +169,10 @@ update public.profiles
 set role = 'receiver'
 where role in ('trucker', 'lgu');
 
+update public.profiles
+set role = 'dswd_admin'
+where role = 'admin';
+
 alter table public.profiles
 add constraint profiles_role_check
 check (role in ('dswd_admin', 'receiver'));
@@ -201,11 +205,11 @@ begin
     coalesce(new.email, ''),
     coalesce(new.raw_user_meta_data->>'full_name', ''),
     case
-      when new.raw_user_meta_data->>'role' = 'dswd_admin' then 'dswd_admin'
+      when new.raw_user_meta_data->>'role' in ('admin', 'dswd_admin') then 'dswd_admin'
       else 'receiver'
     end,
     case
-      when new.raw_user_meta_data->>'role' = 'dswd_admin' then null
+      when new.raw_user_meta_data->>'role' in ('admin', 'dswd_admin') then null
       else new.raw_user_meta_data->>'truck_id'
     end,
     null

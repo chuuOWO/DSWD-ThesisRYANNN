@@ -26,7 +26,7 @@ const roleLabels: Record<UserRole, string> = {
 };
 
 const normalizeRole = (role: unknown): UserRole => (
-  role === 'dswd_admin' ? 'dswd_admin' : 'receiver'
+  role === 'admin' || role === 'dswd_admin' ? 'dswd_admin' : 'receiver'
 );
 
 const mapProfile = (row: Record<string, unknown>): UserProfile => ({
