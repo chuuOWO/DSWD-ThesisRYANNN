@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Calendar, Package, AlertCircle } from 'lucide-react';
 
-interface IncomingGoodsForm {
+export interface IncomingGoodsForm {
   dateReceived: string;
   fnfiCategory: string;
   quantity: number;
@@ -16,6 +16,8 @@ interface IncomingGoodsForm {
 interface AddIncomingGoodsModalProps {
   onClose: () => void;
   onSubmit: (data: IncomingGoodsForm) => void;
+  initialData?: IncomingGoodsForm;
+  mode?: 'add' | 'edit';
 }
 
 const FNFI_CATEGORIES = [
@@ -49,8 +51,7 @@ const MUNICIPALITIES: { [key: string]: string[] } = {
   'Negros Occidental': ['Bacolod City', 'Silay', 'Talisay', 'Victorias']
 };
 
-export function AddIncomingGoodsModal({ onClose, onSubmit }: AddIncomingGoodsModalProps) {
-  const [formData, setFormData] = useState<IncomingGoodsForm>({
+const defaultFormData: IncomingGoodsForm = {
     dateReceived: new Date().toISOString().split('T')[0],
     fnfiCategory: '',
     quantity: 0,
@@ -60,11 +61,24 @@ export function AddIncomingGoodsModal({ onClose, onSubmit }: AddIncomingGoodsMod
     destinationType: 'Warehouse',
     destination: 'Oton Main Warehouse',
     incidentCode: ''
-  });
+};
+
+export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = 'add' }: AddIncomingGoodsModalProps) {
+  const [formData, setFormData] = useState<IncomingGoodsForm>(initialData ?? defaultFormData);
 
   const [selectedProvince, setSelectedProvince] = useState('Iloilo');
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
   const [errors, setErrors] = useState<Partial<Record<keyof IncomingGoodsForm, string>>>({});
+
+  useEffect(() => {
+    if (!initialData) return;
+    setFormData(initialData);
+    if (initialData.destinationType === 'LGU') {
+      setSelectedMunicipality(initialData.destination);
+    } else {
+      setSelectedMunicipality('');
+    }
+  }, [initialData]);
 
   const handleChange = (field: keyof IncomingGoodsForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -129,8 +143,8 @@ export function AddIncomingGoodsModal({ onClose, onSubmit }: AddIncomingGoodsMod
               <Package className="w-6 h-6 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Add Incoming Goods</h2>
-              <p className="text-sm text-gray-600">Add new FNFI items to warehouse inventory</p>
+              <h2 className="text-xl font-bold text-gray-900">{mode === 'edit' ? 'Edit Incoming Delivery' : 'Add Incoming Goods'}</h2>
+              <p className="text-sm text-gray-600">{mode === 'edit' ? 'Update incoming FNFI delivery details' : 'Add new FNFI items to warehouse inventory'}</p>
             </div>
           </div>
           <button
@@ -425,7 +439,7 @@ export function AddIncomingGoodsModal({ onClose, onSubmit }: AddIncomingGoodsMod
               type="submit"
               className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
-              Add to Inventory
+              {mode === 'edit' ? 'Save Changes' : 'Add to Inventory'}
             </button>
           </div>
         </form>

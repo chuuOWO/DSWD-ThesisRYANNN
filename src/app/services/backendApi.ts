@@ -46,6 +46,29 @@ export interface OutgoingPayload {
   walletAddress?: string;
 }
 
+export interface LGUInventoryReportPayload {
+  municipality: string;
+  province: string;
+  lguName: string;
+  foodPacks: number;
+  hygieneKits: number;
+  familyKits: number;
+  affectedFamilies: number;
+  damageIndex: number;
+  urgencyScore: number;
+  priorityColor: 'Red' | 'Yellow' | 'Green';
+  recommendation: string;
+}
+
+export interface DiscrepancyReportPayload {
+  reportType: 'Incoming' | 'Outgoing';
+  manifestNumber?: string;
+  drNumber?: string;
+  note: string;
+  reportedByRole?: string;
+  reportedByWallet?: string;
+}
+
 export interface OutgoingUpdatePayload {
   amountApproved?: number;
   deliveryStatus?: string;
@@ -89,22 +112,6 @@ export interface TruckerReleaseRecord {
   handover_contract_id?: string | null;
 }
 
-export interface LGUPriorityReportRow {
-  id: string;
-  lgu_name: string;
-  municipality: string;
-  province: string;
-  reported_at?: string | null;
-  food_packs?: number | null;
-  hygiene_kits?: number | null;
-  family_kits?: number | null;
-  affected_families?: number | null;
-  damage_index?: number | null;
-  urgency_score?: number | null;
-  priority_color?: string | null;
-  recommendation?: string | null;
-}
-
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -117,20 +124,29 @@ const definedOnly = <T extends Record<string, unknown>>(values: T) =>
 
 export const backendApi = {
   async getDashboard() {
-    const [incomingResult, outgoingResult, lguPriorityResult] = await Promise.all([
+    const [incomingResult, outgoingResult, lguReportsResult, discrepancyResult] = await Promise.all([
       supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
       supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }),
-      supabase.from('lgu_priority_reports').select('*').order('urgency_score', { ascending: false })
+      supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }),
+      supabase.from('discrepancy_reports').select('*').order('reported_at', { ascending: false })
     ]);
 
     throwIfError(incomingResult.error, 'Failed to fetch incoming manifests');
     throwIfError(outgoingResult.error, 'Failed to fetch outgoing requests');
-    throwIfError(lguPriorityResult.error, 'Failed to fetch LGU priority reports');
+
+    if (lguReportsResult.error) {
+      console.warn('LGU inventory reports are not available yet. Run supabase-schema-patch.sql to create lgu_inventory_reports.', lguReportsResult.error);
+    }
+
+    if (discrepancyResult.error) {
+      console.warn('Discrepancy reports are not available yet. Run supabase-schema-patch.sql to create discrepancy_reports.', discrepancyResult.error);
+    }
 
     return {
       incoming: incomingResult.data ?? [],
       outgoing: outgoingResult.data ?? [],
-      lguPriorityReports: (lguPriorityResult.data ?? []) as LGUPriorityReportRow[]
+      lguReports: lguReportsResult.error ? [] : lguReportsResult.data ?? [],
+      discrepancyReports: discrepancyResult.error ? [] : discrepancyResult.data ?? []
     };
   },
 
@@ -231,6 +247,82 @@ export const backendApi = {
     return { ok: true };
   },
 
+
+  async createLGUInventoryReport(payload: LGUInventoryReportPayload) {
+    const { data, error } = await supabase
+      .from('lgu_inventory_reports')
+      .insert({
+        municipality: payload.municipality,
+        province: payload.province,
+        lgu_name: payload.lguName,
+        reported_at: new Date().toISOString(),
+        food_packs: payload.foodPacks,
+        hygiene_kits: payload.hygieneKits,
+        family_kits: payload.familyKits,
+        affected_families: payload.affectedFamilies,
+        damage_index: payload.damageIndex,
+        urgency_score: payload.urgencyScore,
+        priority_color: payload.priorityColor,
+        recommendation: payload.recommendation
+      })
+      .select('id')
+      .single();
+
+    throwIfError(error, 'Failed to create LGU inventory report');
+    return data;
+  },
+
+  async createDiscrepancyReport(payload: DiscrepancyReportPayload) {
+    const { data, error } = await supabase
+      .from('discrepancy_reports')
+      .insert({
+        report_type: payload.reportType,
+        manifest_number: payload.manifestNumber,
+        dr_number: payload.drNumber,
+        note: payload.note,
+        reported_by_role: payload.reportedByRole,
+        reported_by_wallet: payload.reportedByWallet
+      })
+      .select('id')
+      .single();
+
+    throwIfError(error, 'Failed to create discrepancy report');
+    return data;
+  },
+
+  async getNextBatchIndex() {
+    const { data, error } = await supabase
+      .from('app_counters')
+      .select('value')
+      .eq('key', 'batch_index')
+      .maybeSingle();
+
+    if (error) {
+      throwIfError(error, 'Failed to fetch batch counter');
+    }
+
+    if (!data) {
+      const { error: insertError } = await supabase
+        .from('app_counters')
+        .insert({ key: 'batch_index', value: 0 })
+        .select('key')
+        .single();
+
+      throwIfError(insertError, 'Failed to initialize batch counter');
+    }
+
+    const currentValue = (data as { value?: number } | null)?.value ?? 0;
+    const nextValue = currentValue + 1;
+
+    const { error: updateError } = await supabase
+      .from('app_counters')
+      .update({ value: nextValue, updated_at: new Date().toISOString() })
+      .eq('key', 'batch_index');
+
+    throwIfError(updateError, 'Failed to update batch counter');
+    return nextValue;
+  },
+
   async markHandoverAccepted(drNumber: string, receiverGps: string, txHash?: string) {
     const { error } = await supabase
       .from('outgoing_requests')
@@ -246,7 +338,7 @@ export const backendApi = {
       .from('outgoing_requests')
       .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id')
       .ilike('delivery_mode', 'truck')
-      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
+      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit'])
       .order('created_at', { ascending: false });
 
     if (drNumber) {
@@ -258,22 +350,65 @@ export const backendApi = {
     return (data ?? []) as TruckerReleaseRecord[];
   },
 
-  async getTruckLiveLocations() {
-    const { data, error } = await supabase
-      .from('truck_live_locations')
-      .select('*')
-      .order('updated_at', { ascending: false });
+  async getTruckLiveLocations(): Promise<TruckLiveLocation[]> {
+    try {
+      const { data, error } = await supabase
+        .from('truck_live_locations')
+        .select('*')
+        .order('updated_at', { ascending: false });
 
-    throwIfError(error, 'Failed to fetch truck live locations');
-    return (data ?? []) as TruckLiveLocation[];
+      if (error) return [];
+      return (data ?? []) as TruckLiveLocation[];
+    } catch {
+      return [];
+    }
   },
 
   async upsertTruckLiveLocation(payload: TruckLiveLocation) {
-    const { error } = await supabase
-      .from('truck_live_locations')
-      .upsert(payload, { onConflict: 'truck_id' });
+    try {
+      await supabase
+        .from('truck_live_locations')
+        .upsert(payload, { onConflict: 'truck_id' });
+    } catch {
+      // Ignored when truck_live_locations table is not present
+    }
+    return { ok: true };
+  },
 
-    throwIfError(error, 'Failed to save truck live location');
+  async markTruckLiveLocationDone(truckId: string, drNumber?: string) {
+    try {
+      await supabase
+        .from('truck_live_locations')
+        .update({
+          proof_mode: 'delivered',
+          updated_at: new Date().toISOString()
+        })
+        .eq('truck_id', truckId);
+
+      if (drNumber) {
+        await supabase
+          .from('outgoing_requests')
+          .update({ delivery_status: 'Delivered' })
+          .eq('dr_number', drNumber);
+      }
+    } catch (error) {
+      console.warn('Failed to mark delivery done:', error);
+    }
+    return { ok: true };
+  },
+
+  async markTruckLiveLocationDoneByDr(drNumber: string) {
+    try {
+      await supabase
+        .from('truck_live_locations')
+        .update({
+          proof_mode: 'delivered',
+          updated_at: new Date().toISOString()
+        })
+        .eq('dr_number', drNumber);
+    } catch (error) {
+      console.warn('Failed to mark delivery done by DR:', error);
+    }
     return { ok: true };
   },
 
@@ -282,7 +417,9 @@ export const backendApi = {
       .channel('dashboard-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incoming_manifests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_requests' }, onChange)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lgu_priority_reports' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lgu_inventory_reports' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'discrepancy_reports' }, onChange)
       .subscribe();
 
     return () => {
@@ -290,17 +427,27 @@ export const backendApi = {
     };
   },
 
-  subscribeTruckLiveLocations(onChange: (location: TruckLiveLocation) => void) {
+  subscribeTruckLiveLocations(
+    onUpsert: (location: TruckLiveLocation) => void,
+    onDelete?: (truckId: string) => void
+  ) {
+    backendApi.getTruckLiveLocations()
+      .then((locations) => locations.forEach(onUpsert))
+      .catch(() => {});
+
     const channel = supabase
-      .channel('truck-live-location-changes')
+      .channel('truck-live-locations-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, (payload) => {
-        if (payload.new) onChange(payload.new as TruckLiveLocation);
+        if (payload.eventType === 'DELETE') {
+          const deletedId = (payload.old as { truck_id?: string })?.truck_id;
+          if (deletedId && onDelete) {
+            onDelete(deletedId);
+          }
+        } else if (payload.new && typeof payload.new === 'object') {
+          onUpsert(payload.new as TruckLiveLocation);
+        }
       })
       .subscribe();
-
-    backendApi.getTruckLiveLocations()
-      .then((locations) => locations.forEach(onChange))
-      .catch((error) => console.error('Failed to load truck live locations', error));
 
     return () => {
       supabase.removeChannel(channel);

@@ -43,14 +43,33 @@ export const authApi = {
   roleLabels,
 
   async getProfile(userId: string): Promise<UserProfile | null> {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (error) throw new Error(`Failed to load user profile: ${error.message}`);
-    return data ? mapProfile(data) : null;
+      if (data) return mapProfile(data);
+    } catch {
+      // Ignore if profiles table is not used
+    }
+
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData?.user;
+    if (user && user.id === userId) {
+      return {
+        id: user.id,
+        email: user.email ?? '',
+        fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'DSWD Officer',
+        role: normalizeRole(user.user_metadata?.role),
+        truckId: user.user_metadata?.truck_id || null,
+        lguName: null,
+        createdAt: user.created_at
+      };
+    }
+
+    return null;
   },
 
   async signIn(email: string, password: string) {
@@ -68,6 +87,7 @@ export const authApi = {
           full_name: payload.fullName,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
+          wallet_address: payload.walletAddress || null,
           lgu_name: null
         }
       }
@@ -76,16 +96,19 @@ export const authApi = {
     if (error) throw new Error(error.message);
 
     if (data.user && data.session) {
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: payload.email,
-        full_name: payload.fullName,
-        role: payload.role,
-        truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
-        lgu_name: null
-      });
-
-      if (profileError) throw new Error(`Account created, but profile save failed: ${profileError.message}`);
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          email: payload.email,
+          full_name: payload.fullName,
+          role: payload.role,
+          truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
+          wallet_address: payload.walletAddress || null,
+          lgu_name: null
+        });
+      } catch (profileError) {
+        console.warn('Profile upsert warning:', profileError);
+      }
     }
 
     return data;

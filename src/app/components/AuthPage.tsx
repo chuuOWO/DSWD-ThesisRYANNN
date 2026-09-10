@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const roleOptions: Array<{ value: UserRole; label: string; helper: string }> = [
   { value: 'dswd_admin', label: 'DSWD Admin', helper: 'Dashboard, inventory, releases, and tracking map.' },
-  { value: 'receiver', label: 'Receiver', helper: 'Mobile GPS sharing, MetaMask pickup signing, and LGU receipt confirmation.' }
+  { value: 'receiver', label: 'Receiver', helper: 'Mobile GPS sharing, package scanning, and LGU receipt confirmation.' }
 ];
 
 const generateTruckId = () => {
@@ -128,6 +128,8 @@ export function AuthPage() {
               </div>
             </div>
           )}
+
+
 
           <div>
             <label className="text-sm font-bold text-gray-700">Email</label>

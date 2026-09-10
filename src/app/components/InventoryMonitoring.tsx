@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Package, TrendingDown, AlertTriangle, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface InventoryState {
   inventory: { category: string; warehouseA: number; warehouseB: number }[];
+  incomingGoodsList: { fnfiCategory: string; expirationDate: string; quantity: number; status: string }[];
+  outgoingReleasesList: { fnfiCategory: string; amountApproved: number; amountRequested: number; deliveryStatus: string }[];
+  lguPriorityReports: { lguName: string; foodPacks: number; hygieneKits: number; familyKits: number }[];
   addStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => void;
   deductStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => boolean;
   getAvailableStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse') => number;
@@ -34,145 +37,49 @@ const FNFI_CATEGORIES = [
 ];
 
 export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps) {
-  const { inventory } = inventoryState;
+  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList } = inventoryState;
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
 
-  // LGU Warehouse mock data
-  const lguWarehouseData = [
-    {
-      warehouse: 'Leon Municipal Office',
-      'Hygiene Kit': 250,
-      'Food Pack': 350,
-      'Sleeping Kit': 100,
-      'Kitchen Kit': 75,
-      'Family Kit': 150,
-      'Laminated Sack': 200,
-      'RTEF': 50
-    },
-    {
-      warehouse: 'Miag-ao Municipal Office',
-      'Hygiene Kit': 180,
-      'Food Pack': 220,
-      'Sleeping Kit': 80,
-      'Kitchen Kit': 60,
-      'Family Kit': 120,
-      'Laminated Sack': 150,
-      'RTEF': 40
-    },
-    {
-      warehouse: 'Banate Municipal Office',
-      'Hygiene Kit': 120,
-      'Food Pack': 180,
-      'Sleeping Kit': 50,
-      'Kitchen Kit': 40,
-      'Family Kit': 90,
-      'Laminated Sack': 100,
-      'RTEF': 25
-    },
-    {
-      warehouse: 'Guinhol Municipal Office',
-      'Hygiene Kit': 90,
-      'Food Pack': 130,
-      'Sleeping Kit': 40,
-      'Kitchen Kit': 30,
-      'Family Kit': 70,
-      'Laminated Sack': 80,
-      'RTEF': 20
-    },
-    {
-      warehouse: 'Iloilo City Government',
-      'Hygiene Kit': 500,
-      'Food Pack': 700,
-      'Sleeping Kit': 250,
-      'Kitchen Kit': 180,
-      'Family Kit': 350,
-      'Laminated Sack': 400,
-      'RTEF': 120
-    }
-  ];
+  const lguWarehouseData = useMemo(() => lguPriorityReports.map(report => ({
+    warehouse: report.lguName,
+    'Hygiene Kit': report.hygieneKits,
+    'Food Pack': report.foodPacks,
+    'Sleeping Kit': 0,
+    'Kitchen Kit': 0,
+    'Family Kit': report.familyKits,
+    'Laminated Sack': 0,
+    'RTEF': 0
+  })), [lguPriorityReports]);
 
-  // Transform inventory data to include released and available
-  const inventoryData: InventoryItem[] = inventory.map(item => ({
-    category: item.category,
-    warehouseA: item.warehouseA,
-    warehouseB: item.warehouseB,
-    totalStock: item.warehouseA + item.warehouseB,
-    released: 0, // Will be calculated from outgoing releases
-    available: item.warehouseA + item.warehouseB,
-    expiringItems: 0 // Will be calculated from incoming goods with near expiration
-  }));
 
-  // Mock data for demo - replace with actual data later
-  const mockInventoryData: InventoryItem[] = [
-    {
-      category: 'Food Pack',
-      warehouseA: 1500,
-      warehouseB: 1200,
-      totalStock: 2700,
-      released: 800,
-      available: 1900,
-      expiringItems: 150
-    },
-    {
-      category: 'Hygiene Kit',
-      warehouseA: 800,
-      warehouseB: 500,
-      totalStock: 1300,
-      released: 300,
-      available: 1000,
-      expiringItems: 50
-    },
-    {
-      category: 'Sleeping Kit',
-      warehouseA: 400,
-      warehouseB: 300,
-      totalStock: 700,
-      released: 200,
-      available: 500,
-      expiringItems: 0
-    },
-    {
-      category: 'Kitchen Kit',
-      warehouseA: 300,
-      warehouseB: 200,
-      totalStock: 500,
-      released: 150,
-      available: 350,
-      expiringItems: 0
-    },
-    {
-      category: 'Family Kit',
-      warehouseA: 600,
-      warehouseB: 400,
-      totalStock: 1000,
-      released: 300,
-      available: 700,
-      expiringItems: 30
-    },
-    {
-      category: 'Laminated Sack',
-      warehouseA: 2000,
-      warehouseB: 1500,
-      totalStock: 3500,
-      released: 500,
-      available: 3000,
-      expiringItems: 0
-    },
-    {
-      category: 'RTEF',
-      warehouseA: 250,
-      warehouseB: 150,
-      totalStock: 400,
-      released: 100,
-      available: 300,
-      expiringItems: 20
-    }
-  ];
+  const releaseStatuses = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'];
+  const today = new Date();
+  const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  // Use mock data for now (TODO: replace with real calculated data)
-  const displayData = mockInventoryData;
+  const displayData: InventoryItem[] = inventory.map(item => {
+    const released = outgoingReleasesList
+      .filter(release => release.fnfiCategory === item.category && releaseStatuses.includes(release.deliveryStatus))
+      .reduce((sum, release) => sum + (release.amountApproved || release.amountRequested), 0);
+    const expiringItems = incomingGoodsList
+      .filter(incoming => incoming.fnfiCategory === item.category && incoming.status === 'Minted')
+      .filter(incoming => {
+        const expirationDate = new Date(incoming.expirationDate);
+        return expirationDate <= thirtyDaysFromNow && expirationDate >= today;
+      })
+      .reduce((sum, incoming) => sum + incoming.quantity, 0);
+
+    return {
+      category: item.category,
+      warehouseA: item.warehouseA,
+      warehouseB: item.warehouseB,
+      totalStock: item.warehouseA + item.warehouseB,
+      released,
+      available: item.warehouseA + item.warehouseB,
+      expiringItems
+    };
+  });
 
   // Calculate LGU totals per category
   const lguTotals = FNFI_CATEGORIES.reduce((acc, category) => {
@@ -220,7 +127,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Inventory Monitoring</h1>
-        <p className="text-sm text-gray-600 mt-1">Warehouse Stock Management & Tracking</p>
+        <p className="text-sm text-gray-600 mt-1">Supabase-backed inventory from minted incoming batches, approved outgoing releases, and LGU stock reports</p>
       </div>
 
       {/* Summary Cards */}
@@ -301,7 +208,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                   <h3 className="font-bold text-red-900 text-sm">Expiration Warning</h3>
                   <p className="text-sm text-red-800 mt-1">{totalExpiring} items expiring within 30 days</p>
                   <div className="mt-3 space-y-2">
-                    {inventoryData
+                    {displayData
                       .filter(item => item.expiringItems > 0)
                       .map(item => (
                         <div key={item.category} className="bg-white rounded p-2 border border-red-200">
@@ -417,7 +324,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                 const displayTotal = selectedWarehouseType === 'Main' ? item.totalStock :
                                     selectedWarehouseType === 'LGU' ? item.lguTotal :
                                     item.grandTotal;
-                const stockPercentage = Math.round((item.available / displayTotal) * 100);
+                const stockPercentage = displayTotal > 0 ? Math.round((item.available / displayTotal) * 100) : 0;
                 const isLowStock = item.available < 500;
 
                 return (

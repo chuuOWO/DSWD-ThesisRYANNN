@@ -39,37 +39,6 @@ create table if not exists public.outgoing_requests (
   created_at timestamptz not null default now()
 );
 
-create table if not exists public.lgu_priority_reports (
-  id uuid primary key default gen_random_uuid(),
-  lgu_name text not null,
-  municipality text not null,
-  province text not null,
-  reported_at timestamptz not null default now(),
-  food_packs integer not null default 0,
-  hygiene_kits integer not null default 0,
-  family_kits integer not null default 0,
-  affected_families integer not null default 0,
-  damage_index integer not null default 0,
-  urgency_score integer not null default 0,
-  priority_color text not null default 'Green' check (priority_color in ('Red', 'Yellow', 'Green')),
-  recommendation text not null default ''
-);
-
-create table if not exists public.lgu_delivery_summaries (
-  id uuid primary key default gen_random_uuid(),
-  lgu_name text not null,
-  municipality text not null,
-  province text not null,
-  total_items_released integer not null default 0,
-  delivery_count integer not null default 0,
-  completed_deliveries integer not null default 0,
-  pending_deliveries integer not null default 0,
-  last_delivery_date text,
-  current_stock jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
 alter table public.incoming_manifests
 add column if not exists manifest_number text;
 
@@ -133,30 +102,193 @@ exception
   when duplicate_object then null;
 end $$;
 
-do $$
-begin
-  alter publication supabase_realtime add table public.lgu_priority_reports;
-exception
-  when duplicate_object then null;
-end $$;
-
-do $$
-begin
-  alter publication supabase_realtime add table public.lgu_delivery_summaries;
-exception
-  when duplicate_object then null;
-end $$;
-
 alter table public.incoming_manifests enable row level security;
 alter table public.outgoing_requests enable row level security;
-alter table public.lgu_priority_reports enable row level security;
-alter table public.lgu_delivery_summaries enable row level security;
 
+drop policy if exists "Allow anon read incoming" on public.incoming_manifests;
+drop policy if exists "Allow read incoming" on public.incoming_manifests;
+create policy "Allow read incoming"
+on public.incoming_manifests for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow anon insert incoming" on public.incoming_manifests;
+drop policy if exists "Allow insert incoming" on public.incoming_manifests;
+create policy "Allow insert incoming"
+on public.incoming_manifests for insert
+to authenticated, anon
+with check (true);
+
+drop policy if exists "Allow anon update incoming" on public.incoming_manifests;
+drop policy if exists "Allow update incoming" on public.incoming_manifests;
+create policy "Allow update incoming"
+on public.incoming_manifests for update
+to authenticated, anon
+using (true)
+with check (true);
+
+drop policy if exists "Allow anon read outgoing" on public.outgoing_requests;
+drop policy if exists "Allow read outgoing" on public.outgoing_requests;
+create policy "Allow read outgoing"
+on public.outgoing_requests for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow anon insert outgoing" on public.outgoing_requests;
+drop policy if exists "Allow insert outgoing" on public.outgoing_requests;
+create policy "Allow insert outgoing"
+on public.outgoing_requests for insert
+to authenticated, anon
+with check (true);
+
+drop policy if exists "Allow anon update outgoing" on public.outgoing_requests;
+drop policy if exists "Allow update outgoing" on public.outgoing_requests;
+create policy "Allow update outgoing"
+on public.outgoing_requests for update
+to authenticated, anon
+using (true)
+with check (true);
+
+-- LGU stock and damage reports drive the Stock-Based Prioritization module.
+create table if not exists public.lgu_inventory_reports (
+  id uuid primary key default gen_random_uuid(),
+  municipality text not null,
+  province text not null default 'Iloilo',
+  lgu_name text not null,
+  reported_at timestamptz not null default now(),
+  food_packs integer not null default 0,
+  hygiene_kits integer not null default 0,
+  family_kits integer not null default 0,
+  affected_families integer not null default 0,
+  damage_index integer not null default 0 check (damage_index between 0 and 100),
+  urgency_score integer not null default 0 check (urgency_score between 0 and 100),
+  priority_color text not null default 'Green' check (priority_color in ('Red', 'Yellow', 'Green')),
+  recommendation text not null default 'Sufficient stock; continue monitoring.',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists lgu_inventory_reports_priority_idx
+on public.lgu_inventory_reports (priority_color, urgency_score desc, reported_at desc);
+
+create index if not exists lgu_inventory_reports_municipality_idx
+on public.lgu_inventory_reports (municipality, reported_at desc);
+
+do $$
+begin
+  alter publication supabase_realtime add table public.lgu_inventory_reports;
+exception
+  when duplicate_object then null;
+end $$;
+
+alter table public.lgu_inventory_reports enable row level security;
+
+drop policy if exists "Allow anon read LGU inventory reports" on public.lgu_inventory_reports;
+drop policy if exists "Allow read LGU inventory reports" on public.lgu_inventory_reports;
+create policy "Allow read LGU inventory reports"
+on public.lgu_inventory_reports for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow anon insert LGU inventory reports" on public.lgu_inventory_reports;
+drop policy if exists "Allow insert LGU inventory reports" on public.lgu_inventory_reports;
+create policy "Allow insert LGU inventory reports"
+on public.lgu_inventory_reports for insert
+to authenticated, anon
+with check (true);
+
+-- Discrepancy reports capture inbound/outbound quantity mismatches.
+create table if not exists public.discrepancy_reports (
+  id uuid primary key default gen_random_uuid(),
+  report_type text not null check (report_type in ('Incoming', 'Outgoing')),
+  manifest_number text,
+  dr_number text,
+  note text not null,
+  reported_by_role text,
+  reported_by_wallet text,
+  reported_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists discrepancy_reports_type_idx
+on public.discrepancy_reports (report_type, reported_at desc);
+
+create index if not exists discrepancy_reports_manifest_idx
+on public.discrepancy_reports (manifest_number, reported_at desc);
+
+create index if not exists discrepancy_reports_dr_idx
+on public.discrepancy_reports (dr_number, reported_at desc);
+
+do $$
+begin
+  alter publication supabase_realtime add table public.discrepancy_reports;
+exception
+  when duplicate_object then null;
+end $$;
+
+alter table public.discrepancy_reports enable row level security;
+
+drop policy if exists "Allow anon read discrepancy reports" on public.discrepancy_reports;
+drop policy if exists "Allow read discrepancy reports" on public.discrepancy_reports;
+create policy "Allow read discrepancy reports"
+on public.discrepancy_reports for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow anon insert discrepancy reports" on public.discrepancy_reports;
+drop policy if exists "Allow insert discrepancy reports" on public.discrepancy_reports;
+create policy "Allow insert discrepancy reports"
+on public.discrepancy_reports for insert
+to authenticated, anon
+with check (true);
+
+-- App counters keep unique IDs across deletes.
+create table if not exists public.app_counters (
+  key text primary key,
+  value integer not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.app_counters (key, value)
+values ('batch_index', 0)
+on conflict (key) do nothing;
+
+update public.app_counters
+set value = greatest(value, (
+  select coalesce(max((regexp_match(batch_token_id, 'BATCH-\\d{4}-(\\d+)'))[1]::int), 0)
+  from public.incoming_manifests
+))
+where key = 'batch_index';
+
+alter table public.app_counters enable row level security;
+
+drop policy if exists "Allow anon read app counters" on public.app_counters;
+drop policy if exists "Allow read app counters" on public.app_counters;
+create policy "Allow read app counters"
+on public.app_counters for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow anon insert app counters" on public.app_counters;
+drop policy if exists "Allow insert app counters" on public.app_counters;
+create policy "Allow insert app counters"
+on public.app_counters for insert
+to authenticated, anon
+with check (true);
+
+drop policy if exists "Allow anon update app counters" on public.app_counters;
+drop policy if exists "Allow update app counters" on public.app_counters;
+create policy "Allow update app counters"
+on public.app_counters for update
+to authenticated, anon
+using (true)
+with check (true);
+
+-- Supabase Auth profiles drive the temporary RBAC login/signup flow.
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
   full_name text not null default '',
-  role text not null check (role in ('dswd_admin', 'receiver')),
+  role text not null default 'receiver',
   truck_id text,
   lgu_name text,
   created_at timestamptz not null default now()
@@ -169,29 +301,9 @@ update public.profiles
 set role = 'receiver'
 where role in ('trucker', 'lgu');
 
-update public.profiles
-set role = 'dswd_admin'
-where role = 'admin';
-
 alter table public.profiles
 add constraint profiles_role_check
 check (role in ('dswd_admin', 'receiver'));
-
-create table if not exists public.truck_live_locations (
-  truck_id text primary key,
-  dr_number text,
-  latitude double precision not null,
-  longitude double precision not null,
-  gps_text text not null,
-  accuracy double precision,
-  tx_hash text,
-  wallet_address text,
-  proof_mode text,
-  updated_at timestamptz not null default now()
-);
-
-alter table public.profiles enable row level security;
-alter table public.truck_live_locations enable row level security;
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -205,13 +317,10 @@ begin
     coalesce(new.email, ''),
     coalesce(new.raw_user_meta_data->>'full_name', ''),
     case
-      when new.raw_user_meta_data->>'role' in ('admin', 'dswd_admin') then 'dswd_admin'
+      when new.raw_user_meta_data->>'role' = 'dswd_admin' then 'dswd_admin'
       else 'receiver'
     end,
-    case
-      when new.raw_user_meta_data->>'role' in ('admin', 'dswd_admin') then null
-      else new.raw_user_meta_data->>'truck_id'
-    end,
+    new.raw_user_meta_data->>'truck_id',
     null
   )
   on conflict (id) do update set
@@ -239,87 +348,19 @@ as $$
   select role from public.profiles where id = auth.uid()
 $$;
 
-drop policy if exists "Allow anon read incoming" on public.incoming_manifests;
-create policy "Allow anon read incoming"
-on public.incoming_manifests for select
-to authenticated
-using (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow anon insert incoming" on public.incoming_manifests;
-create policy "Allow anon insert incoming"
-on public.incoming_manifests for insert
-to authenticated
-with check (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow anon update incoming" on public.incoming_manifests;
-create policy "Allow anon update incoming"
-on public.incoming_manifests for update
-to authenticated
-using (public.current_user_role() = 'dswd_admin')
-with check (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow anon read outgoing" on public.outgoing_requests;
-create policy "Allow anon read outgoing"
-on public.outgoing_requests for select
-to authenticated
-using (true);
-
-drop policy if exists "Allow anon insert outgoing" on public.outgoing_requests;
-create policy "Allow anon insert outgoing"
-on public.outgoing_requests for insert
-to authenticated
-with check (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow anon update outgoing" on public.outgoing_requests;
-create policy "Allow anon update outgoing"
-on public.outgoing_requests for update
-to authenticated
-using (public.current_user_role() in ('dswd_admin', 'receiver'))
-with check (public.current_user_role() in ('dswd_admin', 'receiver'));
-
-drop policy if exists "Allow authenticated read lgu priority reports" on public.lgu_priority_reports;
-create policy "Allow authenticated read lgu priority reports"
-on public.lgu_priority_reports for select
-to authenticated
-using (true);
-
-drop policy if exists "Allow admin insert lgu priority reports" on public.lgu_priority_reports;
-create policy "Allow admin insert lgu priority reports"
-on public.lgu_priority_reports for insert
-to authenticated
-with check (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow admin update lgu priority reports" on public.lgu_priority_reports;
-create policy "Allow admin update lgu priority reports"
-on public.lgu_priority_reports for update
-to authenticated
-using (public.current_user_role() = 'dswd_admin')
-with check (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow authenticated read lgu delivery summaries" on public.lgu_delivery_summaries;
-create policy "Allow authenticated read lgu delivery summaries"
-on public.lgu_delivery_summaries for select
-to authenticated
-using (true);
-
-drop policy if exists "Allow admin insert lgu delivery summaries" on public.lgu_delivery_summaries;
-create policy "Allow admin insert lgu delivery summaries"
-on public.lgu_delivery_summaries for insert
-to authenticated
-with check (public.current_user_role() = 'dswd_admin');
-
-drop policy if exists "Allow admin update lgu delivery summaries" on public.lgu_delivery_summaries;
-create policy "Allow admin update lgu delivery summaries"
-on public.lgu_delivery_summaries for update
-to authenticated
-using (public.current_user_role() = 'dswd_admin')
-with check (public.current_user_role() = 'dswd_admin');
+alter table public.profiles enable row level security;
 
 drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
 on public.profiles for select
 to authenticated
 using (auth.uid() = id);
+
+drop policy if exists "Users can insert own profile" on public.profiles;
+create policy "Users can insert own profile"
+on public.profiles for insert
+to authenticated
+with check (auth.uid() = id);
 
 drop policy if exists "Users can update own profile" on public.profiles;
 create policy "Users can update own profile"
@@ -328,11 +369,28 @@ to authenticated
 using (auth.uid() = id)
 with check (auth.uid() = id);
 
-drop policy if exists "Users can insert own profile" on public.profiles;
-create policy "Users can insert own profile"
-on public.profiles for insert
-to authenticated
-with check (auth.uid() = id);
+-- Receiver GPS rows power the administrative Trucking map in real time.
+create table if not exists public.truck_live_locations (
+  truck_id text primary key,
+  dr_number text,
+  latitude double precision not null,
+  longitude double precision not null,
+  gps_text text not null,
+  accuracy double precision,
+  tx_hash text,
+  wallet_address text,
+  proof_mode text,
+  updated_at timestamptz not null default now()
+);
+
+do $$
+begin
+  alter publication supabase_realtime add table public.truck_live_locations;
+exception
+  when duplicate_object then null;
+end $$;
+
+alter table public.truck_live_locations enable row level security;
 
 drop policy if exists "Allow authenticated read truck live locations" on public.truck_live_locations;
 create policy "Allow authenticated read truck live locations"
@@ -353,9 +411,63 @@ to authenticated
 using (public.current_user_role() in ('dswd_admin', 'receiver'))
 with check (public.current_user_role() in ('dswd_admin', 'receiver'));
 
-do $$
-begin
-  alter publication supabase_realtime add table public.truck_live_locations;
-exception
-  when duplicate_object then null;
-end $$;
+-- Backfill existing auth.users into profiles so current and past accounts exist
+insert into public.profiles (id, email, full_name, role)
+select 
+  id, 
+  coalesce(email, ''), 
+  coalesce(raw_user_meta_data->>'full_name', 'DSWD Officer'), 
+  case 
+    when raw_user_meta_data->>'role' = 'receiver' then 'receiver'
+    else 'dswd_admin'
+  end
+from auth.users
+on conflict (id) do update set
+  role = excluded.role,
+  full_name = excluded.full_name;
+
+-- Ensure incoming and outgoing are accessible to authenticated and anon users
+drop policy if exists "Allow authenticated read incoming" on public.incoming_manifests;
+drop policy if exists "Allow authenticated insert incoming" on public.incoming_manifests;
+drop policy if exists "Allow authenticated update incoming" on public.incoming_manifests;
+drop policy if exists "Allow authenticated read outgoing" on public.outgoing_requests;
+drop policy if exists "Allow authenticated insert outgoing" on public.outgoing_requests;
+drop policy if exists "Allow authenticated update outgoing" on public.outgoing_requests;
+
+drop policy if exists "Allow read incoming" on public.incoming_manifests;
+create policy "Allow read incoming"
+on public.incoming_manifests for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow insert incoming" on public.incoming_manifests;
+create policy "Allow insert incoming"
+on public.incoming_manifests for insert
+to authenticated, anon
+with check (true);
+
+drop policy if exists "Allow update incoming" on public.incoming_manifests;
+create policy "Allow update incoming"
+on public.incoming_manifests for update
+to authenticated, anon
+using (true)
+with check (true);
+
+drop policy if exists "Allow read outgoing" on public.outgoing_requests;
+create policy "Allow read outgoing"
+on public.outgoing_requests for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow insert outgoing" on public.outgoing_requests;
+create policy "Allow insert outgoing"
+on public.outgoing_requests for insert
+to authenticated, anon
+with check (true);
+
+drop policy if exists "Allow update outgoing" on public.outgoing_requests;
+create policy "Allow update outgoing"
+on public.outgoing_requests for update
+to authenticated, anon
+using (true)
+with check (true);

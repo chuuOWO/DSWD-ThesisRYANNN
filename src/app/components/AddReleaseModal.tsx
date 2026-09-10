@@ -1,9 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package } from 'lucide-react';
+import type { OutgoingStatus } from '../hooks/useInventoryState';
 
-type DeliveryStatus = 'Allocating' | 'Release' | 'In Transit' | 'Distributed';
-
-interface ReleaseForm {
+export interface ReleaseForm {
   dateAllocated: string;
   lguName: string;
   province: string;
@@ -14,7 +13,7 @@ interface ReleaseForm {
   sourceType: 'Warehouse' | 'LGU';
   warehouseSource: string;
   deliveryMode: string;
-  deliveryStatus: DeliveryStatus;
+  deliveryStatus: OutgoingStatus;
   incidentCode: string;
 }
 
@@ -22,6 +21,8 @@ interface AddReleaseModalProps {
   onClose: () => void;
   onSubmit: (data: ReleaseForm) => void;
   availableStock: { category: string; warehouseA: number; warehouseB: number }[];
+  initialData?: ReleaseForm;
+  mode?: 'add' | 'edit';
 }
 
 const FNFI_CATEGORIES = [
@@ -52,8 +53,21 @@ const WAREHOUSE_OPTIONS = [
 
 const DELIVERY_MODES = ['Truck', 'Van', 'Pick-up', 'Boat', 'Helicopter', 'Air Cargo'];
 
-export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleaseModalProps) {
-  const [formData, setFormData] = useState<ReleaseForm>({
+const DELIVERY_STATUSES: OutgoingStatus[] = [
+  'Draft',
+  'Allocating',
+  'Approved',
+  'Packed',
+  'Released',
+  'In Transit',
+  'Delivered',
+  'Accepted',
+  'Distributed',
+  'Correction Requested',
+  'Cancelled'
+];
+
+const defaultFormData: ReleaseForm = {
     dateAllocated: new Date().toISOString().split('T')[0],
     lguName: '',
     province: '',
@@ -66,11 +80,21 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleas
     deliveryMode: 'Truck',
     deliveryStatus: 'Allocating',
     incidentCode: ''
-  });
+};
+
+export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData, mode = 'add' }: AddReleaseModalProps) {
+  const [formData, setFormData] = useState<ReleaseForm>(initialData ?? defaultFormData);
 
   const [selectedProvince, setSelectedProvince] = useState('Iloilo');
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
   const [errors, setErrors] = useState<Partial<Record<keyof ReleaseForm, string>>>({});
+
+  useEffect(() => {
+    if (!initialData) return;
+    setFormData(initialData);
+    setSelectedProvince(initialData.province || 'Iloilo');
+    setSelectedMunicipality(initialData.municipality || '');
+  }, [initialData]);
 
   // Get available stock for selected category and warehouse
   const getAvailableStock = () => {
@@ -170,8 +194,8 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleas
               <TruckIcon className="w-6 h-6 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">New Release</h2>
-              <p className="text-sm text-gray-600">Release FNFI items to LGU</p>
+              <h2 className="text-xl font-bold text-gray-900">{mode === 'edit' ? 'Edit Release Draft' : 'New Release'}</h2>
+              <p className="text-sm text-gray-600">{mode === 'edit' ? 'Update release request details' : 'Release FNFI items to LGU'}</p>
             </div>
           </div>
           <button
@@ -219,9 +243,9 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleas
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="Allocating">Allocating</option>
-                <option value="Release">Release</option>
-                <option value="In Transit">In Transit</option>
-                <option value="Distributed">Distributed</option>
+                {DELIVERY_STATUSES.filter(status => status !== 'Allocating').map(status => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -544,7 +568,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock }: AddReleas
               type="submit"
               className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
             >
-              Create Release
+              {mode === 'edit' ? 'Save Changes' : 'Create Release'}
             </button>
           </div>
         </form>

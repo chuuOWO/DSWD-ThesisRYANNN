@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle, ChevronDown, ClipboardCheck, FileSignature, MapPin, Package, TrendingUp, TruckIcon } from 'lucide-react';
-import type { IncomingGoods, InventoryItem, LGUPriorityReport, OutgoingRelease } from '../hooks/useInventoryState';
+import type { DiscrepancyReport, IncomingGoods, InventoryItem, LGUPriorityReport, OutgoingRelease } from '../hooks/useInventoryState';
 
 interface DashboardState {
   inventory: InventoryItem[];
   incomingGoodsList: IncomingGoods[];
   outgoingReleasesList: OutgoingRelease[];
   lguPriorityReports: LGUPriorityReport[];
+  discrepancyReports: DiscrepancyReport[];
 }
 
 interface DashboardViewProps {
@@ -21,7 +22,7 @@ const priorityClasses = {
 };
 
 export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps) {
-  const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports } = inventoryState;
+  const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports, discrepancyReports } = inventoryState;
   const [showWarehouseOverview, setShowWarehouseOverview] = useState(false);
 
   const totalInventory = inventory.reduce((sum, item) => sum + item.warehouseA + item.warehouseB, 0);
@@ -208,54 +209,46 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
       </div>
 
       <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-lg font-bold text-gray-900">Geospatial Snapshot</h3>
-            <p className="text-sm text-gray-600">Pinned handovers with GPS-confirmed receipt locations.</p>
+            <h3 className="text-lg font-bold text-gray-900">Discrepancy Reports</h3>
+            <p className="text-sm text-gray-600">LGU-reported quantity mismatches and delivery issues.</p>
           </div>
-          <MapPin className="w-6 h-6 text-blue-600" />
+          <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-bold">
+            {discrepancyReports.length} total
+          </span>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <div className="relative bg-slate-50 rounded-xl p-6 border border-slate-200 h-56 overflow-hidden">
-              <svg className="absolute inset-0 w-full h-full opacity-40" viewBox="0 0 300 200">
-                <path d="M 40 120 Q 90 60 150 90 T 270 120" stroke="#94a3b8" strokeWidth="2" fill="none" />
-                <path d="M 20 150 L 70 150 L 70 190 L 20 190 Z" fill="#cbd5e1" opacity="0.6" />
-                <path d="M 110 70 L 150 70 L 150 110 L 110 110 Z" fill="#cbd5e1" opacity="0.6" />
-                <path d="M 200 110 L 240 110 L 240 150 L 200 150 Z" fill="#cbd5e1" opacity="0.6" />
-                <text x="30" y="180" fontSize="8" fill="#64748b">Iloilo City</text>
-                <text x="115" y="105" fontSize="8" fill="#64748b">Leon</text>
-                <text x="205" y="140" fontSize="8" fill="#64748b">Miag-ao</text>
-              </svg>
-              <div className="absolute top-6 right-6 flex flex-col gap-2">
-                {outgoingReleasesList.filter(release => release.receiverGps).slice(0, 3).map(release => (
-                  <div key={release.drNumber} className="flex items-center gap-2 bg-white/80 border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span className="text-xs font-semibold text-gray-700">{release.municipality}</span>
-                  </div>
-                ))}
-                {outgoingReleasesList.filter(release => release.receiverGps).length === 0 && (
-                  <div className="bg-white/80 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-gray-500">
-                    No GPS-confirmed receipts yet
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+
+        {discrepancyReports.length > 0 ? (
           <div className="space-y-3">
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-              <p className="text-xs font-bold text-emerald-800">GPS-Confirmed Handover</p>
-              <p className="text-2xl font-bold text-emerald-700 mt-2">{gpsAcceptedCount}</p>
-              <p className="text-xs text-emerald-700 mt-1">Receipts with coordinates captured.</p>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-bold text-slate-700">Active Movements</p>
-              <p className="text-2xl font-bold text-slate-900 mt-2">{activeReleases.length}</p>
-              <p className="text-xs text-slate-600 mt-1">Releases still in motion or pending checks.</p>
-            </div>
+            {discrepancyReports.slice(0, 5).map(report => (
+              <div key={report.id} className="flex items-start justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-gray-900">
+                    {report.reportType} {report.reportType === 'Incoming' ? (report.manifestNumber || 'Unknown Manifest') : (report.drNumber || 'Unknown DR')}
+                  </p>
+                  <p className="text-xs text-gray-600 mt-1">{report.note}</p>
+                  <p className="text-[11px] text-gray-500 mt-2">Reported {report.reportedAt}</p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold ${report.reportType === 'Incoming' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                    {report.reportType}
+                  </span>
+                  {report.reportedByRole && (
+                    <p className="text-[11px] text-gray-500 mt-2">Role: {report.reportedByRole}</p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
+        ) : (
+          <div className="p-4 bg-green-50 rounded-lg border border-green-100">
+            <p className="text-sm font-bold text-green-900">No discrepancy reports yet</p>
+            <p className="text-xs text-green-700 mt-1">Reported mismatches will appear here once filed.</p>
+          </div>
+        )}
       </div>
+
     </div>
   );
 }

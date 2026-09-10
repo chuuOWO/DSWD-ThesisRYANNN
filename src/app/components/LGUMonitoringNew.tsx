@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit } from 'lucide-react';
 import { AddLGUModal } from './AddLGUModal';
 import { EditLGUModal, LGUDelivery } from './EditLGUModal';
-import type { LGUPriorityReport } from '../hooks/useInventoryState';
+import type { LGUInventoryReportInput, LGUPriorityReport, UserRole } from '../hooks/useInventoryState';
 
 interface RecentActivity {
   id: string;
@@ -24,19 +24,42 @@ const FNFI_CATEGORIES = [
   'RTEF'
 ];
 
+const EMPTY_STOCK = {
+  'Hygiene Kit': 0,
+  'Food Pack': 0,
+  'Sleeping Kit': 0,
+  'Kitchen Kit': 0,
+  'Family Kit': 0,
+  'Laminated Sack': 0,
+  'RTEF': 0
+};
+
 interface LGUMonitoringNewProps {
   inventoryState?: {
     lguPriorityReports: LGUPriorityReport[];
+    submitLGUInventoryReport?: (input: LGUInventoryReportInput) => Promise<{ ok: boolean; message: string }>;
   };
+  currentRole: UserRole;
 }
 
-export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
+export function LGUMonitoringNew({ inventoryState, currentRole }: LGUMonitoringNewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
+  const [submitMessage, setSubmitMessage] = useState<string | null>(null);
+  const [reportForm, setReportForm] = useState<LGUInventoryReportInput>({
+    lguName: 'Leon Municipal Office',
+    municipality: 'Leon',
+    province: 'Iloilo',
+    foodPacks: 95,
+    hygieneKits: 80,
+    familyKits: 50,
+    affectedFamilies: 920,
+    damageIndex: 88
+  });
   const [lguDataList, setLguDataList] = useState<LGUDelivery[]>([
     {
       id: 'MAIN-001',
@@ -243,7 +266,35 @@ export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
     }
   ];
 
-  const filteredLGUs = lguDataList.filter(lgu => {
+
+  const priorityReports = inventoryState?.lguPriorityReports || [];
+  const reportByMunicipality = new Map(priorityReports.map(report => [report.municipality, report]));
+  const displayLGUList = lguDataList.map(lgu => {
+    const report = reportByMunicipality.get(lgu.municipality);
+    if (!report) return lgu;
+
+    return {
+      ...lgu,
+      currentStock: {
+        ...(lgu.currentStock ?? EMPTY_STOCK),
+        'Food Pack': report.foodPacks,
+        'Hygiene Kit': report.hygieneKits,
+        'Family Kit': report.familyKits
+      }
+    };
+  });
+
+  const handleSubmitReport = async () => {
+    if (currentRole !== 'LGU') {
+      setSubmitMessage('RBAC: connect the LGU MetaMask wallet to submit municipality stock and damage reports.');
+      return;
+    }
+
+    const result = await inventoryState?.submitLGUInventoryReport?.(reportForm);
+    setSubmitMessage(result?.message ?? 'LGU report submission is unavailable.');
+  };
+
+  const filteredLGUs = displayLGUList.filter(lgu => {
     const matchesSearch = lgu.lguName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           lgu.municipality.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -258,11 +309,10 @@ export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
     return matchesSearch && matchesType && matchesCategory;
   });
 
-  const priorityReports = inventoryState?.lguPriorityReports || [];
-  const totalLGUs = lguDataList.length;
-  const totalItemsReleased = lguDataList.reduce((sum, lgu) => sum + lgu.totalItemsReleased, 0);
-  const totalDeliveries = lguDataList.reduce((sum, lgu) => sum + lgu.deliveryCount, 0);
-  const totalCompleted = lguDataList.reduce((sum, lgu) => sum + lgu.completedDeliveries, 0);
+  const totalLGUs = displayLGUList.length;
+  const totalItemsReleased = displayLGUList.reduce((sum, lgu) => sum + lgu.totalItemsReleased, 0);
+  const totalDeliveries = displayLGUList.reduce((sum, lgu) => sum + lgu.deliveryCount, 0);
+  const totalCompleted = displayLGUList.reduce((sum, lgu) => sum + lgu.completedDeliveries, 0);
   const overallCompletionRate = Math.round((totalCompleted / totalDeliveries) * 100);
 
   return (
@@ -280,6 +330,57 @@ export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
           <Plus className="w-5 h-5" />
           Add New LGU
         </button>
+      </div>
+
+      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-indigo-950">LGU Stock & Damage Submission</h3>
+            <p className="text-sm text-indigo-800 mt-1">MetaMask role: <span className="font-bold">{currentRole}</span>. These LGU stock and damage reports are saved to Supabase and drive the Red/Yellow/Green prioritization cards.</p>
+          </div>
+          <button
+            onClick={handleSubmitReport}
+            disabled={currentRole !== 'LGU'}
+            className={`px-5 py-3 rounded-lg font-bold text-sm ${currentRole === 'LGU' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+          >
+            Submit LGU Report
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3 mt-4">
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">LGU Office</span>
+            <input value={reportForm.lguName} onChange={(e) => setReportForm({ ...reportForm, lguName: e.target.value })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="Leon Municipal Office" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Municipality</span>
+            <input value={reportForm.municipality} onChange={(e) => setReportForm({ ...reportForm, municipality: e.target.value })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="Leon" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Province</span>
+            <input value={reportForm.province} onChange={(e) => setReportForm({ ...reportForm, province: e.target.value })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="Iloilo" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Food Packs On Hand</span>
+            <input type="number" value={reportForm.foodPacks} onChange={(e) => setReportForm({ ...reportForm, foodPacks: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Hygiene Kits On Hand</span>
+            <input type="number" value={reportForm.hygieneKits} onChange={(e) => setReportForm({ ...reportForm, hygieneKits: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Family Kits On Hand</span>
+            <input type="number" value={reportForm.familyKits} onChange={(e) => setReportForm({ ...reportForm, familyKits: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Affected Families</span>
+            <input type="number" value={reportForm.affectedFamilies} onChange={(e) => setReportForm({ ...reportForm, affectedFamilies: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+          </label>
+          <label className="space-y-1">
+            <span className="block text-xs font-bold text-indigo-950">Damage Index 0-100</span>
+            <input type="number" min="0" max="100" value={reportForm.damageIndex} onChange={(e) => setReportForm({ ...reportForm, damageIndex: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+          </label>
+        </div>
+        {submitMessage && <p className="text-sm font-semibold text-indigo-900 mt-3">{submitMessage}</p>}
       </div>
 
       {/* Summary Cards */}
@@ -324,15 +425,9 @@ export function LGUMonitoringNew({ inventoryState }: LGUMonitoringNewProps) {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-lg font-bold text-gray-900">Stock-Based Prioritization Logic</h3>
-              <p className="text-sm text-gray-600">Red/Yellow/Green indicators are computed from LGU stock, affected families, and damage severity.</p>
+              <p className="text-sm text-gray-600">Red/Yellow/Green indicators are computed from Supabase LGU stock reports, affected families, and damage severity.</p>
             </div>
             <div className="flex items-center gap-2">
-              <span
-                className="text-xs font-semibold text-gray-600 border-b border-dashed border-gray-400"
-                title="Urgency score = stock score + demand score + damage score"
-              >
-                Score formula
-              </span>
               <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">Immediate restocking: {priorityReports.filter(report => report.priorityColor === 'Red').length}</span>
             </div>
           </div>

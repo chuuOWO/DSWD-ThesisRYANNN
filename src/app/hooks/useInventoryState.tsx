@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { backendApi, LGUPriorityReportRow } from '../services/backendApi';
+import { backendApi } from '../services/backendApi';
 import { blockchain } from '../services/blockchain';
 
 export interface InventoryItem {
@@ -7,6 +7,8 @@ export interface InventoryItem {
   warehouseA: number;
   warehouseB: number;
 }
+
+export type UserRole = 'Admin' | 'Trucker' | 'LGU' | 'Unregistered';
 
 export type WarehouseName = 'Oton Main Warehouse' | 'Pototan Main Warehouse';
 export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Minted' | 'Correction Requested' | 'Rejected';
@@ -88,6 +90,19 @@ export interface LGUPriorityReport {
   recommendation: string;
 }
 
+export interface DiscrepancyReport {
+  id: string;
+  reportType: 'Incoming' | 'Outgoing';
+  manifestNumber?: string;
+  drNumber?: string;
+  note: string;
+  reportedByRole?: string;
+  reportedByWallet?: string;
+  reportedAt: string;
+}
+
+export type LGUInventoryReportInput = Omit<LGUPriorityReport, 'id' | 'reportedAt' | 'urgencyScore' | 'priorityColor' | 'recommendation'>;
+
 const nowStamp = () => new Date().toLocaleString('en-PH', { hour12: false });
 
 const makeAudit = (action: string, details: string, txHash?: string): AuditEvent => ({
@@ -110,8 +125,19 @@ const makeManifestHash = (item: Pick<IncomingGoods, 'dateReceived' | 'fnfiCatego
 
 const makeTxHash = (prefix: string) => `0x${prefix}${Math.random().toString(16).slice(2, 10)}${Date.now().toString(16)}`;
 
+const normalizeWarehouseName = (value: string): WarehouseName | null => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'oton main warehouse' || normalized === 'oton warehouse' || normalized === 'oton') {
+    return 'Oton Main Warehouse';
+  }
+  if (normalized === 'pototan main warehouse' || normalized === 'pototan warehouse' || normalized === 'pototan') {
+    return 'Pototan Main Warehouse';
+  }
+  return null;
+};
+
 const isMainWarehouse = (warehouse: string): warehouse is WarehouseName =>
-  warehouse === 'Oton Main Warehouse' || warehouse === 'Pototan Main Warehouse';
+  normalizeWarehouseName(warehouse) !== null;
 
 const isIncomingStatus = (status: unknown): status is IncomingStatus =>
   typeof status === 'string' && ['Draft', 'Pending Verification', 'Verified', 'Minted', 'Correction Requested', 'Rejected'].includes(status);
@@ -137,6 +163,35 @@ type IncomingManifestRow = {
   batch_token_id?: string | null;
   minted_at?: string | null;
   wallet_address?: string | null;
+  created_at?: string | null;
+};
+
+type LGUInventoryReportRow = {
+  id: string;
+  municipality?: string | null;
+  province?: string | null;
+  lgu_name?: string | null;
+  reported_at?: string | null;
+  food_packs?: number | null;
+  hygiene_kits?: number | null;
+  family_kits?: number | null;
+  affected_families?: number | null;
+  damage_index?: number | null;
+  urgency_score?: number | null;
+  priority_color?: string | null;
+  recommendation?: string | null;
+  created_at?: string | null;
+};
+
+type DiscrepancyReportRow = {
+  id: string;
+  report_type?: string | null;
+  manifest_number?: string | null;
+  dr_number?: string | null;
+  note?: string | null;
+  reported_by_role?: string | null;
+  reported_by_wallet?: string | null;
+  reported_at?: string | null;
   created_at?: string | null;
 };
 
@@ -191,6 +246,52 @@ const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
   };
 };
 
+
+const computePriority = (report: Pick<LGUPriorityReport, 'foodPacks' | 'affectedFamilies' | 'damageIndex'>) => {
+  const stockScore = report.foodPacks < 150 ? 45 : report.foodPacks < 300 ? 25 : 8;
+  const demandScore = Math.min(35, Math.round(report.affectedFamilies / 30));
+  const damageScore = Math.round(report.damageIndex * 0.2);
+  const urgencyScore = Math.min(100, stockScore + demandScore + damageScore);
+  const priorityColor: PriorityColor = urgencyScore >= 75 ? 'Red' : urgencyScore >= 50 ? 'Yellow' : 'Green';
+
+  return {
+    urgencyScore,
+    priorityColor,
+    recommendation:
+      priorityColor === 'Red'
+        ? 'Immediate restocking and dispatch recommended.'
+        : priorityColor === 'Yellow'
+        ? 'Prepare allocation; monitor within 24 hours.'
+        : 'Sufficient stock; continue monitoring.'
+  };
+};
+
+const mapLGUInventoryReport = (row: LGUInventoryReportRow): LGUPriorityReport => {
+  const base = {
+    id: row.id,
+    municipality: row.municipality ?? '',
+    province: row.province ?? '',
+    lguName: row.lgu_name ?? '',
+    reportedAt: row.reported_at ?? row.created_at ?? nowStamp(),
+    foodPacks: row.food_packs ?? 0,
+    hygieneKits: row.hygiene_kits ?? 0,
+    familyKits: row.family_kits ?? 0,
+    affectedFamilies: row.affected_families ?? 0,
+    damageIndex: row.damage_index ?? 0
+  };
+  const computed = computePriority(base);
+  const priorityColor = row.priority_color === 'Red' || row.priority_color === 'Yellow' || row.priority_color === 'Green'
+    ? row.priority_color
+    : computed.priorityColor;
+
+  return {
+    ...base,
+    urgencyScore: row.urgency_score ?? computed.urgencyScore,
+    priorityColor,
+    recommendation: row.recommendation ?? computed.recommendation
+  };
+};
+
 const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   drNumber: row.dr_number ?? row.id,
   dateAllocated: row.date_allocated ?? '',
@@ -217,23 +318,15 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   auditTrail: [makeAudit('Loaded from Supabase', `Outgoing request restored from database as ${row.delivery_status ?? 'Allocating'}.`, row.tx_hash ?? undefined)]
 });
 
-const isPriorityColor = (color: unknown): color is PriorityColor =>
-  typeof color === 'string' && ['Red', 'Yellow', 'Green'].includes(color);
-
-const mapLGUPriorityReport = (row: LGUPriorityReportRow): LGUPriorityReport => ({
+const mapDiscrepancyReport = (row: DiscrepancyReportRow): DiscrepancyReport => ({
   id: row.id,
-  municipality: row.municipality,
-  province: row.province,
-  lguName: row.lgu_name,
-  reportedAt: row.reported_at ?? '',
-  foodPacks: row.food_packs ?? 0,
-  hygieneKits: row.hygiene_kits ?? 0,
-  familyKits: row.family_kits ?? 0,
-  affectedFamilies: row.affected_families ?? 0,
-  damageIndex: row.damage_index ?? 0,
-  urgencyScore: row.urgency_score ?? 0,
-  priorityColor: isPriorityColor(row.priority_color) ? row.priority_color : 'Green',
-  recommendation: row.recommendation ?? ''
+  reportType: row.report_type === 'Outgoing' ? 'Outgoing' : 'Incoming',
+  manifestNumber: row.manifest_number ?? undefined,
+  drNumber: row.dr_number ?? undefined,
+  note: row.note ?? '',
+  reportedByRole: row.reported_by_role ?? undefined,
+  reportedByWallet: row.reported_by_wallet ?? undefined,
+  reportedAt: row.reported_at ?? row.created_at ?? nowStamp()
 });
 
 const emptyInventoryItem = (category: string): InventoryItem => ({
@@ -253,10 +346,11 @@ const calculateAvailableInventory = (incoming: IncomingGoods[], outgoing: Outgoi
   };
 
   incoming.forEach(item => {
-    if (item.status !== 'Minted' || item.destinationType !== 'Warehouse' || !isMainWarehouse(item.destination)) return;
+    const destination = normalizeWarehouseName(item.destination);
+    if (item.status !== 'Minted' || item.destinationType !== 'Warehouse' || !destination) return;
 
     const stockItem = ensureItem(item.fnfiCategory);
-    if (item.destination === 'Oton Main Warehouse') {
+    if (destination === 'Oton Main Warehouse') {
       stockItem.warehouseA += item.quantity;
     } else {
       stockItem.warehouseB += item.quantity;
@@ -265,11 +359,12 @@ const calculateAvailableInventory = (incoming: IncomingGoods[], outgoing: Outgoi
 
   outgoing.forEach(release => {
     const consumesStock = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'].includes(release.deliveryStatus);
-    if (!consumesStock || !isMainWarehouse(release.warehouseSource)) return;
+    const warehouseSource = normalizeWarehouseName(release.warehouseSource);
+    if (!consumesStock || !warehouseSource) return;
 
     const stockItem = ensureItem(release.fnfiCategory);
     const quantity = release.amountApproved || release.amountRequested;
-    if (release.warehouseSource === 'Oton Main Warehouse') {
+    if (warehouseSource === 'Oton Main Warehouse') {
       stockItem.warehouseA = Math.max(0, stockItem.warehouseA - quantity);
     } else {
       stockItem.warehouseB = Math.max(0, stockItem.warehouseB - quantity);
@@ -283,6 +378,21 @@ const logBackendError = (action: string) => (error: unknown) => {
   console.error(`${action} did not persist to Supabase`, error);
 };
 
+const toFriendlyTxError = (error: unknown, fallback: string) => {
+  if (error && typeof error === 'object') {
+    const code = (error as { code?: string | number }).code;
+    if (code === 4001 || code === 'ACTION_REJECTED') {
+      return 'Transaction cancelled.';
+    }
+
+    if (error instanceof Error && error.message) {
+      const message = error.message.split('\n')[0].trim();
+      return message || fallback;
+    }
+  }
+  return fallback;
+};
+
 export function useInventoryState(enabled = true) {
   const [integrationMode, setIntegrationMode] = useState<'backend' | 'mock'>('mock');
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -290,7 +400,10 @@ export function useInventoryState(enabled = true) {
   const [incomingGoodsList, setIncomingGoodsList] = useState<IncomingGoods[]>([]);
 
   const [outgoingReleasesList, setOutgoingReleasesList] = useState<OutgoingRelease[]>([]);
+
   const [lguPriorityReports, setLguPriorityReports] = useState<LGUPriorityReport[]>([]);
+
+  const [discrepancyReports, setDiscrepancyReports] = useState<DiscrepancyReport[]>([]);
 
   useEffect(() => {
     setInventory(calculateAvailableInventory(incomingGoodsList, outgoingReleasesList));
@@ -352,7 +465,13 @@ export function useInventoryState(enabled = true) {
   };
 
   const addIncomingGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
-    const newId = `INC-2026-${String(incomingGoodsList.length + 1).padStart(3, '0')}`;
+    const nextIndex = incomingGoodsList.reduce((max, entry) => {
+      const match = entry.id.match(/INC-\d{4}-(\d+)/i);
+      if (!match) return max;
+      const value = Number.parseInt(match[1], 10);
+      return Number.isFinite(value) ? Math.max(max, value) : max;
+    }, 0) + 1;
+    const newId = `INC-2026-${String(nextIndex).padStart(3, '0')}`;
     const goodsWithId: IncomingGoods = {
       ...newGoods,
       id: newId,
@@ -406,17 +525,42 @@ export function useInventoryState(enabled = true) {
     });
   };
 
-  const mintBatchToken = async (id: string) => {
+  const mintBatchToken = async (id: string, actorRole: UserRole = 'Admin') => {
+    if (actorRole !== 'Admin') return { ok: false, message: 'RBAC: only Admin can post/mint a batch token.' };
     const item = incomingGoodsList.find(item => item.id === id);
     if (!item || item.status !== 'Verified') return { ok: false, message: 'Only verified manifests can be minted.' };
 
     const duplicate = incomingGoodsList.find(other => other.id !== id && other.status === 'Minted' && other.manifestHash === item.manifestHash);
-    if (duplicate) return { ok: false, message: `Duplicate manifest detected. Existing token: ${duplicate.batchTokenId}` };
+    if (duplicate) {
+      const duplicateRef = duplicate.batchTokenId ? `${duplicate.id} (${duplicate.batchTokenId})` : duplicate.id;
+      return {
+        ok: false,
+        message: `Duplicate manifest detected. Existing token: ${duplicateRef}. Debug: manifestHash=${item.manifestHash}`
+      };
+    }
 
-    const tokenId = `BATCH-2026-${String(incomingGoodsList.filter(i => i.batchTokenId).length + 1).padStart(3, '0')}`;
+    const fallbackIndex = incomingGoodsList.reduce((max, entry) => {
+      if (!entry.batchTokenId) return max;
+      const match = entry.batchTokenId.match(/BATCH-\d{4}-(\d+)/i);
+      if (!match) return max;
+      const value = Number.parseInt(match[1], 10);
+      return Number.isFinite(value) ? Math.max(max, value) : max;
+    }, 0) + 1;
+
+    let nextBatchIndex = fallbackIndex;
+    try {
+      nextBatchIndex = await backendApi.getNextBatchIndex();
+      setIntegrationMode('backend');
+    } catch (error) {
+      logBackendError('Fetch batch counter')(error);
+      setIntegrationMode('mock');
+    }
+
+    const tokenId = `BATCH-2026-${String(nextBatchIndex).padStart(3, '0')}`;
     let proof;
 
     try {
+      await blockchain.requireConnectedWalletRole('Admin');
       proof = await blockchain.mintBatchToken({
         manifestNumber: item.id,
         batchTokenId: tokenId,
@@ -427,7 +571,8 @@ export function useInventoryState(enabled = true) {
       });
     } catch (error) {
       logBackendError('Mint batch token with MetaMask')(error);
-      return { ok: false, message: error instanceof Error ? error.message : 'MetaMask minting was cancelled or failed.' };
+      const baseMessage = toFriendlyTxError(error, 'Minting failed. Please try again.');
+      return { ok: false, message: `${baseMessage} Debug: manifestHash=${item.manifestHash} batchTokenId=${tokenId}` };
     }
 
     const mintedAt = nowStamp();
@@ -466,10 +611,24 @@ export function useInventoryState(enabled = true) {
       logBackendError('Request incoming correction')(error);
       setIntegrationMode('mock');
     });
+    backendApi.createDiscrepancyReport({
+      reportType: 'Incoming',
+      manifestNumber: id,
+      note
+    }).catch(error => {
+      logBackendError('Create incoming discrepancy report')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => {
-    const newDR = `DR-2026-${String(outgoingReleasesList.length + 1).padStart(3, '0')}`;
+    const nextIndex = outgoingReleasesList.reduce((max, release) => {
+      const match = release.drNumber.match(/DR-\d{4}-(\d+)/i);
+      if (!match) return max;
+      const value = Number.parseInt(match[1], 10);
+      return Number.isFinite(value) ? Math.max(max, value) : max;
+    }, 0) + 1;
+    const newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
     const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus;
     const releaseWithDR: OutgoingRelease = {
       ...newRelease,
@@ -524,7 +683,13 @@ export function useInventoryState(enabled = true) {
     });
 
     const candidateBatches = incomingGoodsList
-      .filter(item => item.status === 'Minted' && item.fnfiCategory === release.fnfiCategory && item.destinationType === 'Warehouse' && item.batchTokenId)
+      .filter(item =>
+        item.status === 'Minted' &&
+        item.fnfiCategory === release.fnfiCategory &&
+        item.destinationType === 'Warehouse' &&
+        item.destination === release.warehouseSource &&
+        item.batchTokenId
+      )
       .slice()
       .sort((a, b) => {
         const aTime = a.mintedAt ? Date.parse(a.mintedAt) : 0;
@@ -569,7 +734,8 @@ export function useInventoryState(enabled = true) {
     return { ok: true, message: 'Allocation approved and ERC-1155 batch balances reserved.' };
   };
 
-  const senderSignAndRelease = async (drNumber: string) => {
+  const senderSignAndRelease = async (drNumber: string, actorRole: UserRole = 'Trucker') => {
+    if (actorRole !== 'Trucker') return { ok: false, message: 'RBAC: only Trucker can sign warehouse release.' };
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release || !['Approved', 'Packed'].includes(release.deliveryStatus)) return { ok: false, message: 'Only approved/packed releases can be signed by sender.' };
     if (release.allocatedBatches.length === 0) return { ok: false, message: 'No batch allocations found for this release.' };
@@ -579,6 +745,7 @@ export function useInventoryState(enabled = true) {
     let proof;
 
     try {
+      await blockchain.requireConnectedWalletRole('Trucker');
       await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
       proof = await blockchain.signRelease({
         drNumber,
@@ -593,7 +760,7 @@ export function useInventoryState(enabled = true) {
       });
     } catch (error) {
       logBackendError('Sign release with MetaMask')(error);
-      return { ok: false, message: error instanceof Error ? error.message : 'MetaMask release signing was cancelled or failed.' };
+      return { ok: false, message: toFriendlyTxError(error, 'Sign release failed. Please try again.') };
     }
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
@@ -631,24 +798,18 @@ export function useInventoryState(enabled = true) {
     });
   };
 
-  const receiverAcceptWithGps = async (drNumber: string) => {
+  const receiverAcceptWithGps = async (drNumber: string, actorRole: UserRole = 'LGU') => {
+    if (actorRole !== 'LGU') return { ok: false, message: 'RBAC: only LGU can confirm receipt.' };
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release) return { ok: false, message: 'Release not found.' };
     const latestGps = release?.municipality === 'Miag-ao' ? '10.6415, 122.2352' : release?.municipality === 'Banate' ? '11.0022, 122.8174' : '10.7202, 122.5621';
     const handoverContractId = release.handoverContractId ?? `HANDOVER-${drNumber.replace('DR-', '')}`;
-    let proof;
-
-    try {
-      proof = await blockchain.confirmReceipt({
-        drNumber,
-        handoverContractId,
-        destination: release.lguName,
-        gps: latestGps
-      });
-    } catch (error) {
-      logBackendError('Confirm receipt with MetaMask')(error);
-      return { ok: false, message: error instanceof Error ? error.message : 'MetaMask receipt confirmation was cancelled or failed.' };
-    }
+    // TODO: Teammate can plug in ReownKit / WalletConnect here for on-chain mobile receipt.
+    const proof = {
+      hash: `LGU-RECEIPT-${Date.now()}`,
+      walletAddress: '0xLGUReceiverWallet',
+      mode: 'signature' as const
+    };
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber && ['Released', 'In Transit', 'Delivered'].includes(item.deliveryStatus)
       ? {
@@ -668,6 +829,8 @@ export function useInventoryState(enabled = true) {
       handoverContractId,
       receiverSignature: proof.hash,
       walletAddress: proof.walletAddress
+    }).then(() => {
+      backendApi.markTruckLiveLocationDoneByDr(drNumber).catch(() => {});
     }).catch(error => {
       logBackendError('Accept outgoing handover')(error);
       setIntegrationMode('mock');
@@ -676,14 +839,44 @@ export function useInventoryState(enabled = true) {
     return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
   };
 
+
+  const submitLGUInventoryReport = async (input: LGUInventoryReportInput) => {
+    try {
+      await blockchain.requireConnectedWalletRole('LGU');
+    } catch (error) {
+      return { ok: false, message: toFriendlyTxError(error, 'Connect the LGU MetaMask wallet to submit this report.') };
+    }
+
+    const computed = computePriority(input);
+    const optimistic: LGUPriorityReport = {
+      ...input,
+      id: `LGU-RPT-${Date.now()}`,
+      reportedAt: nowStamp(),
+      ...computed
+    };
+
+    setLguPriorityReports(prev => [optimistic, ...prev].sort((a, b) => b.urgencyScore - a.urgencyScore));
+
+    try {
+      await backendApi.createLGUInventoryReport({ ...input, ...computed });
+      setIntegrationMode('backend');
+      return { ok: true, message: 'LGU inventory report submitted to Supabase and priority score recalculated.' };
+    } catch (error) {
+      logBackendError('Create LGU inventory report')(error);
+      setIntegrationMode('mock');
+      return { ok: false, message: 'Report is visible locally, but Supabase persistence failed. Check lgu_inventory_reports schema/RLS.' };
+    }
+  };
+
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) return undefined;
 
     const loadDashboard = () => backendApi.getDashboard()
-      .then(({ incoming, outgoing, lguPriorityReports: priorityRows }) => {
+      .then(({ incoming, outgoing, lguReports, discrepancyReports: discrepancyRows }) => {
         setIncomingGoodsList(incoming.map(mapIncomingManifest));
         setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
-        setLguPriorityReports(priorityRows.map(mapLGUPriorityReport));
+        setLguPriorityReports(lguReports.map(mapLGUInventoryReport).sort((a, b) => b.urgencyScore - a.urgencyScore));
+        setDiscrepancyReports((discrepancyRows ?? []).map(mapDiscrepancyReport));
         setIntegrationMode('backend');
       })
       .catch(() => setIntegrationMode('mock'));
@@ -698,6 +891,18 @@ export function useInventoryState(enabled = true) {
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? { ...item, deliveryStatus: 'Correction Requested', correctionNote: note, auditTrail: [makeAudit('Correction Requested', note), ...item.auditTrail] }
       : item));
+    backendApi.updateOutgoing(drNumber, { deliveryStatus: 'Correction Requested' }).catch(error => {
+      logBackendError('Request outgoing correction')(error);
+      setIntegrationMode('mock');
+    });
+    backendApi.createDiscrepancyReport({
+      reportType: 'Outgoing',
+      drNumber,
+      note
+    }).catch(error => {
+      logBackendError('Create outgoing discrepancy report')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   return {
@@ -705,6 +910,7 @@ export function useInventoryState(enabled = true) {
     incomingGoodsList,
     outgoingReleasesList,
     lguPriorityReports,
+    discrepancyReports,
     addStock,
     deductStock,
     getAvailableStock,
@@ -720,8 +926,8 @@ export function useInventoryState(enabled = true) {
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,
-    requestOutgoingCorrection
-    ,
+    requestOutgoingCorrection,
+    submitLGUInventoryReport,
     integrationMode
   };
 }

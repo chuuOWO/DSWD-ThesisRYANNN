@@ -1,20 +1,22 @@
 import { useMemo, useState } from 'react';
 import { Calendar, CheckCircle, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
-import { AddIncomingGoodsModal } from './AddIncomingGoodsModal';
-import type { IncomingGoods, IncomingStatus, WarehouseName } from '../hooks/useInventoryState';
+import { AddIncomingGoodsModal, type IncomingGoodsForm } from './AddIncomingGoodsModal';
+import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../hooks/useInventoryState';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
+  discrepancyReports: DiscrepancyReport[];
   addIncomingGoods: (data: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => void;
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
-  mintBatchToken: (id: string) => Promise<{ ok: boolean; message: string }>;
+  mintBatchToken: (id: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
   requestIncomingCorrection: (id: string, note: string) => void;
 }
 
 interface IncomingModuleProps {
   inventoryState: InventoryState;
+  currentRole: UserRole;
 }
 
 const FNFI_CATEGORIES = [
@@ -62,7 +64,7 @@ const friendlyAuditDetails = (details = '') =>
     .replace(/token/gi, 'batch record')
     .replace(/manifest hash/gi, 'delivery reference');
 
-type IncomingAction = 'edit' | 'submit' | 'verify' | 'post' | 'correction' | 'message';
+type IncomingAction = 'submit' | 'verify' | 'post' | 'correction' | 'message';
 
 interface IncomingActionModalState {
   type: IncomingAction;
@@ -72,9 +74,10 @@ interface IncomingActionModalState {
   message?: string;
 }
 
-export function IncomingModule({ inventoryState }: IncomingModuleProps) {
+export function IncomingModule({ inventoryState, currentRole }: IncomingModuleProps) {
   const {
     incomingGoodsList,
+    discrepancyReports,
     addIncomingGoods,
     updateIncomingGoods,
     submitIncomingForVerification,
@@ -84,6 +87,7 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
   } = inventoryState;
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingIncoming, setEditingIncoming] = useState<IncomingGoods | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -94,15 +98,23 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
     setShowAddModal(false);
   };
 
-  const openActionModal = (type: IncomingAction, item: IncomingGoods) => {
-    if (type === 'edit' && !canEdit(item.status)) {
-      setActionModal({
-        type: 'message',
-        message: 'This verified batch record can no longer be edited directly. Please file a correction record.'
-      });
-      return;
-    }
+  const handleEditGoods = (updatedGoods: IncomingGoodsForm) => {
+    if (!editingIncoming) return;
+    updateIncomingGoods(editingIncoming.id, {
+      dateReceived: updatedGoods.dateReceived,
+      fnfiCategory: updatedGoods.fnfiCategory,
+      quantity: updatedGoods.quantity,
+      unitType: updatedGoods.unitType,
+      expirationDate: updatedGoods.expirationDate,
+      source: updatedGoods.source,
+      destinationType: updatedGoods.destinationType,
+      destination: updatedGoods.destination,
+      incidentCode: updatedGoods.incidentCode
+    });
+    setEditingIncoming(null);
+  };
 
+  const openActionModal = (type: IncomingAction, item: IncomingGoods) => {
     setActionModal({
       type,
       item,
@@ -128,17 +140,6 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
     if (!actionModal?.item) return;
     const item = actionModal.item;
 
-    if (actionModal.type === 'edit') {
-      const nextQuantity = Number(actionModal.quantity);
-      if (!Number.isFinite(nextQuantity) || nextQuantity <= 0) return;
-      updateIncomingGoods(item.id, {
-        quantity: nextQuantity,
-        incidentCode: actionModal.note || item.incidentCode
-      });
-      closeActionModal();
-      return;
-    }
-
     if (actionModal.type === 'submit') {
       submitIncomingForVerification(item.id);
       closeActionModal();
@@ -152,7 +153,7 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
     }
 
     if (actionModal.type === 'post') {
-      const result = await mintBatchToken(item.id);
+      const result = await mintBatchToken(item.id, currentRole);
       showResult(friendlyResult(result.message), result.ok);
       return;
     }
@@ -192,6 +193,8 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
   const warehouseTotalQty = incomingGoodsList
     .filter(item => item.destinationType === 'Warehouse' && item.status === 'Minted')
     .reduce((sum, item) => sum + item.quantity, 0);
+
+  const incomingDiscrepancies = discrepancyReports.filter(report => report.reportType === 'Incoming');
 
   return (
     <div className="space-y-6">
@@ -349,7 +352,19 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">
                       {canEdit(item.status) && (
-                        <button onClick={() => openActionModal('edit', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                        <button
+                          onClick={() => {
+                            if (!canEdit(item.status)) {
+                              setActionModal({
+                                type: 'message',
+                                message: 'This verified batch record can no longer be edited directly. Please file a correction record.'
+                              });
+                              return;
+                            }
+                            setEditingIncoming(item);
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                        >
                           <Edit className="w-3 h-3" /> Edit
                         </button>
                       )}
@@ -364,7 +379,12 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
                         </button>
                       )}
                       {item.status === 'Verified' && (
-                        <button onClick={() => openActionModal('post', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700">
+                        <button
+                          onClick={() => openActionModal('post', item)}
+                          disabled={currentRole !== 'Admin'}
+                          title={currentRole !== 'Admin' ? 'RBAC: connect the Admin MetaMask wallet to post/mint this batch token.' : 'Post/mint this verified batch token.'}
+                          className={`inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg ${currentRole === 'Admin' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                        >
                           <ShieldCheck className="w-3 h-3" /> Post
                         </button>
                       )}
@@ -389,10 +409,65 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
         )}
       </div>
 
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Incoming Discrepancy Reports</h3>
+            <p className="text-sm text-gray-600">Reported quantity mismatches or receiving issues.</p>
+          </div>
+          <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-bold">
+            {incomingDiscrepancies.length} total
+          </span>
+        </div>
+        <div className="p-6">
+          {incomingDiscrepancies.length > 0 ? (
+            <div className="space-y-3">
+              {incomingDiscrepancies.slice(0, 5).map(report => (
+                <div key={report.id} className="flex items-start justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-gray-900">{report.manifestNumber || 'Unknown Manifest'}</p>
+                    <p className="text-xs text-gray-600 mt-1">{report.note}</p>
+                    <p className="text-[11px] text-gray-500 mt-2">Reported {report.reportedAt}</p>
+                  </div>
+                  <span className="shrink-0 inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-700">
+                    Incoming
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 bg-green-50 rounded-lg border border-green-100">
+              <p className="text-sm font-bold text-green-900">No discrepancy reports yet</p>
+              <p className="text-xs text-green-700 mt-1">Incoming mismatches will appear here once filed.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {showAddModal && (
         <AddIncomingGoodsModal
           onClose={() => setShowAddModal(false)}
           onSubmit={handleAddGoods}
+          mode="add"
+        />
+      )}
+
+      {editingIncoming && (
+        <AddIncomingGoodsModal
+          onClose={() => setEditingIncoming(null)}
+          onSubmit={handleEditGoods}
+          mode="edit"
+          initialData={{
+            dateReceived: editingIncoming.dateReceived,
+            fnfiCategory: editingIncoming.fnfiCategory,
+            quantity: editingIncoming.quantity,
+            unitType: editingIncoming.unitType,
+            expirationDate: editingIncoming.expirationDate,
+            source: editingIncoming.source,
+            destinationType: editingIncoming.destinationType,
+            destination: editingIncoming.destination,
+            incidentCode: editingIncoming.incidentCode
+          }}
         />
       )}
 
@@ -402,7 +477,6 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">
-                  {actionModal.type === 'edit' && 'Edit Incoming Record'}
                   {actionModal.type === 'submit' && 'Submit for Checking'}
                   {actionModal.type === 'verify' && 'Confirm Physical Receipt'}
                   {actionModal.type === 'post' && 'Post Verified Batch'}
@@ -421,29 +495,6 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
                 <p className="text-sm text-gray-700">{actionModal.message}</p>
               ) : (
                 <>
-                  {actionModal.type === 'edit' && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">Quantity</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={actionModal.quantity || 0}
-                          onChange={(e) => setActionModal({ ...actionModal, quantity: Number(e.target.value) })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">Remarks</label>
-                        <textarea
-                          value={actionModal.note || ''}
-                          onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-24"
-                        />
-                      </div>
-                    </>
-                  )}
-
                   {actionModal.type === 'submit' && (
                     <p className="text-sm text-gray-700">Send this incoming delivery to the warehouse checker for review?</p>
                   )}
@@ -453,7 +504,12 @@ export function IncomingModule({ inventoryState }: IncomingModuleProps) {
                   )}
 
                   {actionModal.type === 'post' && (
-                    <p className="text-sm text-gray-700">Post this verified batch to the official warehouse stock record?</p>
+                    <div className="space-y-2">
+                      <p className="text-sm text-gray-700">Post this verified batch to the official warehouse stock record?</p>
+                      {actionModal.item?.manifestHash && (
+                        <p className="text-xs text-gray-500">Manifest hash: {actionModal.item.manifestHash}</p>
+                      )}
+                    </div>
                   )}
 
                   {actionModal.type === 'correction' && (

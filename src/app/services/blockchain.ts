@@ -1,11 +1,14 @@
 import { BrowserProvider, Contract, ethers } from 'ethers';
 import { EthereumProvider as WalletConnectProvider } from '@walletconnect/ethereum-provider';
+import type { UserRole } from '../hooks/useInventoryState';
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
   connect?: () => Promise<unknown>;
   accounts?: string[];
   selectedAddress?: string;
+  on?: (event: 'accountsChanged' | 'chainChanged', handler: (...args: unknown[]) => void) => void;
+  removeListener?: (event: 'accountsChanged' | 'chainChanged', handler: (...args: unknown[]) => void) => void;
 };
 
 declare global {
@@ -56,6 +59,13 @@ const targetRpcUrl = import.meta.env.VITE_BLOCKCHAIN_RPC_URL;
 const walletConnectProjectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
 const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://localhost';
 let walletConnectProviderPromise: Promise<EthereumProvider> | null = null;
+type AuthorizedRole = Exclude<UserRole, 'Unregistered'>;
+
+const walletRoles: Array<{ role: AuthorizedRole; address: string | undefined }> = [
+  { role: 'Admin', address: import.meta.env.VITE_ADMIN_WALLET_ADDRESS },
+  { role: 'Trucker', address: import.meta.env.VITE_TRUCKER_WALLET_ADDRESS },
+  { role: 'LGU', address: import.meta.env.VITE_LGU_WALLET_ADDRESS }
+];
 
 export const getWalletErrorMessage = (error: unknown, fallback = 'MetaMask request failed.') => {
   const readMessage = (value: unknown, depth = 0): string | null => {
@@ -151,8 +161,9 @@ const getWalletConnectProvider = async () => {
   return walletConnectProviderPromise;
 };
 
-const getEthereum = async () => {
+const getEthereum = async (interactive = true) => {
   if (window.ethereum) return window.ethereum;
+  if (!interactive) return null;
   return await getWalletConnectProvider();
 };
 
@@ -182,6 +193,15 @@ const getConnectedWalletAddress = async (ethereum: EthereumProvider) => {
   if (ethereum.accounts?.[0]) return ethereum.accounts[0];
 
   throw new Error('MetaMask connected, but no wallet address was returned.');
+};
+
+const normalizeAddress = (address?: string | null) => address?.trim().toLowerCase() ?? '';
+
+const resolveWalletRole = (address?: string | null): UserRole | 'Unregistered' => {
+  const normalized = normalizeAddress(address);
+  if (!normalized) return 'Unregistered';
+
+  return walletRoles.find(entry => normalizeAddress(entry.address) === normalized)?.role ?? 'Unregistered';
 };
 
 const getSigner = async () => {
@@ -249,6 +269,56 @@ const signFallbackProof = async (message: string): Promise<BlockchainProof> => {
 };
 
 export const blockchain = {
+  getWalletRole(address?: string | null): UserRole | 'Unregistered' {
+    return resolveWalletRole(address);
+  },
+
+  onAccountsChanged(handler: () => void) {
+    const ethereum = window.ethereum;
+    if (!ethereum?.on) return () => undefined;
+
+    ethereum.on('accountsChanged', handler);
+    ethereum.on('chainChanged', handler);
+
+    return () => {
+      ethereum.removeListener?.('accountsChanged', handler);
+      ethereum.removeListener?.('chainChanged', handler);
+    };
+  },
+
+  async connectWallet(): Promise<{ walletAddress: string; role: UserRole | 'Unregistered' }> {
+    const signer = await getSigner();
+    const walletAddress = await signer.getAddress();
+    return {
+      walletAddress,
+      role: resolveWalletRole(walletAddress)
+    };
+  },
+
+  async getConnectedWalletAddress(): Promise<string | null> {
+    const ethereum = await getEthereum(false);
+    if (!ethereum) return null;
+    try {
+      const accounts = await ethereum.request({ method: 'eth_accounts' });
+      const first = Array.isArray(accounts) ? accounts[0] : null;
+      return typeof first === 'string' ? first : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async requireConnectedWalletRole(expectedRole: AuthorizedRole): Promise<string> {
+    const signer = await getSigner();
+    const walletAddress = await signer.getAddress();
+    const actualRole = resolveWalletRole(walletAddress);
+
+    if (actualRole !== expectedRole) {
+      throw new Error(`RBAC: connect the ${expectedRole} MetaMask wallet to continue. Current wallet is ${actualRole}.`);
+    }
+
+    return walletAddress;
+  },
+
   async assertBatchTokensExist(batchTokenIds: string[]): Promise<void> {
     if (!batchTokenContractAddress || batchTokenIds.length === 0) return;
 
@@ -333,6 +403,10 @@ export const blockchain = {
   },
 
   async signReleaseProof(input: SignReleaseInput): Promise<BlockchainProof> {
+    if (handoverContractAddress) {
+      return this.signRelease(input);
+    }
+
     return signFallbackProof(
       `Sign trucker GPS proof\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
     );

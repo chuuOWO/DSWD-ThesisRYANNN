@@ -1,38 +1,26 @@
 import { useState } from 'react';
 import { CheckCircle, Edit, FileSignature, MapPin, PackageCheck, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
-import { AddReleaseModal } from './AddReleaseModal';
+import { AddReleaseModal, type ReleaseForm } from './AddReleaseModal';
 import { blockchain } from '../services/blockchain';
-import type { InventoryItem, OutgoingRelease, OutgoingStatus } from '../hooks/useInventoryState';
+import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../hooks/useInventoryState';
 
 interface InventoryState {
   inventory: InventoryItem[];
   outgoingReleasesList: OutgoingRelease[];
+  discrepancyReports: DiscrepancyReport[];
   addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => { ok: boolean; message: string };
-  senderSignAndRelease: (drNumber: string) => Promise<{ ok: boolean; message: string }>;
+  senderSignAndRelease: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
   markInTransit: (drNumber: string) => void;
-  receiverAcceptWithGps: (drNumber: string) => Promise<{ ok: boolean; message: string }>;
+  receiverAcceptWithGps: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
   requestOutgoingCorrection: (drNumber: string, note: string) => void;
 }
 
 interface OutgoingModuleProps {
   inventoryState: InventoryState;
+  currentRole: UserRole;
 }
-
-type AddReleaseForm = {
-  dateAllocated: string;
-  lguName: string;
-  province: string;
-  municipality: string;
-  fnfiCategory: string;
-  amountRequested: number;
-  amountApproved: number;
-  warehouseSource: string;
-  deliveryMode: string;
-  deliveryStatus: 'Allocating' | 'Release' | 'In Transit' | 'Distributed';
-  incidentCode: string;
-};
 
 const statusStyles: Record<OutgoingStatus, string> = {
   Draft: 'bg-gray-100 text-gray-700',
@@ -50,7 +38,7 @@ const statusStyles: Record<OutgoingStatus, string> = {
 
 const editableStatuses: OutgoingStatus[] = ['Draft', 'Allocating', 'Approved', 'Packed'];
 
-type ReleaseAction = 'edit' | 'senderSign' | 'inTransit' | 'receiverAccept' | 'correction' | 'message';
+type ReleaseAction = 'senderSign' | 'inTransit' | 'receiverAccept' | 'correction' | 'message';
 
 interface ReleaseActionModalState {
   type: ReleaseAction;
@@ -60,10 +48,11 @@ interface ReleaseActionModalState {
   message?: string;
 }
 
-export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
+export function OutgoingModuleNew({ inventoryState, currentRole }: OutgoingModuleProps) {
   const {
     inventory,
     outgoingReleasesList,
+    discrepancyReports,
     addOutgoingRelease,
     updateOutgoingRelease,
     approveAllocation,
@@ -74,6 +63,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
   } = inventoryState;
 
   const [showReleaseModal, setShowReleaseModal] = useState(false);
+  const [editingRelease, setEditingRelease] = useState<OutgoingRelease | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
@@ -85,12 +75,12 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
   const [senderWallet, setSenderWallet] = useState('');
   const [custodyMessage, setCustodyMessage] = useState<string | null>(null);
   const autoCloseDelayMs = 1800;
-  const showSenderAuthorization = false;
+  const showSenderAuthorization = currentRole === 'Admin';
 
-  const handleAddRelease = (newRelease: AddReleaseForm) => {
+  const handleAddRelease = (newRelease: ReleaseForm) => {
     addOutgoingRelease({
       ...newRelease,
-      deliveryStatus: newRelease.deliveryStatus === 'Release' ? 'Approved' : newRelease.deliveryStatus,
+      deliveryStatus: newRelease.deliveryStatus,
       handoverContractId: undefined,
       senderSignature: undefined,
       receiverSignature: undefined,
@@ -100,6 +90,24 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
       correctionNote: undefined
     });
     setShowReleaseModal(false);
+  };
+
+  const handleEditRelease = (updatedRelease: ReleaseForm) => {
+    if (!editingRelease) return;
+    updateOutgoingRelease(editingRelease.drNumber, {
+      dateAllocated: updatedRelease.dateAllocated,
+      lguName: updatedRelease.lguName,
+      province: updatedRelease.province,
+      municipality: updatedRelease.municipality,
+      fnfiCategory: updatedRelease.fnfiCategory,
+      amountRequested: updatedRelease.amountRequested,
+      amountApproved: updatedRelease.amountApproved,
+      warehouseSource: updatedRelease.warehouseSource,
+      deliveryMode: updatedRelease.deliveryMode,
+      deliveryStatus: updatedRelease.deliveryStatus,
+      incidentCode: updatedRelease.incidentCode
+    });
+    setEditingRelease(null);
   };
 
   const openApprovalModal = (release: OutgoingRelease) => {
@@ -120,14 +128,6 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
   };
 
   const openReleaseAction = (type: ReleaseAction, release: OutgoingRelease) => {
-    if (type === 'edit' && !editableStatuses.includes(release.deliveryStatus)) {
-      setActionModal({
-        type: 'message',
-        message: 'This release already has signed movement activity. Please file a correction record.'
-      });
-      return;
-    }
-
     setActionModal({
       type,
       release,
@@ -151,19 +151,8 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
     if (!actionModal?.release) return;
     const release = actionModal.release;
 
-    if (actionModal.type === 'edit') {
-      const nextRequested = Number(actionModal.requestedAmount);
-      if (!Number.isFinite(nextRequested) || nextRequested <= 0) return;
-      updateOutgoingRelease(release.drNumber, {
-        amountRequested: nextRequested,
-        incidentCode: actionModal.note || release.incidentCode
-      });
-      closeActionModal();
-      return;
-    }
-
     if (actionModal.type === 'senderSign') {
-      const result = await senderSignAndRelease(release.drNumber);
+      const result = await senderSignAndRelease(release.drNumber, currentRole);
       showResult(result.message.replace('handover contract opened', 'release record signed'), result.ok);
       return;
     }
@@ -175,7 +164,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
     }
 
     if (actionModal.type === 'receiverAccept') {
-      const result = await receiverAcceptWithGps(release.drNumber);
+      const result = await receiverAcceptWithGps(release.drNumber, currentRole);
       showResult(result.message, result.ok);
       return;
     }
@@ -229,6 +218,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
   const approvedCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Approved').length;
   const activeReleaseCount = outgoingReleasesList.filter(r => ['Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus)).length;
   const acceptedCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Accepted' || r.deliveryStatus === 'Distributed').length;
+  const outgoingDiscrepancies = discrepancyReports.filter(report => report.reportType === 'Outgoing');
 
   return (
     <div className="space-y-6">
@@ -336,7 +326,7 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="max-h-[560px] overflow-auto">
           <table className="w-full min-w-[1300px]">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -345,7 +335,6 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Release Record</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Signatures & GPS</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Actions</th>
               </tr>
             </thead>
@@ -372,6 +361,10 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[release.deliveryStatus]}`}>
                       {release.deliveryStatus}
                     </span>
+                    <div className="mt-2 space-y-1 text-xs text-gray-600">
+                      <p>Sender GPS: {release.senderGps || '-'}</p>
+                      <p>Receiver GPS: {release.receiverGps || '-'}</p>
+                    </div>
                     {release.receiverGps && (
                       <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-bold">
                         <MapPin className="w-3 h-3" /> GPS verified
@@ -391,16 +384,22 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                     ) : <p className="text-xs text-gray-400 mb-2">No batch record assigned</p>}
                     <p className="text-xs text-gray-600">Release agreement: {release.handoverContractId ? 'On file' : 'Not set'}</p>
                   </td>
-                  <td className="px-4 py-4 max-w-xs">
-                    <p className="text-xs"><span className="font-bold">Sender:</span> Warehouse Dispatch</p>
-                    <p className="text-xs text-gray-600">GPS: {release.senderGps || '-'}</p>
-                    <p className="text-xs mt-2"><span className="font-bold">Receiver:</span> {release.lguName}</p>
-                    <p className="text-xs text-gray-600">GPS: {release.receiverGps || '-'}</p>
-                  </td>
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">
                       {editableStatuses.includes(release.deliveryStatus) && (
-                        <button onClick={() => openReleaseAction('edit', release)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                        <button
+                          onClick={() => {
+                            if (!editableStatuses.includes(release.deliveryStatus)) {
+                              setActionModal({
+                                type: 'message',
+                                message: 'This release already has signed movement activity. Please file a correction record.'
+                              });
+                              return;
+                            }
+                            setEditingRelease(release);
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                        >
                           <Edit className="w-3 h-3" /> Edit
                         </button>
                       )}
@@ -410,7 +409,12 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                         </button>
                       )}
                       {['Approved', 'Packed'].includes(release.deliveryStatus) && (
-                        <button onClick={() => openReleaseAction('senderSign', release)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                        <button
+                          onClick={() => openReleaseAction('senderSign', release)}
+                          disabled={currentRole !== 'Trucker'}
+                          title={currentRole !== 'Trucker' ? 'RBAC: connect the Trucker MetaMask wallet to sign warehouse release.' : 'Sign release with the Trucker MetaMask wallet.'}
+                          className={`inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg ${currentRole === 'Trucker' ? 'bg-purple-600 text-white hover:bg-purple-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                        >
                           <FileSignature className="w-3 h-3" /> Sign Release
                         </button>
                       )}
@@ -420,7 +424,12 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                         </button>
                       )}
                       {['Released', 'In Transit', 'Delivered'].includes(release.deliveryStatus) && (
-                        <button onClick={() => openReleaseAction('receiverAccept', release)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700">
+                        <button
+                          onClick={() => openReleaseAction('receiverAccept', release)}
+                          disabled={currentRole !== 'LGU'}
+                          title={currentRole !== 'LGU' ? 'RBAC: connect the LGU MetaMask wallet to confirm receipt.' : 'Confirm receipt with the LGU MetaMask wallet.'}
+                          className={`inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg ${currentRole === 'LGU' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                        >
                           <MapPin className="w-3 h-3" /> Confirm Receipt
                         </button>
                       )}
@@ -458,11 +467,70 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
         </div>
       </div>
 
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900">Outgoing Discrepancy Reports</h3>
+            <p className="text-sm text-gray-600">LGU-reported issues on release quantities or deliveries.</p>
+          </div>
+          <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-bold">
+            {outgoingDiscrepancies.length} total
+          </span>
+        </div>
+        <div className="p-6">
+          {outgoingDiscrepancies.length > 0 ? (
+            <div className="space-y-3">
+              {outgoingDiscrepancies.slice(0, 5).map(report => (
+                <div key={report.id} className="flex items-start justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-gray-900">{report.drNumber || 'Unknown DR'}</p>
+                    <p className="text-xs text-gray-600 mt-1">{report.note}</p>
+                    <p className="text-[11px] text-gray-500 mt-2">Reported {report.reportedAt}</p>
+                  </div>
+                  <span className="shrink-0 inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-green-100 text-green-700">
+                    Outgoing
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 bg-green-50 rounded-lg border border-green-100">
+              <p className="text-sm font-bold text-green-900">No discrepancy reports yet</p>
+              <p className="text-xs text-green-700 mt-1">Outgoing mismatches will appear here once filed.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {showReleaseModal && (
         <AddReleaseModal
           onClose={() => setShowReleaseModal(false)}
           onSubmit={handleAddRelease}
           availableStock={inventory}
+          mode="add"
+        />
+      )}
+
+      {editingRelease && (
+        <AddReleaseModal
+          onClose={() => setEditingRelease(null)}
+          onSubmit={handleEditRelease}
+          availableStock={inventory}
+          mode="edit"
+          initialData={{
+            dateAllocated: editingRelease.dateAllocated,
+            lguName: editingRelease.lguName,
+            province: editingRelease.province,
+            municipality: editingRelease.municipality,
+            fnfiCategory: editingRelease.fnfiCategory,
+            amountRequested: editingRelease.amountRequested,
+            amountApproved: editingRelease.amountApproved,
+            sourceType: ['Oton Main Warehouse', 'Pototan Main Warehouse'].includes(editingRelease.warehouseSource) ? 'Warehouse' : 'LGU',
+            warehouseSource: editingRelease.warehouseSource,
+            deliveryMode: editingRelease.deliveryMode,
+            deliveryStatus: editingRelease.deliveryStatus,
+            incidentCode: editingRelease.incidentCode
+          }}
         />
       )}
 
@@ -579,7 +647,6 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">
-                  {actionModal.type === 'edit' && 'Edit Release Request'}
                   {actionModal.type === 'senderSign' && 'Sign Warehouse Release'}
                   {actionModal.type === 'inTransit' && 'Mark as In Transit'}
                   {actionModal.type === 'receiverAccept' && 'Confirm LGU Receipt'}
@@ -598,29 +665,6 @@ export function OutgoingModuleNew({ inventoryState }: OutgoingModuleProps) {
                 <p className="text-sm text-gray-700">{actionModal.message}</p>
               ) : (
                 <>
-                  {actionModal.type === 'edit' && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">Requested Quantity</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={actionModal.requestedAmount || 0}
-                          onChange={(e) => setActionModal({ ...actionModal, requestedAmount: Number(e.target.value) })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-2">Remarks</label>
-                        <textarea
-                          value={actionModal.note || ''}
-                          onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
-                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 min-h-24"
-                        />
-                      </div>
-                    </>
-                  )}
-
                   {actionModal.type === 'senderSign' && (
                     <p className="text-sm text-gray-700">Confirm that this warehouse release is ready for dispatch and record the sender signature?</p>
                   )}

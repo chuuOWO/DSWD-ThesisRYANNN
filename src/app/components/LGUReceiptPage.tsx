@@ -50,7 +50,7 @@ export function LGUReceiptPage({ profile, releases, onAccept, onSignOut }: LGURe
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 flex gap-3">
             <ShieldCheck className="w-5 h-5 text-blue-700 flex-shrink-0" />
             <p className="text-sm font-semibold text-blue-900">
-              Confirm package custody with MetaMask once the truck arrives. GPS is not required for this role right now.
+              Confirm package custody and receipt once the truck arrives at the LGU.
             </p>
           </div>
 
