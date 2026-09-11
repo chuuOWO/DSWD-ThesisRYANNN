@@ -9,6 +9,7 @@ export interface UserProfile {
   role: UserRole;
   truckId?: string | null;
   lguName?: string | null;
+  walletAddress?: string | null;
   createdAt?: string | null;
 }
 
@@ -18,6 +19,7 @@ export interface SignUpPayload {
   fullName: string;
   role: UserRole;
   truckId?: string;
+  walletAddress?: string;
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -36,6 +38,7 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => ({
   role: normalizeRole(row.role),
   truckId: row.truck_id ? String(row.truck_id) : null,
   lguName: row.lgu_name ? String(row.lgu_name) : null,
+  walletAddress: row.wallet_address ? String(row.wallet_address) : null,
   createdAt: row.created_at ? String(row.created_at) : null
 });
 
@@ -65,6 +68,7 @@ export const authApi = {
         role: normalizeRole(user.user_metadata?.role),
         truckId: user.user_metadata?.truck_id || null,
         lguName: null,
+        walletAddress: user.user_metadata?.wallet_address || null,
         createdAt: user.created_at
       };
     }

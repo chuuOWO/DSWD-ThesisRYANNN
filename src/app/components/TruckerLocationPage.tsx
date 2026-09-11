@@ -3,21 +3,27 @@
 import { Component, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from 'react';
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
+  ChevronUp,
   ClipboardList,
   Home,
   Loader2,
   LocateFixed,
   MapPin,
+  Package,
   Radio,
   ScanLine,
   ShieldCheck,
   Truck,
   UserRound,
+  Trash2,
   X,
   Zap
 } from 'lucide-react';
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet-routing-machine';
 import type { UserProfile } from '../services/authApi';
 import { backendApi, type TruckerReleaseRecord } from '../services/backendApi';
 
@@ -59,7 +65,7 @@ const initialInventory: Inventory = {
   remarks: ''
 };
 
-const WAREHOUSE_POSITION: [number, number] = [10.6912, 122.4728];
+const DEFAULT_MAP_CENTER: [number, number] = [10.7202, 122.5621];
 const DEFAULT_DESTINATION_POSITION: [number, number] = [10.787, 122.3892];
 
 const LGU_COORDS: Record<string, [number, number]> = {
@@ -114,20 +120,6 @@ const smoothCoordinate = (prev: number, next: number, alpha = 0.4) => {
   return prev + alpha * (next - prev);
 };
 
-const makeTemporaryQrPayload = (): QrPayload => {
-  const token = Math.floor(1000 + Math.random() * 9000);
-  return {
-    drNumber: `TMP-DR-${token}`,
-    handoverContractId: `TMP-HANDOVER-${token}`,
-    category: 'Family Food Packs',
-    quantity: 850,
-    batchTokenIds: [`BATCH-TMP-${token}`],
-    batchQuantities: [850],
-    from: 'DSWD Oton Main Warehouse',
-    to: 'Leon Municipal Office'
-  };
-};
-
 const parseQrPayload = (value: string): QrPayload => {
   const trimmed = value.trim();
   if (!trimmed) throw new Error('QR code is empty.');
@@ -137,22 +129,34 @@ const parseQrPayload = (value: string): QrPayload => {
     const batchTokenIds = Array.isArray(data.batchTokenIds) && data.batchTokenIds.length ? data.batchTokenIds.map(String) : [`BATCH-${Date.now()}`];
     const batchQuantities = Array.isArray(data.batchQuantities) && data.batchQuantities.length ? data.batchQuantities.map(Number) : [Number(data.quantity ?? 1)];
 
+    if (!data.drNumber) {
+      throw new Error('QR code does not contain a DR number.');
+    }
+
     return {
-      drNumber: String(data.drNumber || `TMP-DR-${Date.now()}`),
-      handoverContractId: String(data.handoverContractId || `HANDOVER-${Date.now()}`),
+      drNumber: String(data.drNumber),
+      handoverContractId: String(data.handoverContractId || `HANDOVER-${data.drNumber}`),
       category: String(data.category || 'Relief Goods'),
       quantity: Number(data.quantity ?? (batchQuantities.reduce((sum, amount) => sum + amount, 0) || 1)),
       batchTokenIds,
       batchQuantities,
       from: String(data.from || 'DSWD Oton Main Warehouse'),
-      to: String(data.to || 'Leon Municipal Office')
+      to: String(data.to || 'Assigned LGU')
     };
-  } catch {
-    return {
-      ...makeTemporaryQrPayload(),
-      batchTokenIds: [trimmed],
-      handoverContractId: `HANDOVER-${trimmed}`
-    };
+  } catch (err) {
+    if (trimmed.startsWith('DR-') || trimmed.startsWith('INC-')) {
+      return {
+        drNumber: trimmed,
+        handoverContractId: `HANDOVER-${trimmed}`,
+        category: 'Relief Goods',
+        quantity: 1,
+        batchTokenIds: [`BATCH-${trimmed}`],
+        batchQuantities: [1],
+        from: 'DSWD Oton Main Warehouse',
+        to: 'Assigned LGU'
+      };
+    }
+    throw new Error(err instanceof Error ? err.message : 'Invalid QR code format. Please scan a valid shipment QR code.');
   }
 };
 
@@ -240,6 +244,138 @@ function MapController({ center, recenterKey }: { center: [number, number]; rece
   return null;
 }
 
+function RoadLockedDeliveryRoute({
+  currentPosition,
+  destinationPosition
+}: {
+  currentPosition: [number, number];
+  destinationPosition: [number, number];
+}) {
+  const map = useMap();
+  const [roadCoordinates, setRoadCoordinates] = useState<[number, number][] | null>(null);
+  const [connectorPoint, setConnectorPoint] = useState<[number, number] | null>(null);
+
+  useEffect(() => {
+    if (!map || !isValidCoordinate(currentPosition) || !isValidCoordinate(destinationPosition)) {
+      setRoadCoordinates(null);
+      setConnectorPoint(null);
+      return;
+    }
+
+    let isMounted = true;
+    let control: any = null;
+
+    try {
+      control = L.Routing.control({
+        waypoints: [
+          L.latLng(currentPosition[0], currentPosition[1]),
+          L.latLng(destinationPosition[0], destinationPosition[1])
+        ],
+        router: L.Routing.osrmv1({
+          serviceUrl: 'https://router.project-osrm.org/route/v1',
+          profile: 'driving'
+        }),
+        lineOptions: {
+          styles: [{ color: '#2500ba', opacity: 0, weight: 0 }],
+          extendToWaypoints: false,
+          missingRouteTolerance: 0
+        },
+        addWaypoints: false,
+        routeWhileDragging: false,
+        draggableWaypoints: false,
+        fitSelectedRoutes: false,
+        show: false,
+        createMarker: () => null
+      } as L.Routing.RoutingControlOptions).addTo(map);
+
+      control.on('routesfound', (event: any) => {
+        if (!isMounted) return;
+        const osrmRoute = event.routes?.[0];
+        const rawCoords: L.LatLng[] = osrmRoute?.coordinates ?? [];
+        if (rawCoords.length > 0) {
+          const coords: [number, number][] = rawCoords.map((c) => [c.lat, c.lng]);
+          setRoadCoordinates(coords);
+
+          // Check first road point distance from currentPosition
+          const firstRoadPoint = coords[0];
+          const distMeters = getDistanceMeters(
+            currentPosition[0],
+            currentPosition[1],
+            firstRoadPoint[0],
+            firstRoadPoint[1]
+          );
+
+          // If off-road (> 15 meters), draw dashed connector line to the nearest road entry
+          if (distMeters > 15) {
+            setConnectorPoint(firstRoadPoint);
+          } else {
+            setConnectorPoint(null);
+          }
+        }
+      });
+
+      control.on('routingerror', () => {
+        if (!isMounted) return;
+        setRoadCoordinates([currentPosition, destinationPosition]);
+        setConnectorPoint(null);
+      });
+    } catch {
+      if (isMounted) {
+        setRoadCoordinates([currentPosition, destinationPosition]);
+        setConnectorPoint(null);
+      }
+    }
+
+    return () => {
+      isMounted = false;
+      if (control) {
+        try {
+          map.removeControl(control);
+        } catch {}
+      }
+    };
+  }, [map, currentPosition[0], currentPosition[1], destinationPosition[0], destinationPosition[1]]);
+
+  return (
+    <>
+      {/* 1. Dashed Off-Road Connector to the nearest road entrance */}
+      {connectorPoint && isValidCoordinate(currentPosition) && isValidCoordinate(connectorPoint) && (
+        <Polyline
+          positions={[currentPosition, connectorPoint]}
+          pathOptions={{
+            color: '#2500ba',
+            weight: 3.5,
+            opacity: 0.9,
+            dashArray: '6, 6'
+          }}
+        />
+      )}
+
+      {/* 2. Solid Road-Locked Path along the streets/highways to the destination */}
+      {roadCoordinates && roadCoordinates.length > 0 && (
+        <Polyline
+          positions={roadCoordinates}
+          pathOptions={{
+            color: '#2500ba',
+            weight: 5,
+            opacity: 0.9,
+            lineJoin: 'round',
+            lineCap: 'round'
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+const getReceiverIdentifier = (profile?: UserProfile | null) => {
+  if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim();
+  if (profile?.fullName && profile.fullName.trim()) return profile.fullName.trim().replace(/\s+/g, '-').toUpperCase();
+  if (profile?.email && profile.email.trim()) return profile.email.split('@')[0].toUpperCase();
+  if (profile?.id) return `RCVR-${profile.id.slice(0, 6).toUpperCase()}`;
+  return 'DRIVER';
+};
+
 interface ErrorBoundaryProps {
   children: ReactNode;
   receiverId?: string;
@@ -268,6 +404,7 @@ class TruckerErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   handleReset = () => {
     try {
       if (this.props.receiverId) {
+        localStorage.removeItem(`trucker_active_packages_${this.props.receiverId}`);
         localStorage.removeItem(`trucker_active_delivery_${this.props.receiverId}`);
       }
       localStorage.removeItem('trucker_active_delivery_TRK-001');
@@ -327,7 +464,7 @@ interface TruckerLocationPageProps {
 }
 
 export function TruckerLocationPage(props: TruckerLocationPageProps) {
-  const receiverId = props.profile?.truckId || (typeof props.profile?.fullName === 'string' && props.profile.fullName.trim() ? props.profile.fullName.trim().replace(/\s+/g, '-').toUpperCase() : 'TRK-001');
+  const receiverId = useMemo(() => getReceiverIdentifier(props.profile), [props.profile]);
   return (
     <TruckerErrorBoundary receiverId={receiverId} onSignOut={props.onSignOut}>
       <TruckerLocationPageContent {...props} />
@@ -336,53 +473,70 @@ export function TruckerLocationPage(props: TruckerLocationPageProps) {
 }
 
 function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageProps) {
-  const receiverId = profile?.truckId || (typeof profile?.fullName === 'string' && profile.fullName.trim() ? profile.fullName.trim().replace(/\s+/g, '-').toUpperCase() : 'TRK-001');
-  const storageKey = `trucker_active_delivery_${receiverId}`;
+  const receiverId = useMemo(() => getReceiverIdentifier(profile), [profile]);
+  const storageKey = `trucker_active_packages_${receiverId}`;
+  const lastKnownPosKey = `trucker_last_known_pos_${receiverId}`;
 
   const [step, setStep] = useState<Step>('pickup');
   const [inventory, setInventory] = useState(initialInventory);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraMessage, setCameraMessage] = useState('Point your camera at the QR code.');
-  const [manualQr, setManualQr] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   
-  const [activePayload, setActivePayload] = useState<QrPayload | null>(() => {
+  const [activePackages, setActivePackages] = useState<QrPayload[]>(() => {
     try {
       if (typeof window !== 'undefined') {
+        // Clean legacy single-item keys
+        localStorage.removeItem('trucker_active_delivery_TRK-001');
+        localStorage.removeItem(`trucker_active_delivery_${receiverId}`);
+
         const saved = localStorage.getItem(storageKey);
         if (saved) {
-          const parsed = JSON.parse(saved) as Partial<QrPayload>;
-          if (parsed && typeof parsed.drNumber === 'string') {
-            return {
-              drNumber: String(parsed.drNumber),
-              handoverContractId: String(parsed.handoverContractId || `HANDOVER-${parsed.drNumber}`),
-              category: String(parsed.category || 'Relief Goods'),
-              quantity: Number(parsed.quantity ?? 1),
-              batchTokenIds: Array.isArray(parsed.batchTokenIds) ? parsed.batchTokenIds.map(String) : [],
-              batchQuantities: Array.isArray(parsed.batchQuantities) ? parsed.batchQuantities.map(Number) : [],
-              from: String(parsed.from || 'DSWD Oton Main Warehouse'),
-              to: String(parsed.to || 'Leon Municipal Office')
-            };
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            return parsed.filter((p) => p && typeof p.drNumber === 'string');
           }
         }
       }
     } catch {
       // ignore corrupted storage
     }
-    return null;
+    return [];
   });
 
   const [handoverToast, setHandoverToast] = useState<string | null>(null);
-  const [location, setLocation] = useState<PhoneLocation | null>(null);
+  const [location, setLocation] = useState<PhoneLocation | null>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const savedPos = localStorage.getItem(lastKnownPosKey);
+        if (savedPos) {
+          const parsed = JSON.parse(savedPos) as Partial<PhoneLocation>;
+          if (typeof parsed.latitude === 'number' && typeof parsed.longitude === 'number' && !isNaN(parsed.latitude) && !isNaN(parsed.longitude)) {
+            return {
+              latitude: parsed.latitude,
+              longitude: parsed.longitude,
+              accuracy: parsed.accuracy ?? null,
+              timestamp: parsed.timestamp || new Date().toISOString()
+            };
+          }
+        }
+      }
+    } catch {}
+    return null;
+  });
+
   const [release, setRelease] = useState<TruckerReleaseRecord | null>(null);
   const [isSigning, setIsSigning] = useState(false);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
 
-  const activePayloadRef = useRef<QrPayload | null>(activePayload);
+  const activePackagesRef = useRef<QrPayload[]>(activePackages);
   useEffect(() => {
-    activePayloadRef.current = activePayload;
-  }, [activePayload]);
+    activePackagesRef.current = activePackages;
+  }, [activePackages]);
 
-  const lastProcessedLocRef = useRef<PhoneLocation | null>(null);
+  const activePayload = activePackages[activePackages.length - 1] ?? null;
+
+  const lastProcessedLocRef = useRef<PhoneLocation | null>(location);
   const watchIdRef = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -395,17 +549,49 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
     if (location && typeof location.latitude === 'number' && typeof location.longitude === 'number' && !isNaN(location.latitude) && !isNaN(location.longitude)) {
       return [location.latitude, location.longitude];
     }
-    return WAREHOUSE_POSITION;
+    return DEFAULT_MAP_CENTER;
   }, [location]);
   
-  const isInTransit = Boolean(activePayload);
+  const isInTransit = activePackages.length > 0;
+  const totalQuantity = useMemo(() => activePackages.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0), [activePackages]);
+  const handleRemovePackage = (drNumber: string) => {
+    const updated = activePackages.filter((p) => p.drNumber !== drNumber);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(updated));
+    } catch {}
+    setActivePackages(updated);
+    if (updated.length === 0) {
+      setInventory(initialInventory);
+      setIsDropdownOpen(false);
+    }
+    void backendApi.assignTruckToRelease(drNumber, null, 'Released').catch(() => {});
+  };
+
+  const handleClearAllPackages = () => {
+    try {
+      localStorage.removeItem(storageKey);
+    } catch {}
+    for (const pkg of activePackages) {
+      void backendApi.assignTruckToRelease(pkg.drNumber, null, 'Released').catch(() => {});
+    }
+    setActivePackages([]);
+    setInventory(initialInventory);
+    setIsDropdownOpen(false);
+  };
+
+  const saveLocationState = (nextLoc: PhoneLocation) => {
+    lastProcessedLocRef.current = nextLoc;
+    setLocation(nextLoc);
+    try {
+      localStorage.setItem(lastKnownPosKey, JSON.stringify(nextLoc));
+    } catch {}
+  };
 
   // 1. Continuous Local GPS watcher (runs all the time, Maxim-style)
   useEffect(() => {
     getBrowserLocation()
       .then((loc) => {
-        lastProcessedLocRef.current = loc;
-        setLocation(loc);
+        saveLocationState(loc);
         setRecenterTrigger((prev) => prev + 1);
       })
       .catch((err) => console.warn('Initial GPS lookup:', err));
@@ -419,7 +605,7 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
         const accuracy = nextPos.coords.accuracy;
 
         if (typeof rawLat !== 'number' || typeof rawLng !== 'number' || isNaN(rawLat) || isNaN(rawLng)) return;
-        if (accuracy && accuracy > 50) return;
+        if (accuracy && accuracy > 150) return;
 
         const prev = lastProcessedLocRef.current;
         if (prev) {
@@ -437,22 +623,18 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
           timestamp: new Date().toISOString()
         };
 
-        lastProcessedLocRef.current = updatedLoc;
-        setLocation(updatedLoc);
+        saveLocationState(updatedLoc);
 
         // Broadcast to Supabase ONLY if in active custody
-        const currentPayload = activePayloadRef.current;
-        if (currentPayload) {
+        const currentPackages = activePackagesRef.current;
+        if (currentPackages && currentPackages.length > 0) {
           void backendApi.upsertTruckLiveLocation({
             truck_id: receiverId,
-            dr_number: currentPayload.drNumber,
             latitude: updatedLoc.latitude,
             longitude: updatedLoc.longitude,
             gps_text: formatGps(updatedLoc),
             accuracy: updatedLoc.accuracy ? Math.round(updatedLoc.accuracy) : null,
-            tx_hash: `RCVR-SIG-${Date.now()}`,
             wallet_address: profile?.walletAddress || '0xReceiverWallet',
-            proof_mode: 'signature',
             updated_at: new Date().toISOString()
           }).catch(() => {});
         }
@@ -469,7 +651,7 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
         watchIdRef.current = null;
       }
     };
-  }, [profile?.walletAddress, receiverId]);
+  }, [lastKnownPosKey, profile?.walletAddress, receiverId]);
 
   // Clean up camera on unmount
   useEffect(() => {
@@ -485,65 +667,34 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
 
     const checkCustodyStatus = async () => {
       try {
-        const [releases, locations] = await Promise.all([
-          backendApi.getTruckerReleases(),
-          backendApi.getTruckLiveLocations()
-        ]);
+        const releases = await backendApi.getTruckerReleases(receiverId);
 
         if (!isSubscribed) return;
         const currentRelease = releases[0] ?? null;
         setRelease(currentRelease);
 
-        const currentActive = activePayloadRef.current;
-        const activeTruckLoc = locations.find(
-          (loc) => loc.truck_id === receiverId && loc.proof_mode !== 'delivered'
-        );
+        const currentPackages = activePackagesRef.current;
+        if (currentPackages && currentPackages.length > 0) {
+          const remainingPackages = currentPackages.filter((pkg) => {
+            const matchingReq = releases.find((r) => r.dr_number === pkg.drNumber);
+            if (!matchingReq) return false;
+            const isAssignedToMe = matchingReq.assigned_truck_id === receiverId;
+            const isDone = ['Delivered', 'Accepted', 'Distributed'].includes(matchingReq.delivery_status ?? '');
+            return isAssignedToMe && !isDone;
+          });
 
-        if (currentActive) {
-          // If we currently have active custody, check if recipient signed receipt in database
-          const matchingReq = releases.find((r) => r.dr_number === currentActive.drNumber);
-          const isDeliveredLoc = locations.find(
-            (loc) => loc.truck_id === receiverId && loc.proof_mode === 'delivered' && loc.dr_number === currentActive.drNumber
-          );
-
-          if ((matchingReq && ['Accepted', 'Delivered'].includes(matchingReq.delivery_status)) || isDeliveredLoc) {
+          if (remainingPackages.length !== currentPackages.length) {
+            const deliveredCount = currentPackages.length - remainingPackages.length;
             try {
-              localStorage.removeItem(storageKey);
+              localStorage.setItem(storageKey, JSON.stringify(remainingPackages));
             } catch {}
-            setActivePayload(null);
-            setInventory(initialInventory);
-            setHandoverToast(`✓ Package ${currentActive.drNumber} was accepted by the recipient! Custody auto-cleared.`);
+            setActivePackages(remainingPackages);
+            if (remainingPackages.length === 0) {
+              setInventory(initialInventory);
+            }
+            setHandoverToast(`✓ ${deliveredCount} package(s) updated/cleared from custody.`);
             setTimeout(() => setHandoverToast(null), 6000);
           }
-        } else if (activeTruckLoc) {
-          // Restore activePayload from database if trucker refreshed while in transit
-          const matchingRelease = releases.find((r) => r.dr_number === activeTruckLoc.dr_number) || currentRelease;
-          let restoredPayload: QrPayload;
-          if (matchingRelease) {
-            restoredPayload = releaseToPayload(matchingRelease);
-          } else {
-            restoredPayload = {
-              drNumber: activeTruckLoc.dr_number,
-              handoverContractId: `HANDOVER-${activeTruckLoc.dr_number}`,
-              category: 'Relief Goods',
-              quantity: 1,
-              batchTokenIds: [`BATCH-${activeTruckLoc.dr_number}`],
-              batchQuantities: [1],
-              from: 'DSWD Oton Main Warehouse',
-              to: 'Leon Municipal Office'
-            };
-          }
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(restoredPayload));
-          } catch {}
-          setActivePayload(restoredPayload);
-          setInventory({
-            batchTokenId: restoredPayload.batchTokenIds[0] ?? restoredPayload.handoverContractId,
-            category: restoredPayload.category,
-            quantity: restoredPayload.quantity,
-            status: 'In transit',
-            remarks: ''
-          });
         }
       } catch (error) {
         console.warn('Failed to verify trucker custody status:', error);
@@ -587,41 +738,46 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
       try {
         nextLocation = await getBrowserLocation();
       } catch (gpsErr) {
-        console.warn('GPS lookup fallback in signAndShare:', gpsErr);
+        console.warn('GPS lookup fallback in signAndShare, using current location:', gpsErr);
         nextLocation = location ?? {
-          latitude: WAREHOUSE_POSITION[0],
-          longitude: WAREHOUSE_POSITION[1],
-          accuracy: 10,
+          latitude: DEFAULT_MAP_CENTER[0],
+          longitude: DEFAULT_MAP_CENTER[1],
+          accuracy: 25,
           timestamp: new Date().toISOString()
         };
       }
 
-      lastProcessedLocRef.current = nextLocation;
-      setLocation(nextLocation);
+      saveLocationState(nextLocation);
       setRecenterTrigger((prev) => prev + 1);
+
+      // Assign package to this truck in Supabase outgoing_requests
+      await backendApi.assignTruckToRelease(payload.drNumber, receiverId, 'In Transit');
+
+      const updatedPackages = [
+        ...activePackages.filter((p) => p.drNumber !== payload.drNumber),
+        payload
+      ];
+
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(updatedPackages));
+      } catch {}
+
+      setActivePackages(updatedPackages);
 
       try {
         await backendApi.upsertTruckLiveLocation({
           truck_id: receiverId,
-          dr_number: payload.drNumber,
           latitude: nextLocation.latitude,
           longitude: nextLocation.longitude,
           gps_text: formatGps(nextLocation),
           accuracy: nextLocation.accuracy ? Math.round(nextLocation.accuracy) : null,
-          tx_hash: `RCVR-SIG-${Date.now()}`,
           wallet_address: profile?.walletAddress || '0xReceiverWallet',
-          proof_mode: 'signature',
           updated_at: new Date().toISOString()
         });
       } catch (apiErr) {
         console.warn('Supabase upsert live location error:', apiErr);
       }
 
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(payload));
-      } catch {}
-
-      setActivePayload(payload);
       setInventory({
         batchTokenId: payload.batchTokenIds[0] ?? payload.handoverContractId,
         category: payload.category,
@@ -653,7 +809,7 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
     setCameraMessage('Requesting camera access...');
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraMessage('Camera unavailable. Use manual input or test scan.');
+      setCameraMessage('Camera unavailable.');
       return;
     }
 
@@ -663,7 +819,7 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
       if (videoRef.current) videoRef.current.srcObject = stream;
       const Detector = (window as BarcodeDetectorWindow).BarcodeDetector;
       if (!Detector) {
-        setCameraMessage('Camera is ready. Use manual input or test scan.');
+        setCameraMessage('Point camera at QR code.');
         return;
       }
 
@@ -682,16 +838,8 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
       const video = videoRef.current;
       if (video) video.onloadeddata = () => requestAnimationFrame(scan);
     } catch {
-      setCameraMessage('Camera permission was denied. Use manual input or test scan.');
+      setCameraMessage('Camera permission was denied.');
     }
-  };
-
-  const handleTemporaryScan = () => {
-    if (release) {
-      void signAndShare(releaseToPayload(release));
-      return;
-    }
-    void signAndShare(makeTemporaryQrPayload());
   };
 
   const isFlow = step !== 'pickup';
@@ -759,9 +907,9 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
               </CircleMarker>
 
               {isInTransit && isValidCoordinate(currentPosition) && isValidCoordinate(destinationPosition) && (
-                <Polyline
-                  positions={[WAREHOUSE_POSITION, currentPosition, destinationPosition]}
-                  pathOptions={{ color: '#2500ba', weight: 4, opacity: 0.8, dashArray: '6, 6' }}
+                <RoadLockedDeliveryRoute
+                  currentPosition={currentPosition}
+                  destinationPosition={destinationPosition}
                 />
               )}
             </MapContainer>
@@ -775,34 +923,94 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
             </div>
           )}
 
-          {/* Active Custody Floating Popup (When carrying package) */}
-          {isInTransit && activePayload && (
-            <div className="absolute left-4 right-4 top-4 z-10 rounded-xl bg-white/95 p-3.5 shadow-lg border-2 border-emerald-500/30 backdrop-blur-sm transition">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex gap-2.5">
-                  <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0">
-                    <Radio size={14} className="animate-pulse" />
+          {/* Active Custody Floating Popup (When carrying 1 or more packages) */}
+          {isInTransit && activePackages.length > 0 && (
+            <div className="absolute left-3 right-3 top-3 z-10 max-h-[300px] overflow-hidden rounded-2xl bg-white/95 p-3 shadow-xl border-2 border-emerald-500/40 backdrop-blur-md transition-all">
+              {/* Header bar / Dropdown Toggle */}
+              <div
+                onClick={() => setIsDropdownOpen((prev) => !prev)}
+                className="flex items-center justify-between gap-2 cursor-pointer select-none"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 flex-shrink-0">
+                    <Radio size={15} className="animate-pulse" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <p className="text-[11px] font-bold text-gray-900">Package in Active Custody</p>
+                      <p className="text-[11px] font-bold text-gray-900 truncate">
+                        {activePackages.length === 1 ? '1 Package in Active Custody' : `${activePackages.length} Packages in Active Custody`}
+                      </p>
                       <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
                     </div>
-                    <p className="text-[10px] font-semibold text-[#2500ba] mt-0.5">
-                      DR #{activePayload.drNumber} • {activePayload.quantity} {activePayload.category}
+                    <p className="text-[9.5px] font-semibold text-[#2500ba] truncate">
+                      Total {totalQuantity} items • LIVE GPS ON
                     </p>
-                    <div className="flex items-center gap-1 text-[9px] text-gray-600 mt-1">
-                      <MapPin size={11} className="text-red-500 flex-shrink-0" />
-                      <span className="font-medium truncate">To: {activePayload.to}</span>
-                    </div>
                   </div>
                 </div>
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800 whitespace-nowrap">
-                  LIVE GPS ON
-                </span>
+
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-800">
+                    {isDropdownOpen ? 'Hide' : `${activePackages.length} pkgs`}
+                  </span>
+                  <button
+                    type="button"
+                    className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition"
+                    aria-label="Toggle package list"
+                  >
+                    {isDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                </div>
               </div>
-              <p className="mt-2 text-[8.5px] text-gray-400 italic">
-                * Custody will automatically clear when the destination officer scans & accepts receipt.
+
+              {/* Collapsible Dropdown List */}
+              {isDropdownOpen && (
+                <div className="mt-2.5 max-h-[180px] space-y-2 overflow-y-auto border-t border-gray-100 pt-2.5 pr-1">
+                  {activePackages.map((pkg, idx) => (
+                    <div
+                      key={pkg.drNumber || idx}
+                      className="rounded-xl border border-gray-200 bg-gray-50/90 p-2.5 text-left text-xs transition hover:bg-white relative group"
+                    >
+                      <div className="flex items-center justify-between pr-5">
+                        <span className="font-bold text-[#2500ba] text-[10.5px]">DR #{pkg.drNumber}</span>
+                        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-semibold text-blue-800">
+                          {pkg.quantity} {pkg.category}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-1 text-[9.5px] text-gray-600">
+                        <MapPin size={11} className="text-red-500 flex-shrink-0" />
+                        <span className="truncate font-medium">To: {pkg.to}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemovePackage(pkg.drNumber);
+                        }}
+                        className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-red-100 hover:text-red-600 transition"
+                        title="Remove package from active custody"
+                        aria-label="Remove package"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleClearAllPackages();
+                    }}
+                    className="w-full mt-2 rounded-lg border border-red-200 bg-red-50 py-1.5 text-[9.5px] font-bold text-red-600 hover:bg-red-100 transition flex items-center justify-center gap-1"
+                  >
+                    <Trash2 size={11} />
+                    Clear All Active Custody
+                  </button>
+                </div>
+              )}
+
+              <p className="mt-2 text-[8px] text-gray-400 italic">
+                * Custody will automatically clear as each recipient officer scans & accepts receipt.
               </p>
             </div>
           )}
@@ -821,7 +1029,7 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
           {/* Bottom Action Sheet (Always ready to scan anything) */}
           <div className="absolute bottom-3 left-4 right-4 z-10 rounded-xl bg-white p-3 shadow-md border border-gray-100">
             <div className="mb-2 flex justify-between text-[9px] text-gray-500">
-              <span>{isInTransit ? '1 package in custody' : 'Map Live • Standby'}</span>
+              <span>{isInTransit ? `${activePackages.length} package${activePackages.length > 1 ? 's' : ''} in custody` : 'Map Live • Standby'}</span>
               <span className={`font-bold ${isInTransit ? 'text-emerald-600' : 'text-[#2500ba]'}`}>
                 {isInTransit ? 'DASHBOARD TRACKING ON' : 'LOCAL GPS ONLY'}
               </span>
@@ -850,10 +1058,6 @@ function TruckerLocationPageContent({ profile, onSignOut }: TruckerLocationPageP
             <ScanModal
               onClose={() => nav('pickup')}
               onStart={startCamera}
-              manualQr={manualQr}
-              setManualQr={setManualQr}
-              onManual={() => handleQrValue(manualQr)}
-              onTemporaryScan={handleTemporaryScan}
               cameraOpen={cameraOpen}
               closeCamera={stopCamera}
               videoRef={videoRef}
@@ -1032,10 +1236,6 @@ function Modal({ title, icon, children, onClose }: { title: string; icon?: React
 function ScanModal({
   onClose,
   onStart,
-  manualQr,
-  setManualQr,
-  onManual,
-  onTemporaryScan,
   cameraOpen,
   closeCamera,
   videoRef,
@@ -1044,10 +1244,6 @@ function ScanModal({
 }: {
   onClose: () => void;
   onStart: () => void;
-  manualQr: string;
-  setManualQr: (value: string) => void;
-  onManual: () => void;
-  onTemporaryScan: () => void;
   cameraOpen: boolean;
   closeCamera: () => void;
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -1058,7 +1254,7 @@ function ScanModal({
     <div className="absolute inset-0 z-30 flex flex-col bg-[#15131f]/90 p-5 text-white">
       <div className="flex items-center justify-between">
         <button onClick={onClose} aria-label="Back"><ChevronLeft /></button>
-        <p className="text-xs font-bold">Scan QR code</p>
+        <p className="text-xs font-bold">Scan Package QR Code</p>
         <Zap size={16} />
       </div>
 
@@ -1083,36 +1279,10 @@ function ScanModal({
       <button
         onClick={cameraOpen ? closeCamera : onStart}
         disabled={isSigning}
-        className="mx-auto mt-3 rounded-full bg-white px-6 py-2.5 text-[10px] font-bold text-[#2500ba] disabled:opacity-50"
+        className="mx-auto mt-4 rounded-full bg-white px-6 py-2.5 text-[10px] font-bold text-[#2500ba] disabled:opacity-50 hover:bg-gray-100 transition"
       >
         {cameraOpen ? 'Close camera' : 'Open camera'}
       </button>
-
-      <button
-        type="button"
-        onClick={onTemporaryScan}
-        disabled={isSigning}
-        className="mx-auto mt-2 rounded-full bg-[#2500ba] px-6 py-2.5 text-[10px] font-bold text-white shadow hover:bg-blue-800 disabled:opacity-50"
-      >
-        {isSigning ? 'Signing...' : 'Temporary scan package'}
-      </button>
-
-      <div className="mx-auto mt-auto w-full max-w-[310px] rounded-xl bg-white p-3 text-[#15132d]">
-        <p className="mb-1 text-[10px] font-bold text-[#2500ba]">Manual QR fallback</p>
-        <input
-          value={manualQr}
-          onChange={(e) => setManualQr(e.target.value)}
-          placeholder="Paste token ID or JSON payload"
-          className="w-full rounded-lg border p-2.5 text-[10px]"
-        />
-        <button
-          onClick={onManual}
-          disabled={isSigning}
-          className="mt-2 w-full rounded-lg bg-[#2500ba] py-2.5 text-[10px] font-bold text-white disabled:opacity-50"
-        >
-          Use scanned value
-        </button>
-      </div>
     </div>
   );
 }

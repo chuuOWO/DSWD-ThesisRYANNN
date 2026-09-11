@@ -44,6 +44,8 @@ export interface OutgoingPayload {
   receiverGps?: string;
   txHash?: string;
   walletAddress?: string;
+  assignedTruckId?: string | null;
+  assigned_truck_id?: string | null;
 }
 
 export interface LGUInventoryReportPayload {
@@ -80,18 +82,17 @@ export interface OutgoingUpdatePayload {
   senderSignature?: string;
   receiverSignature?: string;
   walletAddress?: string;
+  assignedTruckId?: string | null;
+  assigned_truck_id?: string | null;
 }
 
 export interface TruckLiveLocation {
   truck_id: string;
-  dr_number?: string | null;
   latitude: number;
   longitude: number;
   gps_text: string;
   accuracy?: number | null;
-  tx_hash?: string | null;
   wallet_address?: string | null;
-  proof_mode?: string | null;
   updated_at?: string | null;
 }
 
@@ -110,6 +111,9 @@ export interface TruckerReleaseRecord {
   incident_code?: string | null;
   allocated_batches?: { batchTokenId?: string | null; quantity?: number | null }[] | null;
   handover_contract_id?: string | null;
+  assigned_truck_id?: string | null;
+  tx_hash?: string | null;
+  wallet_address?: string | null;
 }
 
 const throwIfError = (error: unknown, context: string) => {
@@ -215,7 +219,8 @@ export const backendApi = {
         sender_gps: payload.senderGps,
         receiver_gps: payload.receiverGps,
         tx_hash: payload.txHash,
-        wallet_address: payload.walletAddress
+        wallet_address: payload.walletAddress,
+        assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null
       })
       .select('id')
       .single();
@@ -235,7 +240,8 @@ export const backendApi = {
       handover_contract_id: payload.handoverContractId,
       sender_signature: payload.senderSignature,
       receiver_signature: payload.receiverSignature,
-      wallet_address: payload.walletAddress
+      wallet_address: payload.walletAddress,
+      assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id
     });
 
     const { error } = await supabase
@@ -333,21 +339,37 @@ export const backendApi = {
     return { ok: true };
   },
 
-  async getTruckerReleases(drNumber?: string | null) {
+  async getTruckerReleases(truckId?: string | null) {
     let query = supabase
       .from('outgoing_requests')
-      .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id')
+      .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,tx_hash,wallet_address')
       .ilike('delivery_mode', 'truck')
-      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit'])
+      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
       .order('created_at', { ascending: false });
 
-    if (drNumber) {
-      query = query.eq('dr_number', drNumber);
+    if (truckId) {
+      query = query.or(`assigned_truck_id.eq.${truckId},assigned_truck_id.is.null`);
     }
 
     const { data, error } = await query;
     throwIfError(error, 'Failed to fetch trucker releases');
     return (data ?? []) as TruckerReleaseRecord[];
+  },
+
+  async assignTruckToRelease(drNumber: string, truckId: string | null, deliveryStatus: string = 'In Transit') {
+    const updates: Record<string, unknown> = {
+      assigned_truck_id: truckId
+    };
+    if (deliveryStatus) {
+      updates.delivery_status = deliveryStatus;
+    }
+    const { error } = await supabase
+      .from('outgoing_requests')
+      .update(updates)
+      .eq('dr_number', drNumber);
+
+    throwIfError(error, 'Failed to assign truck to release');
+    return { ok: true };
   },
 
   async getTruckLiveLocations(): Promise<TruckLiveLocation[]> {
@@ -366,30 +388,40 @@ export const backendApi = {
 
   async upsertTruckLiveLocation(payload: TruckLiveLocation) {
     try {
-      await supabase
+      const sanitizedPayload: Record<string, unknown> = {
+        truck_id: payload.truck_id,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        gps_text: payload.gps_text,
+        accuracy: payload.accuracy ?? null,
+        wallet_address: payload.wallet_address ?? null,
+        updated_at: payload.updated_at || new Date().toISOString()
+      };
+
+      const { error } = await supabase
         .from('truck_live_locations')
-        .upsert(payload, { onConflict: 'truck_id' });
-    } catch {
-      // Ignored when truck_live_locations table is not present
+        .upsert(sanitizedPayload, { onConflict: 'truck_id' });
+      if (error) {
+        console.warn('upsertTruckLiveLocation warning:', error.message);
+      }
+    } catch (err) {
+      console.warn('upsertTruckLiveLocation error:', err);
     }
     return { ok: true };
   },
 
   async markTruckLiveLocationDone(truckId: string, drNumber?: string) {
     try {
-      await supabase
-        .from('truck_live_locations')
-        .update({
-          proof_mode: 'delivered',
-          updated_at: new Date().toISOString()
-        })
-        .eq('truck_id', truckId);
-
       if (drNumber) {
         await supabase
           .from('outgoing_requests')
           .update({ delivery_status: 'Delivered' })
           .eq('dr_number', drNumber);
+      } else {
+        await supabase
+          .from('outgoing_requests')
+          .update({ delivery_status: 'Delivered' })
+          .eq('assigned_truck_id', truckId);
       }
     } catch (error) {
       console.warn('Failed to mark delivery done:', error);
@@ -400,11 +432,8 @@ export const backendApi = {
   async markTruckLiveLocationDoneByDr(drNumber: string) {
     try {
       await supabase
-        .from('truck_live_locations')
-        .update({
-          proof_mode: 'delivered',
-          updated_at: new Date().toISOString()
-        })
+        .from('outgoing_requests')
+        .update({ delivery_status: 'Delivered' })
         .eq('dr_number', drNumber);
     } catch (error) {
       console.warn('Failed to mark delivery done by DR:', error);

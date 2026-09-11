@@ -114,7 +114,6 @@ const shortWallet = (address?: string | null) => {
 
 const isActiveReceiverLocation = (location: TruckLiveLocation) => {
   if (!location || !location.truck_id) return false;
-  if (location.proof_mode && location.proof_mode.toLowerCase() === 'delivered') return false;
   if (typeof location.latitude !== 'number' || typeof location.longitude !== 'number') return false;
   return true;
 };
@@ -157,20 +156,82 @@ const getProgress = (location: TruckLiveLocation, destination: [number, number])
 
 const toTruckRoute = (
   location: TruckLiveLocation,
-  release?: TruckerReleaseRecord | OutgoingRelease
+  releases: TruckerReleaseRecord[],
+  outgoingReleasesList: OutgoingRelease[]
 ): TruckRoute => {
-  const origin = String(getReleaseValue(release, 'warehouse_source', 'warehouseSource') ?? 'DSWD Oton Warehouse');
-  const destination = String(
-    getReleaseValue(release, 'lgu_name', 'lguName')
-    ?? getReleaseValue(release, 'municipality', 'municipality')
-    ?? 'Assigned LGU'
-  );
-  const category = String(getReleaseValue(release, 'category', 'fnfiCategory') ?? 'Relief goods');
-  const quantity = Number(getReleaseValue(release, 'amount_approved', 'amountApproved') ?? 0);
-  const status = getReleaseValue(release, 'delivery_status', 'deliveryStatus') === 'Delivered' ? 'Delivered' : 'In Transit';
+  const allReleases: TruckerReleaseRecord[] = [
+    ...releases,
+    ...outgoingReleasesList.map((r) => ({
+      dr_number: r.drNumber,
+      lgu_name: r.lguName,
+      municipality: r.municipality,
+      province: r.province,
+      category: r.fnfiCategory,
+      amount_approved: r.amountApproved,
+      amount_requested: r.amountRequested,
+      warehouse_source: r.warehouseSource,
+      delivery_status: r.deliveryStatus,
+      assigned_truck_id: r.assignedTruckId ?? r.assigned_truck_id,
+      tx_hash: r.blockchainTxHash,
+      wallet_address: undefined
+    }))
+  ];
+
+  const uniqueMap = new Map<string, TruckerReleaseRecord>();
+  for (const rel of allReleases) {
+    if (rel.dr_number && !uniqueMap.has(rel.dr_number)) {
+      uniqueMap.set(rel.dr_number, rel);
+    }
+  }
+
+  const assignedPackages = Array.from(uniqueMap.values()).filter((r) => {
+    return r.assigned_truck_id === location.truck_id;
+  });
+
+  const activeAssigned = assignedPackages.filter((r) => r.delivery_status !== 'Delivered');
+
+  let origin = 'DSWD Oton Warehouse';
+  let destination = 'Assigned LGU';
+  let cargo = 'Standby (0 active packages)';
+  let status: TruckStatus = 'In Transit';
+
+  if (activeAssigned.length > 0) {
+    const origins = Array.from(new Set(activeAssigned.map((r) => String(r.warehouse_source || 'DSWD Oton Warehouse'))));
+    origin = origins.join(', ');
+
+    const destinations = Array.from(new Set(activeAssigned.map((r) => String(r.lgu_name || r.municipality || 'Assigned LGU'))));
+    destination = destinations.join(', ');
+
+    status = 'In Transit';
+
+    const cargoItems = activeAssigned.map((r) => {
+      const qty = Number(r.amount_approved ?? r.amount_requested ?? 0);
+      const cat = String(r.category || 'Relief goods');
+      const dest = String(r.lgu_name || r.municipality || '');
+      const prefix = qty > 0 ? `${qty} ${cat}` : cat;
+      return dest ? `${prefix} (${dest})` : prefix;
+    });
+
+    if (cargoItems.length > 1) {
+      cargo = `${cargoItems.length} Packages: ${cargoItems.join(', ')}`;
+    } else {
+      cargo = cargoItems[0] || 'Relief goods';
+    }
+  } else if (assignedPackages.length > 0) {
+    status = 'Delivered';
+    cargo = 'All assigned packages delivered';
+  }
+
   const originPosition = findCoords(WAREHOUSE_COORDS, origin) ?? WAREHOUSE_COORDS['dswd oton warehouse'];
   const destinationPosition = findCoords(LGU_COORDS, destination) ?? [location.latitude, location.longitude];
-  const progress = status === 'Delivered' ? 100 : getProgress(location, destinationPosition);
+  const progress = status === 'Delivered' ? 100 : (activeAssigned.length > 0 ? getProgress(location, destinationPosition) : 100);
+
+  const activeDrs = activeAssigned.map((r) => r.dr_number);
+  const releaseLabel = activeDrs.length > 1
+    ? `${activeDrs.length} Packages (${activeDrs.join(', ')})`
+    : (activeDrs.length === 1 ? `Release ${activeDrs[0]}` : 'No active package assigned');
+
+  const latestTx = activeAssigned.find((r) => r.tx_hash)?.tx_hash;
 
   return {
     id: location.truck_id,
@@ -179,7 +240,7 @@ const toTruckRoute = (
     status,
     origin,
     destination,
-    cargo: quantity > 0 ? `${quantity} ${category}` : category,
+    cargo,
     eta: 'Calculating...',
     updatedAt: formatDateTime(location.updated_at),
     originPosition,
@@ -196,15 +257,15 @@ const toTruckRoute = (
         completed: true
       },
       {
-        label: location.dr_number ? `Release ${location.dr_number}` : 'Temporary QR proof',
-        time: location.tx_hash ? 'MetaMask proof recorded' : 'Awaiting blockchain proof',
-        note: location.tx_hash ? `TX ${location.tx_hash.slice(0, 10)}...` : 'Receiver has not signed a proof yet',
-        completed: Boolean(location.tx_hash)
+        label: releaseLabel,
+        time: latestTx ? 'MetaMask proof recorded' : (activeDrs.length > 0 ? 'Assigned and in transit' : 'Standby'),
+        note: latestTx ? `TX ${latestTx.slice(0, 10)}...` : (activeDrs.length > 0 ? `${activeDrs.length} package(s) loaded` : 'Awaiting assignment'),
+        completed: Boolean(latestTx || activeDrs.length > 0)
       },
       {
         label: `Destination: ${destination}`,
-        time: status === 'Delivered' ? 'Delivered' : 'Pending arrival',
-        note: status === 'Delivered' ? 'Delivery closed by receiver' : 'Awaiting done delivering confirmation',
+        time: status === 'Delivered' ? 'Delivered' : (activeAssigned.length > 0 ? 'In Transit' : 'Standby'),
+        note: status === 'Delivered' ? 'Delivery completed' : (activeAssigned.length > 0 ? 'Heading to destination' : 'Ready for pickup'),
         completed: status === 'Delivered'
       }
     ]
@@ -378,6 +439,18 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
       .then(setReleases)
       .catch((error) => console.error('Failed to load trucker releases', error));
 
+    backendApi.getTruckLiveLocations()
+      .then((locations) => {
+        const initialMap: Record<string, TruckLiveLocation> = {};
+        locations.forEach((loc) => {
+          if (loc.truck_id) {
+            initialMap[loc.truck_id] = loc;
+          }
+        });
+        setLiveLocations((current) => ({ ...initialMap, ...current }));
+      })
+      .catch((err) => console.error('Failed to load initial truck locations', err));
+
     return backendApi.subscribeTruckLiveLocations(
       (location) => {
         setLiveLocations((current) => {
@@ -398,7 +471,7 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
   const liveTruckRoutes = useMemo(() => Object.values(liveLocations)
     .filter(isActiveReceiverLocation)
     .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
-    .map((location) => toTruckRoute(location, releaseByDrNumber(releases, outgoingReleasesList, location.dr_number))), [liveLocations, releases, outgoingReleasesList]);
+    .map((location) => toTruckRoute(location, releases, outgoingReleasesList)), [liveLocations, releases, outgoingReleasesList]);
 
   useEffect(() => {
     if (!liveTruckRoutes.length) {
@@ -472,7 +545,7 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {activeReleases.map((item) => (
-                      <tr key={item.id} className="hover:bg-gray-50">
+                      <tr key={item.drNumber} className="hover:bg-gray-50">
                         <td className="py-3 font-mono font-bold text-blue-800">{item.drNumber}</td>
                         <td className="py-3 font-semibold text-gray-800">{item.lguName || item.municipality}</td>
                         <td className="py-3 text-gray-600">{item.fnfiCategory}</td>

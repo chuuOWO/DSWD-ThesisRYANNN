@@ -85,6 +85,9 @@ add column if not exists wallet_address text;
 alter table public.outgoing_requests
 add column if not exists allocated_batches jsonb;
 
+alter table public.outgoing_requests
+add column if not exists assigned_truck_id text;
+
 create unique index if not exists outgoing_requests_dr_number_key
 on public.outgoing_requests (dr_number);
 
@@ -372,14 +375,11 @@ with check (auth.uid() = id);
 -- Receiver GPS rows power the administrative Trucking map in real time.
 create table if not exists public.truck_live_locations (
   truck_id text primary key,
-  dr_number text,
   latitude double precision not null,
   longitude double precision not null,
   gps_text text not null,
   accuracy double precision,
-  tx_hash text,
   wallet_address text,
-  proof_mode text,
   updated_at timestamptz not null default now()
 );
 

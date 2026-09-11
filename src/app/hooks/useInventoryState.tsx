@@ -71,6 +71,8 @@ export interface OutgoingRelease {
   receiverGps?: string;
   blockchainTxHash?: string;
   correctionNote?: string;
+  assignedTruckId?: string | null;
+  assigned_truck_id?: string | null;
   auditTrail: AuditEvent[];
 }
 
@@ -805,10 +807,10 @@ export function useInventoryState(enabled = true) {
     const latestGps = release?.municipality === 'Miag-ao' ? '10.6415, 122.2352' : release?.municipality === 'Banate' ? '11.0022, 122.8174' : '10.7202, 122.5621';
     const handoverContractId = release.handoverContractId ?? `HANDOVER-${drNumber.replace('DR-', '')}`;
     // TODO: Teammate can plug in ReownKit / WalletConnect here for on-chain mobile receipt.
-    const proof = {
+    const proof: { hash: string; walletAddress: string; mode: 'contract' | 'signature' } = {
       hash: `LGU-RECEIPT-${Date.now()}`,
       walletAddress: '0xLGUReceiverWallet',
-      mode: 'signature' as const
+      mode: 'signature'
     };
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber && ['Released', 'In Transit', 'Delivered'].includes(item.deliveryStatus)
