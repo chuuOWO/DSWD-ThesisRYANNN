@@ -2,375 +2,425 @@
 
 A hybrid decentralized supply chain monitoring and chain-of-custody tracking platform developed for the **Department of Social Welfare and Development (DSWD) Region VI (Western Visayas - Panay Island)**.
 
-This system integrates **Supabase Cloud PostgreSQL**, **Ethereum (Sepolia Testnet) Smart Contracts**, **Leaflet Real-Road Fleet Mapping**, **W3C Geolocation**, and **MetaMask Cryptographic Handshakes** to eliminate ghost deliveries, inventory tampering, and unauthorized municipal rerouting.
+This system integrates **Supabase Cloud PostgreSQL**, **Ethereum (Sepolia Testnet) Smart Contracts (ERC-1155)**, **Leaflet Real-Road Fleet Mapping**, **W3C Geolocation**, and **MetaMask Cryptographic Handshakes** to eliminate ghost deliveries, inventory tampering, and unauthorized municipal rerouting.
 
 ---
 
 ## Table of Contents
-1. [Simplified Version (High-Level Overview)](#1-simplified-version-high-level-overview)
-   - [The Core Problem & Solution](#the-core-problem--solution)
-   - [The 3-Step Relief Lifecycle](#the-3-step-relief-lifecycle)
-   - [User Roles & Permissions](#user-roles--permissions)
-2. [Detailed Technical Version (How the Whole Code Works)](#2-detailed-technical-version-how-the-whole-code-works)
-   - [Architecture & Tech Stack](#architecture--tech-stack)
-   - [Repository Folder Structure](#repository-folder-structure)
-   - [Module-by-Module Code Breakdown](#module-by-module-code-breakdown)
-   - [Core Security & Operational Mechanisms](#core-security--operational-mechanisms)
-3. [Smart Contract & Blockchain Architecture](#3-smart-contract--blockchain-architecture)
+
+1. [Simplified Version (Plain-English Overview)](#1-simplified-version-plain-english-overview)
+   - [The Problem Being Solved](#the-problem-being-solved)
+   - [How the System Works in 4 Steps](#how-the-system-works-in-4-steps)
+   - [Who Uses the System (User Roles)](#who-uses-the-system-user-roles)
+2. [Detailed Technical Version (Complete Codebase Breakdown)](#2-detailed-technical-version-complete-codebase-breakdown)
+   - [System Architecture & Data Flow](#system-architecture--data-flow)
+   - [Complete Project File Inventory](#complete-project-file-inventory)
+   - [Root Configuration & Infrastructure Files](#root-configuration--infrastructure-files)
+   - [Smart Contracts Layer (`contracts/`)](#smart-contracts-layer-contracts)
+   - [Core Application Shell & Contexts (`src/app/`)](#core-application-shell--contexts-srcapp)
+   - [Services & Data Access Layer (`src/app/services/` & `src/app/lib/`)](#services--data-access-layer-srcappservices--srcapplib)
+   - [State Management & Custom Hook (`src/app/hooks/`)](#state-management--custom-hook-srcapphooks)
+   - [Static Reference Data (`src/app/data/`)](#static-reference-data-srcappdata)
+   - [Layout & Navigation Components (`src/app/components/layout/`)](#layout--navigation-components-srcappcomponentslayout)
+   - [Authentication Components (`src/app/components/auth/`)](#authentication-components-srcappcomponentsauth)
+   - [Primary Application Views (`src/app/components/views/`)](#primary-application-views-srcappcomponentsviews)
+   - [Modals & Dialogs (`src/app/components/modals/`)](#modals--dialogs-srcappcomponentsmodals)
+   - [Specialized UI & Design Elements (`src/app/components/design/`)](#specialized-ui--design-elements-srcappcomponentsdesign)
+   - [Styling & Asset Manifests (`src/styles/` & `src/imports/`)](#styling--asset-manifests-srcstyles--srcimports)
+3. [Smart Contract Technical Specification](#3-smart-contract-technical-specification)
 4. [Database Schema (Supabase PostgreSQL)](#4-database-schema-supabase-postgresql)
-5. [Deployment & Why Ngrok is Not Needed](#5-deployment--why-ngrok-is-not-needed)
-6. [Getting Started & Local Development](#6-getting-started--local-development)
+5. [Production Deployment & GitHub Pages CI/CD](#5-production-deployment--github-pages-cicd)
+6. [Local Development & Setup Guide](#6-local-development--setup-guide)
 
 ---
 
-# 1. Simplified Version (High-Level Overview)
+# 1. Simplified Version (Plain-English Overview)
 
-### The Core Problem & Solution
-During natural disasters (typhoons, floods, earthquakes) across Panay Island, thousands of family food packs and non-food relief items (FNFIs) are dispatched from regional warehouses in **Oton** and **Pototan** to local municipalities. Traditional paper delivery receipts and phone calls often result in:
-- Unverified arrivals and disputes over missing relief goods.
-- Drivers rerouting or delivering to unintended locations.
-- Lack of real-time visibility on shipment progress.
-- Unofficial personnel claiming or signing for municipal shipments.
+### The Problem Being Solved
+When typhoons, floods, or calamities strike Panay Island (Iloilo, Antique, Capiz, and Aklan), the DSWD Regional Office dispatches thousands of family food packs and disaster kits from its regional warehouses in **Oton** and **Pototan** to local municipal evacuation gyms.
 
-**Our Solution:** A tamper-proof, transparent web system where:
-1. Every batch of goods received at the warehouse is minted as an immutable blockchain batch.
-2. Shipments travel with live GPS tracking following real Panay highway networks.
-3. Local Government Unit (LGU) receivers scan an encrypted QR code and sign for delivery using their registered **MetaMask wallet** and **GPS location**.
-4. The blockchain cryptographically seals the transaction—no record can ever be deleted, altered, or forged.
+Historically, relief logistics relied on paper manifests, manual phone check-ins, and physical delivery receipts. This created serious vulnerabilities:
+- **Disputed Deliveries:** Difficulties verifying whether relief packs actually reached the intended evacuees or local government offices.
+- **Rerouting Risks:** Drivers taking unverified routes or goods arriving at unauthorized facilities without official acknowledgement.
+- **Paper Trail Loss:** Waterlogged, lost, or forged paperwork preventing transparent auditing.
+- **Unauthorized Claimants:** Individuals without authorized municipal authority receiving aid shipments on behalf of an LGU.
 
----
-
-### The 3-Step Relief Lifecycle
+### How the System Works in 4 Steps
 
 ```
-[ STEP 1: INCOMING ]
-Warehouse receives goods from VDRC/LDRC -> DSWD Admin verifies physical count -> 
-Batch Token Minted on Blockchain -> Added to regional stock (in kits)
+[ 1. INTAKE AT WAREHOUSE ]
+Goods arrive at Oton or Pototan from national resource centers (VDRC / LDRC).
+DSWD staff verify counts. The Admin mints an immutable blockchain batch token.
+Stock is officially added to available regional inventory in standardized "kits".
 
                |
                v
 
-[ STEP 2: OUTGOING DISPATCH ]
-Panay LGU submits emergency request -> Priority scoring ranks urgency -> 
-DSWD Admin approves allocation -> Central Admin cryptographically signs release -> 
-Scannable Delivery Receipt (DR) QR Code generated -> Truck loaded & dispatched
+[ 2. ALLOCATION & DISPATCH ]
+Local Government Units (LGUs) submit disaster reports and relief requests.
+The system calculates emergency priority scores (Red/Yellow/Green).
+Central Admin approves the requested quantity and signs the dispatch on blockchain.
+A scannable Delivery Receipt (DR) with a cryptographic hash is issued to the driver.
 
                |
                v
 
-[ STEP 3: LIVE TRANSIT & HANDOVER ]
-Truck travels across Panay highways -> Live GPS streams to central monitoring map -> 
-LGU Receiver inspects package & scans QR code -> Receiver's MetaMask signs transaction -> 
-Smart contract verifies registered wallet + GPS boundary -> Custody permanently sealed
+[ 3. REAL-ROAD TRANSIT TRACKING ]
+The driver opens the mobile app and taps "Start Delivery".
+The phone streams live GPS coordinates over secure WebSockets.
+The Admin Dashboard plots the vehicle moving along actual Panay highway corridors.
+
+               |
+               v
+
+[ 4. CRYPTOGRAPHIC HANDOVER AT MUNICIPAL HALL ]
+The truck arrives at the municipal gym or evacuation center.
+The designated LGU Receiver inspects the goods and counts physical packages.
+The receiver scans the driver's QR code using their smartphone camera.
+The receiver signs using their registered MetaMask cryptographic wallet.
+The smart contract verifies wallet identity + GPS location, permanently sealing custody.
 ```
 
----
+### Who Uses the System (User Roles)
 
-### User Roles & Permissions
-
-| Role | Interface | Responsibilities | Security Controls |
+| Role | Access Device | Key Responsibilities | Protection & Controls |
 | :--- | :--- | :--- | :--- |
-| **DSWD Central Admin** | Desktop Dashboard | Oversees regional stock, approves releases, views live map, manages accounts, and assigns LGUs. | Full administrative rights; signs initial blockchain release; strictly controls LGU assignment. |
-| **Field Receiver (Driver / Trucker)** | Mobile / Desktop | Scans assigned delivery, streams GPS coordinates along transit corridors, transports goods. | Bound to specific vehicle/delivery; cannot alter destination or modify stock counts. |
-| **LGU Receiver** | Mobile Receiver View | Inspects incoming shipment at municipal hall, verifies batch contents, confirms handover. | **Strictly locked to admin-assigned municipality**; must sign with registered MetaMask wallet. |
+| **DSWD Central Admin** | Desktop PC | Approves dispatches, mints inventory batches, views live fleet map, manages staff accounts, and assigns LGUs. | Full administrative rights; protected by database role (`dswd_admin`) and verified MetaMask wallet. |
+| **Field Receiver (Driver / Trucker)** | Mobile Smartphone | Carries shipments, broadcasts real-time GPS telemetry, and presents proof-of-transit QR codes. | Bound to specific DR numbers and truck IDs; cannot edit quantities or divert municipal destinations. |
+| **LGU Receiver** | Mobile Smartphone | Inspects incoming packages at the municipal hall, performs barcode scans, and signs for custody. | **Strictly locked to their Admin-assigned Panay municipality**; can only sign with their registered MetaMask wallet. |
 
 ---
 
-# 2. Detailed Technical Version (How the Whole Code Works)
+# 2. Detailed Technical Version (Complete Codebase Breakdown)
 
-## Architecture & Tech Stack
-
-```
-+-----------------------------------------------------------------------------------+
-|                                  USER BROWSER                                     |
-|  React 18  *  TypeScript  *  Tailwind CSS v4  *  Lucide Icons  *  Leaflet Maps     |
-+---------------------------------------+-------------------------------------------+
-                                        |
-                 +----------------------+----------------------+
-                 |                                             |
-                 v                                             v
-+----------------------------------+        +---------------------------------------+
-|        SUPABASE CLOUD            |        |      ETHEREUM (SEPOLIA TESTNET)       |
-|  - PostgreSQL Database           |        |  - DSWDReliefTracker.sol              |
-|  - Auth (JWT Sessions & RLS)     |        |  - Ethers.js v6 Smart Contract Client  |
-|  - Realtime WebSockets           |        |  - MetaMask Signer & Nonce Checks     |
-|  - Storage (Manifests / Hashes)  |        |  - Immutable Chain-of-Custody Hashes  |
-+----------------------------------+        +---------------------------------------+
-```
-
-- **Frontend Core:** Vite 6, React 18, TypeScript, Tailwind CSS v4.
-- **Mapping & Geolocation:** Leaflet, React-Leaflet, OpenStreetMap, OSRM Highway Routing, W3C HTML5 Geolocation API.
-- **Blockchain Layer:** Solidity `^0.8.20`, Ethers.js v6, Alchemy Sepolia RPC, MetaMask Browser Extension / Mobile App.
-- **Operational Backend:** Supabase PostgreSQL, Supabase Realtime Channels, Supabase Auth.
-- **Hosting & CI/CD:** GitHub Pages (Automated via GitHub Actions), zero ngrok dependency.
-
----
-
-## Repository Folder Structure
-
-The application source code is cleanly decoupled under `src/app/components/` into structured functional domains:
+## System Architecture & Data Flow
 
 ```
-src/
-├── app/
-│   ├── components/
-│   │   ├── auth/
-│   │   │   └── AuthPage.tsx            # Split-screen responsive login/signup with wallet binding
-│   │   ├── design/
-│   │   │   ├── FiveDotsLoadingModal.tsx # Minimalist 5-dot pulse loading state
-│   │   │   └── LocationPickerMap.tsx    # Interactive map pin dropper for warehouse coordinates
-│   │   ├── layout/
-│   │   │   ├── Header.tsx               # Top navigation bar, wallet status pill, and profile trigger
-│   │   │   └── Sidebar.tsx              # Sidebar navigation for admin operations
-│   │   ├── modals/
-│   │   │   ├── AddIncomingGoodsModal.tsx# Form for logging incoming goods (locked strictly to kits)
-│   │   │   ├── AddReleaseModal.tsx      # Outgoing dispatch modal with Direct Delivery support
-│   │   │   ├── AddLGUModal.tsx          # Administrator modal for registering new Panay LGUs
-│   │   │   ├── EditLGUModal.tsx         # Modal for updating municipality parameters & contacts
-│   │   │   ├── QrCodeGeneratorModal.tsx # Scannable manifest QR generator with blockchain hash
-│   │   │   ├── ProfileSettingsModal.tsx # User profile settings and MetaMask wallet binding
-│   │   │   ├── ConfirmLogoutModal.tsx   # Safe session signout confirmation dialog
-│   │   │   └── MetaMaskMismatchModal.tsx# Fullscreen security lock when active wallet doesn't match
-│   │   ├── views/
-│   │   │   ├── DashboardView.tsx        # Central executive metrics, stock summaries, and alerts
-│   │   │   ├── IncomingModule.tsx       # Warehouse inflow verification and token minting
-│   │   │   ├── OutgoingModule.tsx       # Outgoing dispatch queues, approvals, and release signatures
-│   │   │   ├── InventoryMonitoring.tsx  # Warehouse stock levels, thresholds, and priority scoring
-│   │   │   ├── LGUMonitoring.tsx        # 93 Panay municipalities status, relief aid quotas, and logs
-│   │   │   ├── TruckTracking.tsx        # Live road-snapped GPS tracking across Panay Island
-│   │   │   ├── AccountManagement.tsx    # Admin user management and role/municipality assignment
-│   │   │   ├── ReceiverPage.tsx         # Mobile field receiver handover interface
-│   │   │   └── LGUReceiverPage.tsx      # Mobile municipal receiver acceptance & GPS scan interface
-│   │   └── index.ts                     # Central barrel export for all UI components
-│   ├── contexts/
-│   │   └── AuthContext.tsx              # Supabase session provider and authentication listener
-│   ├── data/
-│   │   └── panayLguDirectory.ts         # Complete directory of 93 Panay LGUs with GPS coordinates
-│   ├── hooks/
-│   │   └── useInventoryState.tsx        # Central business logic, inventory math, and state coordination
-│   ├── lib/
-│   │   ├── supabase.ts                  # Supabase client singleton
-│   │   └── lguCoordinates.ts            # Panay geospatial centroid definitions
-│   ├── services/
-│   │   ├── authApi.ts                   # Supabase authentication and user profile management
-│   │   ├── backendApi.ts                # PostgreSQL CRUD and Realtime WebSocket channel sync
-│   │   └── blockchain.ts                # Ethers.js client, contract interface, and wallet verification
-│   ├── App.tsx                          # Primary router, layout shell, and mismatch modal mount
-│   └── main.tsx                         # React 18 DOM mount and entry point
-├── contracts/
-│   ├── DSWDReliefTracker.sol            # Core Solidity smart contract
-│   └── DSWDReliefTracker_Flat.sol       # Flattened contract for Etherscan verification
-├── dist/                                # Compiled production bundle (HTML, JS, CSS)
-├── .github/workflows/
-│   └── deploy.yml                       # GitHub Actions CI/CD automated deployment workflow
-├── package.json                         # Project dependencies and build scripts
-└── vite.config.ts                       # Vite configuration with relative base path and Tailwind
++---------------------------------------------------------------------------------------+
+|                                    BROWSER CLIENT                                     |
+|  React 18  *  TypeScript  *  Tailwind CSS v4  *  Leaflet Routing  *  Ethers.js v6     |
++-------------------------------------------+-------------------------------------------+
+                                            |
+                    +-----------------------+-----------------------+
+                    |                                               |
+                    v                                               v
++---------------------------------------+       +---------------------------------------+
+|            SUPABASE CLOUD             |       |      ETHEREUM (SEPOLIA TESTNET)       |
+|  - PostgreSQL Database Engine         |       |  - DSWDReliefTracker.sol (ERC-1155)   |
+|  - Realtime WebSocket Channels        |       |  - Immutable Batch Token Minting      |
+|  - Supabase Auth & JWT Sessions       |       |  - Multi-Signature Custody Handovers  |
+|  - Row Level Security (RLS) Policies  |       |  - EIP-712 Fallback Hash Signing      |
++---------------------------------------+       +---------------------------------------+
 ```
 
 ---
 
-## Module-by-Module Code Breakdown
+## Complete Project File Inventory
 
-### 1. Business Logic Coordinator (`useInventoryState.tsx`)
-Located at `src/app/hooks/useInventoryState.tsx`.
-- Acts as the primary state hub for inventory operations.
-- Synchronizes local React state with Supabase tables (`incoming_manifests`, `outgoing_requests`, `lgu_inventory_reports`, `discrepancy_reports`).
-- **Batch Tokenization**: When `mintBatchToken(id)` is triggered, it calls `blockchain.mintBatchToken()`, waits for on-chain transaction receipt, and updates the incoming record status to `'Verified'` and `'Minted'`. Stock is added to available inventory only after this step.
-- **Chain-of-Custody Signatures**:
-  - `senderSignRelease(releaseId, gps)`: Captures sender wallet address, timestamp, and GPS; sets status to `'In Transit'`.
-  - `receiverAcceptWithGps(releaseId, gps, qrPayload)`: Validates that the scanned manifest hash matches the record, calls `blockchain.recordCustodyHandover()`, updates Supabase, and logs an immutable audit trail entry.
+### Root Configuration & Infrastructure Files
 
-### 2. Blockchain & Wallet Integration (`blockchain.ts`)
-Located at `src/app/services/blockchain.ts`.
-- Initializes `ethers.BrowserProvider(window.ethereum)`.
-- **Database-Driven RBAC (`resolveWalletRoleFromDb`)**:
-  - Replaced legacy static `.env` wallet addresses with dynamic database lookups.
-  - Queries `profiles` in Supabase by `wallet_address`.
-  - Resolves role to `'Admin'`, `'LGUReceiver'`, or `'Receiver'`.
-- **Handover Contract Interaction**:
-  - Interacts with contract `0x91c976fEe18761d8331d759D24987Ab65ec486A1` on Sepolia.
-  - Encodes delivery manifest metadata, merkle root hash, sender/receiver addresses, and GPS coordinates into `recordHandover()` transactions.
-
-### 3. Backend & Real-Time Sync (`backendApi.ts`)
-Located at `src/app/services/backendApi.ts`.
-- Manages all PostgreSQL queries via the Supabase JavaScript SDK.
-- **Live Fleet Tracking Synchronization**:
-  - `upsertTruckLiveLocation()`: Updates latitude, longitude, and wallet in `truck_live_locations`.
-  - `subscribeToAllTruckLocations()`: Establishes a Supabase Realtime WebSocket subscription (`postgres_changes` on `truck_live_locations`). Any GPS coordinate emitted by a mobile driver is instantly received by the Central Admin map without polling.
-
-### 4. Panay Road Network Fleet Tracking (`TruckTracking.tsx`)
-Located at `src/app/components/views/TruckTracking.tsx`.
-- Renders an interactive Leaflet map covering the four Panay provinces: **Iloilo**, **Capiz**, **Aklan**, and **Antique**.
-- **Real Road Snapping**: Uses the OSRM (Open Source Routing Machine) routing engine to calculate true driving routes along Panay national highways (e.g., Iloilo-Capiz Highway, Antique Coastal Road) rather than straight lines across mountains or water.
-- **Camera Decoupling**: Map camera does not hijack user view when GPS pings arrive. Users navigate freely or click dedicated utility controls (**Fit Fleet**, **Locate**, **Panay Overview**).
+| File | Purpose |
+| :--- | :--- |
+| `.env` / `.env.production` | Environment variable definitions for Supabase URL, Anon Key, Sepolia Contract addresses, Chain ID (`11155111`), and Alchemy RPC endpoint. |
+| `.github/workflows/deploy.yml` | Automated GitHub Actions CI/CD pipeline that triggers on push to `main`, installs packages using Node 22, executes `npm run build`, creates `dist/404.html` for SPA routing, and deploys directly to GitHub Pages. |
+| `vite.config.ts` | Vite configuration specifying `@vitejs/plugin-react`, `@tailwindcss/vite`, relative asset pathing (`base: './'`), and Figma asset resolver plugins. |
+| `tsconfig.json` | TypeScript compiler configuration targeting ESNext, React JSX runtime, DOM libraries, and strict module resolution. |
+| `package.json` | Project manifest defining runtime dependencies (`ethers`, `@supabase/supabase-js`, `leaflet`, `lucide-react`, `react`, `react-dom`) and build scripts. |
+| `postcss.config.mjs` | PostCSS configuration powering Tailwind CSS utility compilation. |
+| `supabase-schema-patch.sql` | Complete SQL migration script defining tables (`profiles`, `incoming_manifests`, `outgoing_requests`, `truck_live_locations`, `lgu_inventory_reports`, `discrepancy_reports`), RLS policies, indexes, and triggers. |
+| `index.html` | Application HTML entry point containing viewport meta tags, preloaded web fonts (Inter, Lexend, JetBrains Mono), and the root DOM mounting node `#root`. |
 
 ---
 
-## Core Security & Operational Mechanisms
+### Smart Contracts Layer (`contracts/`)
 
-### 1. Strict MetaMask Account Binding & Mismatch Modal
-To prevent unauthorized users from signing for shipments or using wrong accounts:
-1. Every user's profile in Supabase is permanently bound to a registered MetaMask address (`profile.walletAddress`).
-2. `App.tsx` listens in real-time to wallet changes via `window.ethereum.on('accountsChanged')`.
-3. If the active account in MetaMask does not match `profile.walletAddress`:
-   - A full-screen blocking modal ([`MetaMaskMismatchModal.tsx`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/src/app/components/modals/MetaMaskMismatchModal.tsx)) immediately blurs and locks the entire application.
-   - Shows a comparison card: **Expected Wallet (Authorized)** vs. **Current Active Wallet (Unauthorized)**.
-   - A live detection radar pulse watches the extension. The moment the user switches to the registered account in MetaMask, the modal automatically unmounts without a page refresh.
-   - Provides a direct **Sign Out** button to exit the session safely.
-
-### 2. Admin-Only LGU Receiver Assignment
-- Local Government Unit (LGU) field receivers cannot choose or change their assigned municipality.
-- The municipal jurisdiction is strictly assigned by Central Admin in the database (`profile.lguName`).
-- In [`LGUReceiverPage.tsx`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/src/app/components/views/LGUReceiverPage.tsx), the self-selection dropdown has been removed and replaced with a locked badge (`[Sigma LGU] Official Municipal Custody`).
-- If an account has no municipality assigned, an administrative alert banner prevents operations until DSWD Central Admin designates their jurisdiction.
-
-### 3. Direct Delivery Mode
-- Emergency national dispatches originating directly from national disaster resource centers (**VDRC** or **LDRC**) bypass regional warehouse inventory.
-- Selecting `Direct Delivery` in [`AddReleaseModal.tsx`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/src/app/components/modals/AddReleaseModal.tsx) allows direct dispatch to municipalities without deducting stock from Oton or Pototan regional warehouses.
-
-### 4. Standardized Kit Unit
-- All incoming goods and relief allocations have been standardized strictly to **`kits`**.
-- Obsolete unit dropdowns (`packs`, `sacks`, `bales`, etc.) have been removed across all intake and dispatch forms.
+| File | Description |
+| :--- | :--- |
+| `contracts/DSWDReliefTracker.sol` | Primary Solidity smart contract (`^0.8.20`) inheriting OpenZeppelin ERC-1155 and Ownable. Manages tokenized relief batches (`mintBatchToken`), multi-signature handovers (`signRelease`, `confirmReceipt`), GPS timestamp recording, and administrator whitelist management (`onlyAdmin`, `setAdmin`). |
+| `contracts/DSWDReliefTracker_Flat.sol` | Flattened, single-file concatenation of `DSWDReliefTracker.sol` and all imported OpenZeppelin dependencies for direct contract verification on Etherscan Sepolia. |
 
 ---
 
-# 3. Smart Contract & Blockchain Architecture
+### Core Application Shell & Contexts (`src/app/`)
 
-Contract code: [`contracts/DSWDReliefTracker.sol`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/contracts/DSWDReliefTracker.sol)
+| File | Description |
+| :--- | :--- |
+| `src/main.tsx` | Main application bootstrap that mounts React into `#root` with `React.StrictMode` and wraps the application with `AuthProvider`. |
+| `src/vite-env.d.ts` | TypeScript declarations for Vite client environment variables and the global `window.ethereum` MetaMask interface. |
+| `src/app/App.tsx` | Root component managing application navigation, view routing, role detection, MetaMask account change listeners, session validation, and conditional rendering of `MetaMaskMismatchModal`. |
+| `src/app/contexts/AuthContext.tsx` | React Context provider that exposes user profile data (`UserProfile`), authentication state (`isAuthenticated`, `isLoading`), login/logout methods, and profile refresh triggers. |
 
-### Data Structures
+---
+
+### Services & Data Access Layer (`src/app/services/` & `src/app/lib/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/services/blockchain.ts` | Core blockchain integration service using Ethers.js v6. Handles MetaMask connection, contract instances, database-driven wallet role verification (`resolveWalletRoleFromDb`), batch token minting (`mintBatchToken`), dispatch authorization (`mintAndAuthorizeRelease`), and recipient verification. |
+| `src/app/services/backendApi.ts` | Data access client communicating with Supabase PostgreSQL. Implements CRUD operations for incoming manifests, outgoing requests, live truck location upserts (`upsertTruckLiveLocation`), discrepancy filings, and WebSocket subscriptions (`subscribeToAllTruckLocations`). |
+| `src/app/services/authApi.ts` | Authentication service managing Supabase Auth sign-ins, registrations, password resets, profile retrieval, profile photo updates, and wallet address bindings. |
+| `src/app/lib/supabase.ts` | Singleton factory initializing and exporting the `supabase` JavaScript client using runtime environment variables. |
+| `src/app/lib/inputValidation.ts` | Centralized sanitization library enforcing strict data types: `sanitizeNumbersOnly` (numeric inputs), `sanitizeTextOnly` (letters, spaces, periods, hyphens), `sanitizePhone` (digits and single leading `+`), and `sanitizeAlphanumeric`. |
+| `src/app/lib/lguCoordinates.ts` | Geospatial lookup mapping Panay Island municipalities to exact latitude and longitude coordinates for map centering and distance verification. |
+
+---
+
+### State Management & Custom Hook (`src/app/hooks/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/hooks/useInventoryState.tsx` | The central state engine of the application. Coordinates available warehouse inventory counts, loads incoming manifests and outgoing releases, computes disaster priority scores, executes stock deductions, handles blockchain minting handshakes, and subscribes to Supabase Realtime changes. |
+
+---
+
+### Static Reference Data (`src/app/data/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/data/panayLguDirectory.ts` | Official registry of all 93 Local Government Units across the 4 provinces of Panay Island (Iloilo, Antique, Capiz, Aklan). Contains municipal names, provincial designations, centroid GPS coordinates, and helper search utilities (`findPanayLgu`). |
+
+---
+
+### Layout & Navigation Components (`src/app/components/layout/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/components/layout/Header.tsx` | Top application header displaying DSWD branding, current system date, connected MetaMask wallet status pill, network indicator, and user profile drawer trigger. |
+| `src/app/components/layout/Sidebar.tsx` | Collapsible desktop navigation bar providing one-click switching between views (Dashboard, Incoming, Outgoing, Inventory, LGUs, Fleet Tracking, Accounts) with active view badges. |
+
+---
+
+### Authentication Components (`src/app/components/auth/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/components/auth/AuthPage.tsx` | Responsive split-screen login and signup interface featuring DSWD institutional branding, role selection tabs (Admin vs. Field Receiver), input sanitization, and optional MetaMask wallet pre-linking. |
+
+---
+
+### Primary Application Views (`src/app/components/views/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/components/views/DashboardView.tsx` | Executive summary screen displaying total inventory in kits, active dispatches, low stock indicators, critical LGU priority alerts, recent blockchain audit feeds, and quick navigation shortcuts. |
+| `src/app/components/views/IncomingModule.tsx` | Warehouse intake log showing received relief goods shipments. Allows supervisors to draft incoming manifests, verify physical package tallies, and trigger on-chain batch token minting. |
+| `src/app/components/views/OutgoingModule.tsx` | Outgoing dispatch management queue. Allows administrators to review LGU requests, approve requested quantities, sign releases via MetaMask, generate scannable QR Delivery Receipts, and monitor shipment progress. |
+| `src/app/components/views/InventoryMonitoring.tsx` | Real-time warehouse storage monitor. Visualizes stock by category (Food Packs, Hygiene Kits, Family Kits, etc.) across Oton and Pototan warehouses, highlighting reorder thresholds below 500 kits. |
+| `src/app/components/views/LGUMonitoring.tsx` | Comprehensive disaster status and inventory view for all Panay municipalities. Displays damage indices, affected family metrics, computed priority scores, and recorded stock levels. |
+| `src/app/components/views/AccountManagement.tsx` | Administrative user roster. Allows Central Admins to approve pending signups, assign or reassign field receivers to specific Panay municipalities, and authorize wallet addresses. |
+| `src/app/components/views/TruckTracking.tsx` | Live fleet map built on Leaflet and OpenStreetMap. Displays real-time vehicle positions snapped to Panay highway corridors, driving speed, battery/GPS accuracy, and dedicated camera controls (**Fit Fleet**, **Locate**, **Panay Overview**). |
+| `src/app/components/views/ReceiverPage.tsx` | Mobile-optimized interface for field truck drivers. Allows drivers to start delivery, stream device GPS coordinates to Supabase Realtime, and view shipment route checkpoints. |
+| `src/app/components/views/LGUReceiverPage.tsx` | Dedicated mobile portal for municipal LGU receivers. Features an embedded camera QR scanner, package verification counters, and one-tap MetaMask cryptographic handover signing. |
+
+---
+
+### Modals & Dialogs (`src/app/components/modals/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/components/modals/AddIncomingGoodsModal.tsx` | Intake modal for recording shipments arriving at regional warehouses from VDRC, LDRC, or external donors, locked to "kits" with strict numeric quantity validation. |
+| `src/app/components/modals/AddReleaseModal.tsx` | Outgoing release modal allowing administrators to select destination LGUs, specify requested quantities, choose delivery modes, or toggle **Direct Delivery** from national centers. |
+| `src/app/components/modals/AddLGUModal.tsx` | Admin dialog to register a new municipal drop-off location with province, municipality name, contact personnel, and initial stock statistics. |
+| `src/app/components/modals/EditLGUModal.tsx` | Admin dialog to update existing LGU profile details, contact numbers, and recorded inventory statistics with strict input validation. |
+| `src/app/components/modals/ProfileSettingsModal.tsx` | User profile modal allowing staff to update full names, take web camera snapshots for profile photos, link MetaMask wallets permanently, and review assigned roles. |
+| `src/app/components/modals/QrCodeGeneratorModal.tsx` | Generates high-resolution scannable QR codes containing encrypted Delivery Receipt data, batch token IDs, and hash proofs for field verification. |
+| `src/app/components/modals/MetaMaskMismatchModal.tsx` | Security lock modal that blurs and blocks application access whenever the active MetaMask account differs from the account registered in the user's profile. |
+| `src/app/components/modals/ConfirmLogoutModal.tsx` | Safety confirmation dialog prompting users before ending their authenticated session and disconnecting active state. |
+
+---
+
+### Specialized UI & Design Elements (`src/app/components/design/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/app/components/design/LocationPickerMap.tsx` | Interactive Leaflet mini-map component enabling users to drop and drag a geospatial pin to set precise coordinates for drop-off facilities or evacuation gyms. |
+| `src/app/components/design/FiveDotsLoadingModal.tsx` | Minimalist 5-dot animated pulse loading modal providing clear visual feedback during asynchronous blockchain minting and database sync operations. |
+
+---
+
+### Styling & Asset Manifests (`src/styles/` & `src/imports/`)
+
+| File | Description |
+| :--- | :--- |
+| `src/styles/tailwind.css` | Tailwind CSS v4 entry point importing base utilities, theme definitions, and component styles. |
+| `src/styles/theme.css` | Custom theme variables defining primary blue (`#2500ba`), surface colors, borders, and modal shadows. |
+| `src/styles/fonts.css` | Typography definitions loading Inter, Lexend, and JetBrains Mono monospace typefaces. |
+| `src/styles/index.css` | Global CSS reset and scrollbar styling overrides. |
+| `src/imports/dswdlogo.png` | Official DSWD high-resolution insignia used in application headers and authentication screens. |
+| `src/imports/dswd_building.png` | Architectural graphic displayed in desktop login view backgrounds. |
+
+---
+
+# 3. Smart Contract Technical Specification
+
+Contract File: [`contracts/DSWDReliefTracker.sol`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/contracts/DSWDReliefTracker.sol)
+
+### Core Storage & Structs
 
 ```solidity
-struct ReliefBatch {
-    string batchId;
+struct Batch {
+    uint256 batchId;
+    string manifestNumber;
+    string batchTokenId;
+    string manifestHash;
     string category;
     uint256 quantity;
-    string originWarehouse;
-    uint256 timestamp;
+    string destination;
     address mintedBy;
+    uint256 mintedAt;
 }
 
-struct HandoverEvent {
+struct Handover {
+    uint256 handoverId;
     string drNumber;
-    string merkleRootHash;
-    address senderWallet;
-    address receiverWallet;
+    string handoverContractId;
+    uint256[] batchIds;
+    uint256[] batchQuantities;
+    string fromLocation;
+    string destination;
     string senderGps;
     string receiverGps;
-    uint256 senderSignedAt;
-    uint256 receiverSignedAt;
-    bool isCompleted;
+    address sender;
+    address receiver;
+    uint256 releasedAt;
+    uint256 acceptedAt;
+    HandoverStatus status;
 }
 ```
 
-### Key Functions
-- `mintBatchToken(string batchId, string category, uint256 quantity, string warehouse)`: Mints an immutable batch record on-chain. Only callable by authorized DSWD Admin accounts.
-- `recordHandoverRelease(string drNumber, string merkleHash, string senderGps)`: Called by DSWD Admin when releasing goods to in-transit status. Records first cryptographic signature and GPS.
-- `confirmHandoverReceipt(string drNumber, string receiverGps)`: Called by LGU Receiver. Requires `msg.sender == registeredLguWallet`. Verifies receiver GPS, marks handover completed, and emits `HandoverCompleted` event.
+### Essential Methods & Access Rules
+
+1. `mintBatchToken(...) external onlyAdmin nonReentrant returns (uint256)`:
+   - Validates that the caller is an authorized administrator (`owner()` or `isAuthorizedAdmin`).
+   - Mints an ERC-1155 token representing physical relief goods in warehouse storage.
+   - Stores metadata hash, batch token ID, and quantity.
+2. `signRelease(...) external nonReentrant returns (uint256)`:
+   - Called by the releasing party (Warehouse/Admin) when goods depart.
+   - Records sender wallet address, departure timestamp, and initial GPS reading.
+   - Sets handover status to `Released`.
+3. `confirmReceipt(...) external nonReentrant returns (uint256)`:
+   - Called by the municipal receiver upon arrival.
+   - Validates that the receiver wallet matches the authorized recipient.
+   - Records the destination GPS coordinate and acceptance timestamp.
+   - Transitions status to `Accepted`, cryptographically sealing the handover.
+4. `setAdmin(address admin, bool authorized) external onlyOwner`:
+   - Allows the contract owner to whitelist or revoke administrator privileges for new staff wallets without redeploying the contract.
 
 ---
 
 # 4. Database Schema (Supabase PostgreSQL)
 
-Full schema patch: [`supabase-schema-patch.sql`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/supabase-schema-patch.sql)
+Complete Schema Script: [`supabase-schema-patch.sql`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/supabase-schema-patch.sql)
 
-```sql
--- Profiles table with role and wallet binding
-CREATE TABLE public.profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email TEXT UNIQUE NOT NULL,
-    full_name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('dswd_admin', 'receiver')),
-    truck_id TEXT,
-    lgu_name TEXT,
-    wallet_address TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+### Table Reference
 
--- Incoming goods received at regional warehouses
-CREATE TABLE public.incoming_manifests (
-    id TEXT PRIMARY KEY,
-    date_received DATE NOT NULL,
-    fnfi_category TEXT NOT NULL,
-    quantity INTEGER NOT NULL,
-    unit_type TEXT DEFAULT 'kits',
-    expiration_date DATE,
-    source TEXT NOT NULL,
-    destination_type TEXT DEFAULT 'Warehouse',
-    destination TEXT NOT NULL,
-    incident_code TEXT,
-    status TEXT DEFAULT 'Pending Verification',
-    manifest_hash TEXT,
-    token_id TEXT,
-    audit_trail JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+#### 1. `profiles`
+Stores user identities, application roles, and permanent wallet address bindings.
+- `id` (UUID, Primary Key, references `auth.users`)
+- `email` (TEXT, Unique)
+- `full_name` (TEXT)
+- `role` (TEXT, check: `dswd_admin` or `receiver`)
+- `truck_id` (TEXT, optional driver identifier)
+- `lgu_name` (TEXT, assigned Panay municipality for LGU receivers)
+- `wallet_address` (TEXT, bound MetaMask address)
+- `avatar_url` (TEXT, base64 photo captured via web camera)
+- `status` (TEXT, check: `pending`, `verified`, `rejected`)
 
--- Outgoing release requests and handovers
-CREATE TABLE public.outgoing_requests (
-    id TEXT PRIMARY KEY,
-    dr_number TEXT UNIQUE,
-    lgu_name TEXT NOT NULL,
-    municipality TEXT,
-    province TEXT,
-    source_type TEXT DEFAULT 'Warehouse',
-    warehouse_source TEXT NOT NULL,
-    fnfi_category TEXT NOT NULL,
-    amount_requested INTEGER NOT NULL,
-    amount_approved INTEGER,
-    delivery_status TEXT DEFAULT 'Draft',
-    delivery_mode TEXT NOT NULL,
-    assigned_truck TEXT,
-    recipient_contact TEXT,
-    destination_address TEXT,
-    qr_code_hash TEXT,
-    blockchain_hash TEXT,
-    sender_wallet TEXT,
-    receiver_wallet TEXT,
-    sender_gps TEXT,
-    receiver_gps TEXT,
-    timeline JSONB DEFAULT '[]'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+#### 2. `incoming_manifests`
+Tracks relief supplies arriving at regional warehouses.
+- `id` (TEXT, Primary Key, manifest ID)
+- `date_received` (DATE)
+- `fnfi_category` (TEXT)
+- `quantity` (INTEGER)
+- `unit_type` (TEXT, standardized to `kits`)
+- `source` (TEXT, e.g., `VDRC`, `LDRC`, `Oton Main Warehouse`)
+- `destination` (TEXT)
+- `status` (TEXT, check: `Draft`, `Pending Verification`, `Verified`, `Minted`)
+- `manifest_hash` (TEXT, SHA-256 fingerprint)
+- `token_id` (TEXT, blockchain batch token reference)
+- `audit_trail` (JSONB)
 
--- Real-time truck coordinates for live map tracking
-CREATE TABLE public.truck_live_locations (
-    truck_id TEXT PRIMARY KEY,
-    latitude DOUBLE PRECISION NOT NULL,
-    longitude DOUBLE PRECISION NOT NULL,
-    gps_text TEXT,
-    accuracy DOUBLE PRECISION,
-    wallet_address TEXT,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
+#### 3. `outgoing_requests`
+Maintains records of dispatches, delivery statuses, and handover proofs.
+- `id` (TEXT, Primary Key)
+- `dr_number` (TEXT, Unique delivery receipt number)
+- `lgu_name` (TEXT, destination office or evacuation facility)
+- `municipality` (TEXT)
+- `province` (TEXT)
+- `warehouse_source` (TEXT)
+- `fnfi_category` (TEXT)
+- `amount_requested` (INTEGER)
+- `amount_approved` (INTEGER)
+- `delivery_status` (TEXT, check: `Draft`, `Allocating`, `Approved`, `Released`, `In Transit`, `Delivered`, `Correction Requested`)
+- `delivery_mode` (TEXT, e.g., `Truck`, `Van`, `Pick-up`, `Direct Delivery`)
+- `assigned_truck` (TEXT)
+- `qr_code_hash` (TEXT)
+- `blockchain_hash` (TEXT)
+- `sender_wallet` (TEXT)
+- `receiver_wallet` (TEXT)
+- `sender_gps` (TEXT)
+- `receiver_gps` (TEXT)
+- `timeline` (JSONB)
+
+#### 4. `truck_live_locations`
+Real-time GPS coordinate stream for live fleet monitoring.
+- `truck_id` (TEXT, Primary Key)
+- `latitude` (DOUBLE PRECISION)
+- `longitude` (DOUBLE PRECISION)
+- `gps_text` (TEXT)
+- `accuracy` (DOUBLE PRECISION)
+- `wallet_address` (TEXT)
+- `updated_at` (TIMESTAMPTZ)
+
+#### 5. `lgu_inventory_reports`
+Municipal disaster reports driving priority ranking scores.
+- `id` (UUID, Primary Key)
+- `lgu_name` (TEXT)
+- `municipality` (TEXT)
+- `province` (TEXT)
+- `food_packs` (INTEGER)
+- `hygiene_kits` (INTEGER)
+- `family_kits` (INTEGER)
+- `affected_families` (INTEGER)
+- `damage_index` (NUMERIC)
+- `priority_score` (NUMERIC)
+- `priority_level` (TEXT, check: `Critical`, `High`, `Moderate`, `Low`)
+- `reported_at` (TIMESTAMPTZ)
+
+#### 6. `discrepancy_reports`
+Disputes filed by field receivers when physical counts do not match manifests.
+- `id` (UUID, Primary Key)
+- `report_type` (TEXT)
+- `dr_number` (TEXT)
+- `manifest_id` (TEXT)
+- `note` (TEXT)
+- `created_at` (TIMESTAMPTZ)
 
 ---
 
-# 5. Deployment & Why Ngrok is Not Needed
+# 5. Production Deployment & GitHub Pages CI/CD
 
-### Eliminating Ngrok
-In previous local development setups (`http://localhost:5173`), testing on mobile devices required tunneling tools like **ngrok** because modern mobile browsers (Chrome on Android, Safari on iOS) strictly enforce a **Secure Context (HTTPS)** policy:
-- `navigator.geolocation.getCurrentPosition()` is blocked on insecure HTTP networks.
-- HTML5 camera streaming for QR scanning is blocked on insecure HTTP networks.
+### Why Ngrok is Not Needed
+In previous local development setups (`http://localhost:5173`), testing mobile features required tunneling tools like **ngrok** because mobile operating systems strictly enforce a **Secure Context (HTTPS)** policy:
+- `navigator.geolocation.watchPosition()` is completely blocked over plain HTTP on remote devices.
+- HTML5 camera streaming (`navigator.mediaDevices.getUserMedia()`) is blocked over plain HTTP.
 
-### Production GitHub Pages Deployment
-By deploying to **GitHub Pages**, the site is served over native, trusted **HTTPS** with an automatic SSL certificate:
+### Production Deployment via GitHub Pages
+The application is deployed over native, trusted HTTPS at:
 `https://chuuowo.github.io/DSWD-ThesisRYANNN/`
 
-1. **Zero Tunnels Needed**: Anyone can open the link on their smartphone, tablet, or PC without ngrok running on a host machine.
-2. **Instant Camera & GPS Permissions**: Browsers immediately prompt for and grant GPS and camera access.
-3. **Automated CI/CD Pipeline** ([`.github/workflows/deploy.yml`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/.github/workflows/deploy.yml)):
-   - Every push to `main` automatically runs Node 22, installs dependencies, compiles Vite, generates `dist/404.html` for single-page application routing, and publishes to GitHub Pages.
+- **Zero Third-Party Tunnels:** Accessible from any smartphone or desktop directly without host tunneling software.
+- **Immediate Device Access:** Mobile browsers grant camera and GPS access without security warnings.
+- **Continuous Integration Pipeline:** Configured in [`.github/workflows/deploy.yml`](file:///c:/Users/miaqu/newthesisv3/Blockchain-Supabase-Thesis/.github/workflows/deploy.yml). Every push to `main` compiles the TypeScript codebase, builds Vite production chunks, copies `index.html` to `dist/404.html` for single-page routing, and publishes to GitHub Pages.
 
 ---
 
-# 6. Getting Started & Local Development
+# 6. Local Development & Setup Guide
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) v20+ or v22 LTS
+- [Node.js](https://nodejs.org/) v20.x or v22.x LTS
 - [Git](https://git-scm.com/)
-- [MetaMask](https://metamask.io/) browser extension or mobile app
+- [MetaMask](https://metamask.io/) browser extension (desktop) or mobile app
 
 ### Setup Instructions
 
@@ -387,6 +437,17 @@ By deploying to **GitHub Pages**, the site is served over native, trusted **HTTP
 
 3. **Configure environment:**
    Create a `.env` file in the project root:
+   ```env
+   VITE_SUPABASE_URL=your_supabase_project_url
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_id
+   VITE_RELIEF_TRACKER_CONTRACT_ADDRESS=0x91c976fEe18761d8331d759D24987Ab65ec486A1
+   VITE_BATCH_TOKEN_CONTRACT_ADDRESS=0x91c976fEe18761d8331d759D24987Ab65ec486A1
+   VITE_HANDOVER_CONTRACT_ADDRESS=0x91c976fEe18761d8331d759D24987Ab65ec486A1
+   VITE_BLOCKCHAIN_CHAIN_ID=11155111
+   VITE_BLOCKCHAIN_CHAIN_NAME=Sepolia
+   VITE_BLOCKCHAIN_RPC_URL=your_alchemy_or_infura_sepolia_rpc_url
+   ```
 
 4. **Run the local development server:**
    ```bash
@@ -400,6 +461,5 @@ By deploying to **GitHub Pages**, the site is served over native, trusted **HTTP
 
 ---
 
-
 ### Authors & Academic Context
-Developed as part of the Undergraduate Thesis Project for the **Bachelor of Science in Information Technology / Computer Science**, focusing on blockchain supply chain integrity, multi-signature custody handovers, and GIS-assisted disaster logistics for DSWD Region VI.
+Developed as part of the Undergraduate Thesis Project for the **Bachelor of Science in Information Technology / Computer Science**, focusing on blockchain supply chain integrity, multi-signature custody handovers, and GIS-assisted disaster logistics for DSWD Region VI (Western Visayas).
