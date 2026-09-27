@@ -388,17 +388,6 @@ By deploying to **GitHub Pages**, the site is served over native, trusted **HTTP
 
 3. **Configure environment:**
    Create a `.env` file in the project root:
-   ```env
-   VITE_SUPABASE_URL=https://nekejscoaoglqvkbzkby.supabase.co
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-   VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_id
-   VITE_RELIEF_TRACKER_CONTRACT_ADDRESS=0x91c976fEe18761d8331d759D24987Ab65ec486A1
-   VITE_BATCH_TOKEN_CONTRACT_ADDRESS=0x91c976fEe18761d8331d759D24987Ab65ec486A1
-   VITE_HANDOVER_CONTRACT_ADDRESS=0x91c976fEe18761d8331d759D24987Ab65ec486A1
-   VITE_BLOCKCHAIN_CHAIN_ID=11155111
-   VITE_BLOCKCHAIN_CHAIN_NAME=Sepolia
-   VITE_BLOCKCHAIN_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/your_alchemy_key
-   ```
 
 4. **Run the local development server:**
    ```bash
