@@ -239,8 +239,8 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
   const priorityReports = inventoryState?.lguPriorityReports || [];
 
   const handleSubmitReport = async () => {
-    if (currentRole !== 'LGU') {
-      setSubmitMessage('RBAC: connect the LGU MetaMask wallet to submit municipality stock and damage reports.');
+    if (currentRole !== 'LGUReceiver') {
+      setSubmitMessage('RBAC: connect the LGU Receiver MetaMask wallet to submit municipality stock and damage reports.');
       return;
     }
 
@@ -328,8 +328,8 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
           </div>
           <button
             onClick={handleSubmitReport}
-            disabled={currentRole !== 'LGU'}
-            className={`px-5 py-3 rounded-lg font-bold text-sm ${currentRole === 'LGU' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+            disabled={currentRole !== 'LGUReceiver'}
+            className={`px-5 py-3 rounded-lg font-bold text-sm ${currentRole === 'LGUReceiver' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
           >
             Submit LGU Report
           </button>

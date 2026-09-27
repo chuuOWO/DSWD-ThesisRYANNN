@@ -76,6 +76,8 @@ export interface DiscrepancyReportPayload {
 
 export interface OutgoingUpdatePayload {
   amountApproved?: number;
+  amountRequested?: number;
+  amount_requested?: number;
   deliveryStatus?: string;
   allocatedBatches?: { batchTokenId: string; quantity: number }[];
   senderGps?: string;
@@ -275,6 +277,7 @@ export const backendApi = {
   async updateOutgoing(drNumber: string, payload: OutgoingUpdatePayload) {
     const updates = definedOnly({
       amount_approved: payload.amountApproved,
+      amount_requested: payload.amountRequested ?? payload.amount_requested,
       delivery_status: payload.deliveryStatus,
       allocated_batches: payload.allocatedBatches,
       sender_gps: payload.senderGps,
