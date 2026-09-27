@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X, Calendar, Package, AlertCircle } from 'lucide-react';
+import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
 
 export interface IncomingGoodsForm {
   dateReceived: string;
@@ -194,11 +195,15 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
                 Quantity <span className="text-red-500">*</span>
               </label>
               <input
-                type="number"
-                min="1"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={formData.quantity || ''}
-                onChange={(e) => handleChange('quantity', parseInt(e.target.value) || 0)}
-                placeholder="Enter quantity"
+                onChange={(e) => {
+                  const cleaned = sanitizeNumbersOnly(e.target.value);
+                  handleChange('quantity', cleaned ? parseInt(cleaned, 10) : 0);
+                }}
+                placeholder="Enter quantity (kits)"
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.quantity ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -311,8 +316,8 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
             <input
               type="text"
               value={formData.incidentCode}
-              onChange={(e) => handleChange('incidentCode', e.target.value)}
-              placeholder="e.g., Emergency stock, Good condition"
+              onChange={(e) => handleChange('incidentCode', sanitizeAlphanumeric(e.target.value))}
+              placeholder="e.g., EMERGENCY-01, GOOD-CONDITION"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

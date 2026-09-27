@@ -36,6 +36,7 @@ import { blockchain } from '../../services/blockchain';
 import { findPanayLgu } from '../../data/panayLguDirectory';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
+import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 
 interface BarcodeDetectorResult {
   rawValue?: string;
@@ -2001,12 +2002,14 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                       -
                     </button>
                     <input
-                      type="number"
-                      min={1}
-                      value={verifiedQuantity}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={verifiedQuantity || ''}
                       onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setVerifiedQuantity(isNaN(val) || val < 1 ? 1 : val);
+                        const cleaned = sanitizeNumbersOnly(e.target.value);
+                        const val = cleaned ? parseInt(cleaned, 10) : 0;
+                        setVerifiedQuantity(val);
                       }}
                       className="w-24 text-center font-mono font-extrabold text-xl py-2 px-2 border-2 border-[#2500ba] rounded-xl text-[#2500ba] bg-white focus:outline-hidden"
                     />

@@ -252,7 +252,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                 <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
                 <div className="flex-1">
                   <h3 className="font-bold text-yellow-900 text-sm">Low Stock Alert</h3>
-                  <p className="text-sm text-yellow-800 mt-1">{lowStockItems.length} categories have low stock (below 500 units)</p>
+                  <p className="text-sm text-yellow-800 mt-1">{lowStockItems.length} categories have low stock (below 500 kits)</p>
                   <div className="mt-3 space-y-2">
                     {lowStockItems.map(item => (
                       <div key={item.category} className="bg-white rounded p-2 border border-yellow-200">

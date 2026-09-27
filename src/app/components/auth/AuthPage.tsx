@@ -12,6 +12,7 @@ import { authApi, UserRole } from '../../services/authApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
+import { sanitizeTextOnly } from '../../lib/inputValidation';
 import dswdLogo from '../../../imports/dswdlogo.png';
 import dswdBuilding from '../../../imports/dswd_building.png';
 
@@ -300,7 +301,7 @@ export function AuthPage() {
                       type="text"
                       required
                       value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
+                      onChange={(e) => setFullName(sanitizeTextOnly(e.target.value))}
                       placeholder="Enter full name"
                       className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                     />
@@ -773,7 +774,7 @@ export function AuthPage() {
                     type="text"
                     required
                     value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
+                    onChange={(e) => setFullName(sanitizeTextOnly(e.target.value))}
                     placeholder="Enter your name"
                     className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                   />

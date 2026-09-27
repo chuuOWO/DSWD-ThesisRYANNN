@@ -149,7 +149,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-gray-900">{release.drNumber} | {release.municipality}</p>
-                      <p className="text-xs text-gray-600 mt-1">{release.fnfiCategory} | {release.amountApproved || release.amountRequested} units</p>
+                      <p className="text-xs text-gray-600 mt-1">{release.fnfiCategory} | {release.amountApproved || release.amountRequested} kits</p>
                     </div>
                     <span className="shrink-0 px-2 py-1 bg-white text-orange-700 border border-orange-200 rounded-full text-[11px] font-bold">
                       {release.deliveryStatus}
@@ -198,7 +198,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-sm text-gray-900">{release.drNumber}: {release.fnfiCategory}</p>
-                  <p className="text-xs text-gray-600">{release.amountApproved || release.amountRequested} units | {release.municipality} | {release.deliveryStatus}</p>
+                  <p className="text-xs text-gray-600">{release.amountApproved || release.amountRequested} kits | {release.municipality} | {release.deliveryStatus}</p>
                   <p className="text-xs text-gray-500 truncate">Release record: {release.handoverContractId || 'not signed yet'} | Receipt reference: {release.blockchainTxHash || '-'}</p>
                 </div>
                 {release.receiverGps && <CheckCircle className="w-5 h-5 text-green-600" />}

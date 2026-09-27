@@ -3,6 +3,7 @@ import { CheckCircle, Edit, FileSignature, MapPin, PackageCheck, Plus, QrCode, R
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { blockchain } from '../../services/blockchain';
+import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
 
 interface InventoryState {
@@ -337,8 +338,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   </td>
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-gray-900">{release.fnfiCategory}</p>
-                    <p className="text-sm text-gray-700">Requested: {release.amountRequested.toLocaleString()} units</p>
-                    <p className="text-sm text-green-700 font-semibold">Approved: {release.amountApproved ? `${release.amountApproved.toLocaleString()} units` : '-'}</p>
+                    <p className="text-sm text-gray-700">Requested: {release.amountRequested.toLocaleString()} kits</p>
+                    <p className="text-sm text-green-700 font-semibold">Approved: {release.amountApproved ? `${release.amountApproved.toLocaleString()} kits` : '-'}</p>
                     {release.incidentCode && release.incidentCode.toLowerCase() !== 'none' && (
                       <p className="text-xs text-gray-500 mt-0.5">Remarks: {release.incidentCode}</p>
                     )}
@@ -542,18 +543,23 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Amount Requested</label>
                 <div className="px-4 py-3 bg-gray-100 rounded-lg">
-                  <span className="text-lg font-bold text-gray-900">{selectedRelease.amountRequested.toLocaleString()} units</span>
+                  <span className="text-lg font-bold text-gray-900">{selectedRelease.amountRequested.toLocaleString()} kits</span>
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Amount to Approve <span className="text-red-500">*</span></label>
                 <input
-                  type="number"
-                  min="1"
-                  max={selectedRelease.amountRequested}
-                  value={approvalAmount}
-                  onChange={(e) => setApprovalAmount(parseInt(e.target.value) || 0)}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={approvalAmount || ''}
+                  onChange={(e) => {
+                    const c = sanitizeNumbersOnly(e.target.value);
+                    const n = c ? parseInt(c, 10) : 0;
+                    setApprovalAmount(selectedRelease ? Math.min(n, selectedRelease.amountRequested) : n);
+                  }}
+                  placeholder="0"
                   className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-lg"
                 />
                 <p className="text-xs text-gray-600 mt-1">Approval mints the on-chain batch token and records the Admin MetaMask signature.</p>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
 import { LocationPickerMap } from '../design/LocationPickerMap';
+import { sanitizeNumbersOnly, sanitizeTextOnly } from '../../lib/inputValidation';
 
 export interface ReleaseForm {
   dateAllocated: string;
@@ -348,7 +349,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
               <input
                 type="text"
                 value={formData.municipality}
-                onChange={(e) => handleChange('municipality', e.target.value)}
+                onChange={(e) => handleChange('municipality', sanitizeTextOnly(e.target.value))}
                 placeholder="e.g., Leon, Miag-ao (Optional)"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -375,7 +376,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
               <input
                 type="text"
                 value={formData.lguName}
-                onChange={(e) => handleChange('lguName', e.target.value)}
+                onChange={(e) => handleChange('lguName', sanitizeTextOnly(e.target.value))}
                 placeholder="e.g., Leon Municipal Evacuation Gym"
                 className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.lguName ? 'border-red-500' : 'border-gray-300'
@@ -614,12 +615,15 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                 Amount Requested <span className="text-red-500">*</span>
               </label>
               <input
-                type="number"
-                min={availableQty > 0 ? 1 : 0}
-                max={availableQty > 0 ? availableQty : undefined}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={formData.amountRequested || ''}
-                onChange={(e) => handleChange('amountRequested', parseInt(e.target.value) || 0)}
-                placeholder="Enter amount"
+                onChange={(e) => {
+                  const cleaned = sanitizeNumbersOnly(e.target.value);
+                  handleChange('amountRequested', cleaned ? parseInt(cleaned, 10) : 0);
+                }}
+                placeholder="Enter amount (kits)"
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.amountRequested ? 'border-red-500' : 'border-gray-300'
                 }`}

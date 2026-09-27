@@ -4,6 +4,7 @@ import { AddLGUModal } from '../modals/AddLGUModal';
 import { EditLGUModal, LGUDelivery } from '../modals/EditLGUModal';
 import type { LGUInventoryReportInput, LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
 import { PANAY_LGUS } from '../../data/panayLguDirectory';
+import { sanitizeTextOnly, sanitizeNumbersOnly } from '../../lib/inputValidation';
 
 interface RecentActivity {
   id: string;
@@ -336,35 +337,109 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3 mt-4">
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">LGU Office</span>
-            <input value={reportForm.lguName} onChange={(e) => setReportForm({ ...reportForm, lguName: e.target.value })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="Leon Municipal Office" />
+            <input
+              type="text"
+              value={reportForm.lguName}
+              onChange={(e) => setReportForm({ ...reportForm, lguName: sanitizeTextOnly(e.target.value) })}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="Leon Municipal Office"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Municipality</span>
-            <input value={reportForm.municipality} onChange={(e) => setReportForm({ ...reportForm, municipality: e.target.value })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="Leon" />
+            <input
+              type="text"
+              value={reportForm.municipality}
+              onChange={(e) => setReportForm({ ...reportForm, municipality: sanitizeTextOnly(e.target.value) })}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="Leon"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Province</span>
-            <input value={reportForm.province} onChange={(e) => setReportForm({ ...reportForm, province: e.target.value })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="Iloilo" />
+            <input
+              type="text"
+              value={reportForm.province}
+              onChange={(e) => setReportForm({ ...reportForm, province: sanitizeTextOnly(e.target.value) })}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="Iloilo"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Food Packs On Hand</span>
-            <input type="number" value={reportForm.foodPacks} onChange={(e) => setReportForm({ ...reportForm, foodPacks: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={reportForm.foodPacks || ''}
+              onChange={(e) => {
+                const c = sanitizeNumbersOnly(e.target.value);
+                setReportForm({ ...reportForm, foodPacks: c ? parseInt(c, 10) : 0 });
+              }}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="0"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Hygiene Kits On Hand</span>
-            <input type="number" value={reportForm.hygieneKits} onChange={(e) => setReportForm({ ...reportForm, hygieneKits: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={reportForm.hygieneKits || ''}
+              onChange={(e) => {
+                const c = sanitizeNumbersOnly(e.target.value);
+                setReportForm({ ...reportForm, hygieneKits: c ? parseInt(c, 10) : 0 });
+              }}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="0"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Family Kits On Hand</span>
-            <input type="number" value={reportForm.familyKits} onChange={(e) => setReportForm({ ...reportForm, familyKits: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={reportForm.familyKits || ''}
+              onChange={(e) => {
+                const c = sanitizeNumbersOnly(e.target.value);
+                setReportForm({ ...reportForm, familyKits: c ? parseInt(c, 10) : 0 });
+              }}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="0"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Affected Families</span>
-            <input type="number" value={reportForm.affectedFamilies} onChange={(e) => setReportForm({ ...reportForm, affectedFamilies: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={reportForm.affectedFamilies || ''}
+              onChange={(e) => {
+                const c = sanitizeNumbersOnly(e.target.value);
+                setReportForm({ ...reportForm, affectedFamilies: c ? parseInt(c, 10) : 0 });
+              }}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="0"
+            />
           </label>
           <label className="space-y-1">
             <span className="block text-xs font-bold text-indigo-950">Damage Index 0-100</span>
-            <input type="number" min="0" max="100" value={reportForm.damageIndex} onChange={(e) => setReportForm({ ...reportForm, damageIndex: Number(e.target.value) })} className="w-full px-3 py-2 rounded border border-indigo-200 text-sm" placeholder="0" />
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={reportForm.damageIndex || ''}
+              onChange={(e) => {
+                const c = sanitizeNumbersOnly(e.target.value);
+                const n = c ? Math.min(100, parseInt(c, 10)) : 0;
+                setReportForm({ ...reportForm, damageIndex: n });
+              }}
+              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
+              placeholder="0"
+            />
           </label>
         </div>
         {submitMessage && <p className="text-sm font-semibold text-indigo-900 mt-3">{submitMessage}</p>}
@@ -532,7 +607,7 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
               <div className="flex justify-between items-center">
                 <span className="text-sm font-semibold text-gray-600">Current Stock</span>
                 <span className="text-sm font-bold text-purple-600">
-                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} units
+                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} kits
                 </span>
               </div>
 
@@ -578,7 +653,7 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
                     <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-bold">
                       {activity.fnfiCategory}
                     </span>
-                    <span className="text-sm font-bold text-gray-900">{activity.quantity.toLocaleString()} units</span>
+                    <span className="text-sm font-bold text-gray-900">{activity.quantity.toLocaleString()} kits</span>
                     <span className={`px-2 py-1 rounded text-xs font-bold ${
                       activity.status === 'Delivered' ? 'bg-green-100 text-green-700' :
                       activity.status === 'In Transit' ? 'bg-yellow-100 text-yellow-700' :

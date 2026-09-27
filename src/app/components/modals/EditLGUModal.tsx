@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, MapPin, AlertCircle, Edit } from 'lucide-react';
+import { sanitizeTextOnly, sanitizeNumbersOnly, sanitizePhone } from '../../lib/inputValidation';
 
 export interface LGUDelivery {
   id: string;
@@ -154,7 +155,7 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
               <input
                 type="text"
                 value={formData.municipality}
-                onChange={(e) => handleChange('municipality', e.target.value)}
+                onChange={(e) => handleChange('municipality', sanitizeTextOnly(e.target.value))}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.municipality ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -170,7 +171,7 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
             <input
               type="text"
               value={formData.lguName}
-              onChange={(e) => handleChange('lguName', e.target.value)}
+              onChange={(e) => handleChange('lguName', sanitizeTextOnly(e.target.value))}
               className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 errors.lguName ? 'border-red-500' : 'border-gray-300'
               }`}
@@ -186,7 +187,7 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
               <input
                 type="text"
                 value={formData.contactPerson || ''}
-                onChange={(e) => handleChange('contactPerson', e.target.value)}
+                onChange={(e) => handleChange('contactPerson', sanitizeTextOnly(e.target.value))}
                 placeholder="e.g., Juan Dela Cruz"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -198,8 +199,9 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
               </label>
               <input
                 type="text"
+                inputMode="tel"
                 value={formData.contactNumber || ''}
-                onChange={(e) => handleChange('contactNumber', e.target.value)}
+                onChange={(e) => handleChange('contactNumber', sanitizePhone(e.target.value))}
                 placeholder="e.g., 09XX-XXX-XXXX"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
@@ -215,10 +217,14 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
                   Total Items Released
                 </label>
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={formData.totalItemsReleased || ''}
-                  onChange={(e) => handleChange('totalItemsReleased', parseInt(e.target.value) || 0)}
+                  onChange={(e) => {
+                    const c = sanitizeNumbersOnly(e.target.value);
+                    handleChange('totalItemsReleased', c ? parseInt(c, 10) : 0);
+                  }}
                   className="w-full px-3 py-2 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -228,10 +234,14 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
                   Completed Deliveries
                 </label>
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={formData.completedDeliveries || ''}
-                  onChange={(e) => handleChange('completedDeliveries', parseInt(e.target.value) || 0)}
+                  onChange={(e) => {
+                    const c = sanitizeNumbersOnly(e.target.value);
+                    handleChange('completedDeliveries', c ? parseInt(c, 10) : 0);
+                  }}
                   className="w-full px-3 py-2 border border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -241,10 +251,14 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
                   Pending Deliveries
                 </label>
                 <input
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={formData.pendingDeliveries || ''}
-                  onChange={(e) => handleChange('pendingDeliveries', parseInt(e.target.value) || 0)}
+                  onChange={(e) => {
+                    const c = sanitizeNumbersOnly(e.target.value);
+                    handleChange('pendingDeliveries', c ? parseInt(c, 10) : 0);
+                  }}
                   className="w-full px-3 py-2 border border-orange-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -281,10 +295,14 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
                     {category}
                   </label>
                   <input
-                    type="number"
-                    min="0"
-                    value={formData.currentStock?.[category] || 0}
-                    onChange={(e) => handleStockChange(category, parseInt(e.target.value) || 0)}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={formData.currentStock?.[category] || ''}
+                    onChange={(e) => {
+                      const c = sanitizeNumbersOnly(e.target.value);
+                      handleStockChange(category, c ? parseInt(c, 10) : 0);
+                    }}
                     className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>

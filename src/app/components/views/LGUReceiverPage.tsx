@@ -1087,7 +1087,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
                     <div key={r.drNumber} className="pt-2 pb-1 text-xs flex items-center justify-between">
                       <div>
                         <p className="font-bold text-gray-900">{r.drNumber}</p>
-                        <p className="text-[10px] text-gray-500">{r.fnfiCategory} • {r.amountApproved || r.amountRequested} units</p>
+                        <p className="text-[10px] text-gray-500">{r.fnfiCategory} • {r.amountApproved || r.amountRequested} kits</p>
                       </div>
                       <span className="px-2 py-0.5 rounded-full text-[9.5px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
                         Accepted

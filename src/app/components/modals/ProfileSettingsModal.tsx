@@ -19,6 +19,7 @@ import {
 import { authApi, type UserProfile } from '../../services/authApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
+import { sanitizeTextOnly } from '../../lib/inputValidation';
 
 interface ProfileSettingsModalProps {
   isOpen: boolean;
@@ -455,7 +456,7 @@ export function ProfileSettingsModal({
             <input
               type="text"
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => setFullName(sanitizeTextOnly(e.target.value))}
               placeholder="e.g. Maria Santos"
               className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
               required

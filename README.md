@@ -20,7 +20,6 @@ This system integrates **Supabase Cloud PostgreSQL**, **Ethereum (Sepolia Testne
 4. [Database Schema (Supabase PostgreSQL)](#4-database-schema-supabase-postgresql)
 5. [Deployment & Why Ngrok is Not Needed](#5-deployment--why-ngrok-is-not-needed)
 6. [Getting Started & Local Development](#6-getting-started--local-development)
-7. [Simulated Field Testing Guide](#7-simulated-field-testing-guide)
 
 ---
 
@@ -401,29 +400,6 @@ By deploying to **GitHub Pages**, the site is served over native, trusted **HTTP
 
 ---
 
-# 7. Simulated Field Testing Guide
-
-You can test the entire end-to-end flow without requiring physical delivery trucks on the road:
-
-1. Open the Admin Dashboard and navigate to **Trucking & Live GPS Tracking**.
-2. Press **`F12`** in your browser, switch to the **Console** tab, and execute:
-   ```javascript
-   import('/src/app/services/backendApi.ts').then(({ backendApi }) => {
-     backendApi.upsertTruckLiveLocation({
-       truck_id: 'TRUCK-PASS-01',
-       latitude: 10.9412,
-       longitude: 122.6281,
-       gps_text: '10.9412, 122.6281',
-       accuracy: 15,
-       wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
-       updated_at: new Date().toISOString()
-     }).then(() => console.log('Live truck coordinate dispatched to Supabase!'));
-   });
-   ```
-3. The Admin Map will immediately snap `TRUCK-PASS-01` to the highway corridor, display real-time drive metrics, and show transit checkpoints.
-4. On your mobile device, log in as an LGU Receiver, open the camera QR scanner, scan the generated Delivery Receipt QR, and confirm receipt with MetaMask. The transaction will confirm on Ethereum Sepolia and seal the delivery custody.
-
----
 
 ### Authors & Academic Context
 Developed as part of the Undergraduate Thesis Project for the **Bachelor of Science in Information Technology / Computer Science**, focusing on blockchain supply chain integrity, multi-signature custody handovers, and GIS-assisted disaster logistics for DSWD Region VI.
