@@ -30,8 +30,6 @@ const FNFI_CATEGORIES = [
   'RTEF'
 ];
 
-const UNIT_TYPES = ['packs', 'kits', 'sets', 'sacks', 'boxes', 'bales', 'units'];
-
 const SOURCE_OPTIONS = [
   'VDRC',
   'LDRC',
@@ -44,7 +42,7 @@ const defaultFormData: IncomingGoodsForm = {
     dateReceived: new Date().toISOString().split('T')[0],
     fnfiCategory: '',
     quantity: 0,
-    unitType: 'packs',
+    unitType: 'kits',
     expirationDate: '',
     source: 'VDRC',
     destinationType: 'Warehouse',
@@ -53,12 +51,14 @@ const defaultFormData: IncomingGoodsForm = {
 };
 
 export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = 'add' }: AddIncomingGoodsModalProps) {
-  const [formData, setFormData] = useState<IncomingGoodsForm>(initialData ?? defaultFormData);
+  const [formData, setFormData] = useState<IncomingGoodsForm>(
+    initialData ? { ...initialData, unitType: initialData.unitType || 'kits' } : defaultFormData
+  );
   const [errors, setErrors] = useState<Partial<Record<keyof IncomingGoodsForm, string>>>({});
 
   useEffect(() => {
     if (!initialData) return;
-    setFormData(initialData);
+    setFormData({ ...initialData, unitType: initialData.unitType || 'kits' });
   }, [initialData]);
 
   const handleChange = (field: keyof IncomingGoodsForm, value: string | number) => {
@@ -213,17 +213,14 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
 
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">
-                Unit Type <span className="text-red-500">*</span>
+                Unit Type
               </label>
-              <select
-                value={formData.unitType}
-                onChange={(e) => handleChange('unitType', e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {UNIT_TYPES.map(unit => (
-                  <option key={unit} value={unit}>{unit}</option>
-                ))}
-              </select>
+              <div className="w-full px-4 py-2.5 bg-gray-100 border border-gray-300 rounded-lg text-gray-800 font-semibold text-sm flex items-center justify-between">
+                <span>kits</span>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded shadow-xs">
+                  Fixed
+                </span>
+              </div>
             </div>
           </div>
 

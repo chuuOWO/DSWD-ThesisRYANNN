@@ -188,7 +188,7 @@ export function QrCodeGeneratorModal({
             <div class="details">
               <div><strong>Destination LGU:</strong> ${payload.to}</div>
               <div><strong>Category:</strong> ${payload.category}</div>
-              <div><strong>Quantity:</strong> ${payload.quantity.toLocaleString()} units</div>
+              <div><strong>Quantity:</strong> ${payload.quantity.toLocaleString()} kits</div>
               <div><strong>Origin:</strong> ${payload.from}</div>
               <div><strong>Handover ID:</strong> ${payload.handoverContractId}</div>
             </div>
@@ -250,7 +250,7 @@ export function QrCodeGeneratorModal({
             <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-600 pt-2 border-t border-gray-200">
               <div><span className="font-semibold text-gray-800">Destination:</span> {currentRelease.lguName}</div>
               <div><span className="font-semibold text-gray-800">Status:</span> {currentRelease.deliveryStatus}</div>
-              <div><span className="font-semibold text-gray-800">Quantity:</span> {currentRelease.amountApproved || currentRelease.amountRequested} units</div>
+              <div><span className="font-semibold text-gray-800">Quantity:</span> {currentRelease.amountApproved || currentRelease.amountRequested} kits</div>
               <div><span className="font-semibold text-gray-800">Origin:</span> {currentRelease.warehouseSource}</div>
             </div>
           )}
@@ -302,7 +302,7 @@ export function QrCodeGeneratorModal({
             {isCompleted ? 'Completed Shipment' : 'Official Manifest QR'}
           </span>
           <h3 className="text-base font-extrabold text-gray-900">{payload?.drNumber || 'No Release'}</h3>
-          <p className="text-xs text-gray-500">{payload?.category} &bull; {payload?.quantity.toLocaleString()} units &rarr; {payload?.to}</p>
+          <p className="text-xs text-gray-500">{payload?.category} &bull; {payload?.quantity.toLocaleString()} kits &rarr; {payload?.to}</p>
         </div>
 
         {/* QR Code Canvas / Image */}

@@ -600,7 +600,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                     {availableQty > 0 ? availableQty.toLocaleString() : '-'}
                   </p>
                   <p className="text-xs text-gray-600">
-                    {availableQty > 0 ? 'units available' : 'N/A'}
+                    {availableQty > 0 ? 'kits available' : 'N/A'}
                   </p>
                 </div>
               </div>
