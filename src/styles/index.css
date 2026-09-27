@@ -3,3 +3,116 @@
 @import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
 @import './tailwind.css';
 @import './theme.css';
+
+/* ==========================================================================
+   Ultra-Slick Minimalist Silver-Slate Basemap & Modern Tailwind Map HUD
+   - Strips noisy OSM colors (yellow highways, green patches) into a clean,
+     monochrome silver-slate architectural canvas.
+   - Resets Leaflet divIcon containers to be completely borderless & transparent.
+   - Upgrades Leaflet popups with modern rounded glassmorphism & soft shadows.
+   ========================================================================== */
+.leaflet-container {
+  background-color: #f1f5f9 !important;
+  font-family: inherit !important;
+}
+
+.leaflet-container .leaflet-tile-pane {
+  filter: grayscale(100%) contrast(88%) brightness(105%);
+  opacity: 0.88;
+}
+
+/* Seamless tile loading & prevent white square flashes */
+img.leaflet-tile {
+  background-color: transparent !important;
+}
+
+/* Remove default Leaflet divIcon white box & 1px gray border */
+.leaflet-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Modern Minimalist Popups */
+.leaflet-popup-content-wrapper {
+  border-radius: 0.875rem !important;
+  box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08) !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  padding: 0 !important;
+  background: #ffffff !important;
+}
+
+.leaflet-popup-content {
+  margin: 10px 14px !important;
+  line-height: 1.4 !important;
+}
+
+.leaflet-popup-tip {
+  background: #ffffff !important;
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.08) !important;
+}
+
+/* ==========================================================================
+   Animated Moving Watercolor Gradient for Modern Auth Page
+   ========================================================================== */
+@keyframes fluidBlob1 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(50px, -70px) scale(1.15);
+  }
+  66% {
+    transform: translate(-40px, 50px) scale(0.92);
+  }
+}
+
+@keyframes fluidBlob2 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  33% {
+    transform: translate(-60px, 60px) scale(1.12);
+  }
+  66% {
+    transform: translate(45px, -55px) scale(0.94);
+  }
+}
+
+@keyframes fluidBlob3 {
+  0%, 100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+  50% {
+    transform: translate(70px, 40px) scale(1.18);
+  }
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-blob-1 {
+  animation: fluidBlob1 20s ease-in-out infinite alternate;
+}
+
+.animate-blob-2 {
+  animation: fluidBlob2 25s ease-in-out infinite alternate;
+}
+
+.animate-blob-3 {
+  animation: fluidBlob3 18s ease-in-out infinite alternate;
+}
+
+.animate-gradient-shift {
+  background-size: 250% 250%;
+  animation: gradientShift 18s ease infinite;
+}
+

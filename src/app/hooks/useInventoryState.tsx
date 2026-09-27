@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { backendApi } from '../services/backendApi';
-import { blockchain } from '../services/blockchain';
+import { blockchain, generateBatchTokenId } from '../services/blockchain';
+import { findPanayLgu } from '../data/panayLguDirectory';
 
 export interface InventoryItem {
   category: string;
@@ -8,7 +9,7 @@ export interface InventoryItem {
   warehouseB: number;
 }
 
-export type UserRole = 'Admin' | 'Trucker' | 'LGU' | 'Unregistered';
+export type UserRole = 'Admin' | 'Receiver' | 'LGUReceiver' | 'Unregistered';
 
 export type WarehouseName = 'Oton Main Warehouse' | 'Pototan Main Warehouse';
 export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Minted' | 'Correction Requested' | 'Rejected';
@@ -65,10 +66,12 @@ export interface OutgoingRelease {
   incidentCode: string;
   allocatedBatches: BatchAllocation[];
   handoverContractId?: string;
+  adminSignature?: string;
   senderSignature?: string;
   receiverSignature?: string;
   senderGps?: string;
   receiverGps?: string;
+  destinationAddress?: string;
   blockchainTxHash?: string;
   correctionNote?: string;
   assignedTruckId?: string | null;
@@ -214,8 +217,11 @@ type OutgoingRequestRow = {
   allocated_batches?: { batchTokenId?: string | null; quantity?: number | null }[] | null;
   sender_gps?: string | null;
   receiver_gps?: string | null;
+  destination_address?: string | null;
+  assigned_truck_id?: string | null;
   tx_hash?: string | null;
   handover_contract_id?: string | null;
+  admin_signature?: string | null;
   sender_signature?: string | null;
   receiver_signature?: string | null;
   wallet_address?: string | null;
@@ -294,6 +300,30 @@ const mapLGUInventoryReport = (row: LGUInventoryReportRow): LGUPriorityReport =>
   };
 };
 
+export const deduplicateLguPriorityReports = (reports: LGUPriorityReport[]): LGUPriorityReport[] => {
+  const map = new Map<string, LGUPriorityReport>();
+
+  for (const report of reports) {
+    const rawMuni = report.municipality || report.lguName || '';
+    const canonical = findPanayLgu(rawMuni, report.province)?.municipality ?? rawMuni.trim();
+    if (!canonical) continue;
+
+    const key = canonical.toLowerCase();
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...report, municipality: canonical });
+    } else {
+      const existingTime = new Date(existing.reportedAt || 0).getTime();
+      const currentTime = new Date(report.reportedAt || 0).getTime();
+      if (currentTime > existingTime) {
+        map.set(key, { ...report, municipality: canonical });
+      }
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.urgencyScore - a.urgencyScore);
+};
+
 const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   drNumber: row.dr_number ?? row.id,
   dateAllocated: row.date_allocated ?? '',
@@ -312,10 +342,14 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
     return [{ batchTokenId: entry.batchTokenId, quantity: entry.quantity }];
   }),
   handoverContractId: row.handover_contract_id ?? undefined,
+  adminSignature: row.tx_hash ?? row.admin_signature ?? undefined,
   senderSignature: row.sender_signature ?? undefined,
   receiverSignature: row.receiver_signature ?? undefined,
   senderGps: row.sender_gps ?? undefined,
   receiverGps: row.receiver_gps ?? undefined,
+  destinationAddress: row.destination_address ?? undefined,
+  assignedTruckId: row.assigned_truck_id ?? undefined,
+  assigned_truck_id: row.assigned_truck_id ?? undefined,
   blockchainTxHash: row.tx_hash ?? undefined,
   auditTrail: [makeAudit('Loaded from Supabase', `Outgoing request restored from database as ${row.delivery_status ?? 'Allocating'}.`, row.tx_hash ?? undefined)]
 });
@@ -349,7 +383,7 @@ const calculateAvailableInventory = (incoming: IncomingGoods[], outgoing: Outgoi
 
   incoming.forEach(item => {
     const destination = normalizeWarehouseName(item.destination);
-    if (item.status !== 'Minted' || item.destinationType !== 'Warehouse' || !destination) return;
+    if ((item.status !== 'Verified' && item.status !== 'Minted') || item.destinationType !== 'Warehouse' || !destination) return;
 
     const stockItem = ensureItem(item.fnfiCategory);
     if (destination === 'Oton Main Warehouse') {
@@ -360,6 +394,9 @@ const calculateAvailableInventory = (incoming: IncomingGoods[], outgoing: Outgoi
   });
 
   outgoing.forEach(release => {
+    // Direct delivery bypasses regional warehouse stock deduction
+    if (release.deliveryMode === 'Direct Delivery') return;
+
     const consumesStock = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'].includes(release.deliveryStatus);
     const warehouseSource = normalizeWarehouseName(release.warehouseSource);
     if (!consumesStock || !warehouseSource) return;
@@ -558,7 +595,7 @@ export function useInventoryState(enabled = true) {
       setIntegrationMode('mock');
     }
 
-    const tokenId = `BATCH-2026-${String(nextBatchIndex).padStart(3, '0')}`;
+    const tokenId = generateBatchTokenId();
     let proof;
 
     try {
@@ -631,20 +668,24 @@ export function useInventoryState(enabled = true) {
       return Number.isFinite(value) ? Math.max(max, value) : max;
     }, 0) + 1;
     const newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
-    const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus;
+    const isDirect = newRelease.deliveryMode === 'Direct Delivery';
+    const status: OutgoingStatus = isDirect ? 'Approved' : (newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus);
     const releaseWithDR: OutgoingRelease = {
       ...newRelease,
       deliveryStatus: status,
       drNumber: newDR,
-      amountApproved: status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved,
+      amountApproved: isDirect ? (newRelease.amountRequested || newRelease.amountApproved) : (status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved),
       allocatedBatches: [],
-      auditTrail: [makeAudit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
+      auditTrail: [makeAudit(isDirect ? 'Direct National Dispatch Created' : 'Release Draft Created', isDirect ? `Dispatched directly from ${newRelease.warehouseSource} to ${newRelease.lguName}.` : 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
     backendApi.createOutgoing({
       ...newRelease,
       drNumber: newDR,
-      deliveryStatus: 'Allocating'
+      amountApproved: isDirect ? (newRelease.amountRequested || newRelease.amountApproved) : newRelease.amountApproved,
+      deliveryStatus: status,
+      receiverGps: newRelease.receiverGps,
+      destinationAddress: newRelease.destinationAddress
     }).then(() => {
       setIntegrationMode('backend');
     }).catch(error => {
@@ -662,59 +703,66 @@ export function useInventoryState(enabled = true) {
         auditTrail: [makeAudit('Edited', 'Pre-handover release details edited before immutable custody event.'), ...release.auditTrail]
       };
     }));
+
+    void backendApi.updateOutgoing(drNumber, {
+      amountApproved: patch.amountApproved,
+      deliveryStatus: patch.deliveryStatus,
+      allocatedBatches: patch.allocatedBatches,
+      receiverGps: patch.receiverGps,
+      destinationAddress: patch.destinationAddress
+    }).catch(err => console.warn('Supabase updateOutgoing error:', err));
   };
 
-  const approveAllocation = (drNumber: string, amountApproved: number) => {
+  const approveAllocation = async (drNumber: string, amountApproved: number): Promise<{ ok: boolean; message: string }> => {
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release) return { ok: false, message: 'Release not found.' };
-    if (amountApproved <= 0 || amountApproved > release.amountRequested) return { ok: false, message: 'Approved amount must be between 1 and requested amount.' };
+    if (amountApproved <= 0 || amountApproved > release.amountRequested) {
+      return { ok: false, message: 'Approved amount must be between 1 and requested amount.' };
+    }
+
+    // Direct Delivery bypasses regional warehouse stock and minting
+    if (release.deliveryMode === 'Direct Delivery') {
+      setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
+        ? {
+            ...item,
+            amountApproved,
+            deliveryStatus: 'Approved',
+            auditTrail: [makeAudit('Direct Dispatch Approved', `Direct delivery from ${release.warehouseSource} approved without regional warehouse minting.`), ...item.auditTrail]
+          }
+        : item));
+      backendApi.updateOutgoing(drNumber, {
+        amountApproved,
+        deliveryStatus: 'Approved'
+      }).catch(error => {
+        logBackendError('Approve direct delivery')(error);
+      });
+      return { ok: true, message: 'Direct delivery dispatched without regional warehouse minting.' };
+    }
+
+    // Validate available regional warehouse stock
     if (isMainWarehouse(release.warehouseSource) && getAvailableStock(release.fnfiCategory, release.warehouseSource) < amountApproved) {
       return { ok: false, message: 'Insufficient available warehouse stock.' };
     }
 
-    const reserveStatuses: OutgoingStatus[] = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'];
-    const reservedByBatch = new Map<string, number>();
-    outgoingReleasesList.forEach(item => {
-      if (item.drNumber === drNumber || !reserveStatuses.includes(item.deliveryStatus)) return;
-      item.allocatedBatches.forEach(allocation => {
-        reservedByBatch.set(
-          allocation.batchTokenId,
-          (reservedByBatch.get(allocation.batchTokenId) ?? 0) + allocation.quantity
-        );
+    const batchTokenId = generateBatchTokenId();
+    let proof;
+
+    try {
+      await blockchain.requireConnectedWalletRole('Admin');
+      proof = await blockchain.mintAndAuthorizeRelease({
+        drNumber: release.drNumber,
+        batchTokenId,
+        category: release.fnfiCategory,
+        quantity: amountApproved,
+        warehouseSource: release.warehouseSource,
+        lguName: release.lguName
       });
-    });
-
-    const candidateBatches = incomingGoodsList
-      .filter(item =>
-        item.status === 'Minted' &&
-        item.fnfiCategory === release.fnfiCategory &&
-        item.destinationType === 'Warehouse' &&
-        item.destination === release.warehouseSource &&
-        item.batchTokenId
-      )
-      .slice()
-      .sort((a, b) => {
-        const aTime = a.mintedAt ? Date.parse(a.mintedAt) : 0;
-        const bTime = b.mintedAt ? Date.parse(b.mintedAt) : 0;
-        return aTime - bTime;
-      });
-
-    let remaining = amountApproved;
-    const allocations: BatchAllocation[] = [];
-
-    candidateBatches.forEach(batch => {
-      if (!batch.batchTokenId || remaining <= 0) return;
-      const reserved = reservedByBatch.get(batch.batchTokenId) ?? 0;
-      const available = Math.max(0, batch.quantity - reserved);
-      if (available <= 0) return;
-      const take = Math.min(available, remaining);
-      allocations.push({ batchTokenId: batch.batchTokenId, quantity: take });
-      remaining -= take;
-    });
-
-    if (remaining > 0) {
-      return { ok: false, message: 'Insufficient tokenized stock to cover the approved release quantity.' };
+    } catch (error) {
+      logBackendError('Mint and authorize release with MetaMask')(error);
+      return { ok: false, message: toFriendlyTxError(error, 'Authorization and batch minting failed. Please connect Admin MetaMask.') };
     }
+
+    const allocations: BatchAllocation[] = [{ batchTokenId, quantity: amountApproved }];
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? {
@@ -722,33 +770,47 @@ export function useInventoryState(enabled = true) {
           amountApproved,
           deliveryStatus: 'Approved',
           allocatedBatches: allocations,
-          auditTrail: [makeAudit('Allocation Approved', 'Stock reserved and ERC-1155 batch balances allocated; custody transfer happens on receipt confirmation.'), ...item.auditTrail]
+          adminSignature: proof.hash,
+          blockchainTxHash: proof.hash,
+          auditTrail: [makeAudit('Release Minted & Authorized', `Admin authorized dispatch and minted batch ${batchTokenId} on blockchain.`, proof.hash), ...item.auditTrail]
         }
       : item));
-    backendApi.updateOutgoing(drNumber, {
-      amountApproved,
-      deliveryStatus: 'Approved',
-      allocatedBatches: allocations
-    }).catch(error => {
+
+    try {
+      await backendApi.updateOutgoing(drNumber, {
+        amountApproved,
+        deliveryStatus: 'Approved',
+        allocatedBatches: allocations,
+        txHash: proof.hash,
+        adminSignature: proof.hash,
+        walletAddress: proof.walletAddress
+      });
+      setIntegrationMode('backend');
+    } catch (error) {
       logBackendError('Approve outgoing allocation')(error);
       setIntegrationMode('mock');
-    });
-    return { ok: true, message: 'Allocation approved and ERC-1155 batch balances reserved.' };
+    }
+
+    return { ok: true, message: `Release approved! Batch token ${batchTokenId} minted on blockchain with Admin signature.` };
   };
 
-  const senderSignAndRelease = async (drNumber: string, actorRole: UserRole = 'Trucker') => {
-    if (actorRole !== 'Trucker') return { ok: false, message: 'RBAC: only Trucker can sign warehouse release.' };
+  const senderSignAndRelease = async (drNumber: string, actorRole: UserRole = 'Receiver') => {
+    if (actorRole !== 'Receiver') return { ok: false, message: 'RBAC: only Receiver can sign warehouse release.' };
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release || !['Approved', 'Packed'].includes(release.deliveryStatus)) return { ok: false, message: 'Only approved/packed releases can be signed by sender.' };
-    if (release.allocatedBatches.length === 0) return { ok: false, message: 'No batch allocations found for this release.' };
+    if (release.deliveryMode !== 'Direct Delivery' && release.allocatedBatches.length === 0) {
+      return { ok: false, message: 'No batch allocations found for this release.' };
+    }
 
     const senderGps = release.warehouseSource === 'Pototan Main Warehouse' ? '11.0039, 122.5364' : '10.6922, 122.4731';
     const handoverContractId = `HANDOVER-${drNumber.replace('DR-', '')}`;
     let proof;
 
     try {
-      await blockchain.requireConnectedWalletRole('Trucker');
-      await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
+      await blockchain.requireConnectedWalletRole('Receiver');
+      if (release.deliveryMode !== 'Direct Delivery') {
+        await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
+      }
       proof = await blockchain.signRelease({
         drNumber,
         handoverContractId,
@@ -800,20 +862,31 @@ export function useInventoryState(enabled = true) {
     });
   };
 
-  const receiverAcceptWithGps = async (drNumber: string, actorRole: UserRole = 'LGU') => {
-    if (actorRole !== 'LGU') return { ok: false, message: 'RBAC: only LGU can confirm receipt.' };
-    const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
+  const receiverAcceptWithGps = async (drNumber: string, actorRole: UserRole = 'LGUReceiver') => {
+    if (actorRole !== 'LGUReceiver') return { ok: false, message: 'RBAC: only LGUReceiver can confirm receipt.' };
+    const targetDrUpper = drNumber.trim().toUpperCase();
+    const release = outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
     if (!release) return { ok: false, message: 'Release not found.' };
-    const latestGps = release?.municipality === 'Miag-ao' ? '10.6415, 122.2352' : release?.municipality === 'Banate' ? '11.0022, 122.8174' : '10.7202, 122.5621';
-    const handoverContractId = release.handoverContractId ?? `HANDOVER-${drNumber.replace('DR-', '')}`;
-    // TODO: Teammate can plug in ReownKit / WalletConnect here for on-chain mobile receipt.
-    const proof: { hash: string; walletAddress: string; mode: 'contract' | 'signature' } = {
-      hash: `LGU-RECEIPT-${Date.now()}`,
-      walletAddress: '0xLGUReceiverWallet',
-      mode: 'signature'
-    };
+    const canonicalDr = release.drNumber;
+    const lguLookup = findPanayLgu(release?.destinationAddress || release?.lguName || release?.municipality || '', release?.province);
+    const latestGps = release?.receiverGps || (lguLookup ? `${lguLookup.lat}, ${lguLookup.lng}` : '10.7202, 122.5621');
+    const handoverContractId = release.handoverContractId ?? `HANDOVER-${canonicalDr.replace('DR-', '')}`;
+    let proof: { hash: string; walletAddress: string; mode: 'contract' | 'signature' };
 
-    setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber && ['Released', 'In Transit', 'Delivered'].includes(item.deliveryStatus)
+    try {
+      proof = await blockchain.confirmReceipt({
+        drNumber: canonicalDr,
+        handoverContractId,
+        destination: release.lguName,
+        gps: latestGps
+      });
+    } catch (confErr: any) {
+      console.warn('LGU confirmReceipt error:', confErr);
+      const msg = confErr?.message || 'MetaMask confirmation failed or was cancelled.';
+      return { ok: false, message: msg };
+    }
+
+    setOutgoingReleasesList(prev => prev.map(item => item.drNumber.trim().toUpperCase() === targetDrUpper && ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(item.deliveryStatus)
       ? {
           ...item,
           deliveryStatus: 'Accepted',
@@ -824,7 +897,7 @@ export function useInventoryState(enabled = true) {
           auditTrail: [makeAudit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', proof.hash), ...item.auditTrail]
         }
       : item));
-    backendApi.updateOutgoing(drNumber, {
+    backendApi.updateOutgoing(canonicalDr, {
       deliveryStatus: 'Accepted',
       receiverGps: latestGps,
       txHash: proof.hash,
@@ -832,7 +905,7 @@ export function useInventoryState(enabled = true) {
       receiverSignature: proof.hash,
       walletAddress: proof.walletAddress
     }).then(() => {
-      backendApi.markTruckLiveLocationDoneByDr(drNumber).catch(() => {});
+      backendApi.markTruckLiveLocationDoneByDr(canonicalDr).catch(() => {});
     }).catch(error => {
       logBackendError('Accept outgoing handover')(error);
       setIntegrationMode('mock');
@@ -844,9 +917,9 @@ export function useInventoryState(enabled = true) {
 
   const submitLGUInventoryReport = async (input: LGUInventoryReportInput) => {
     try {
-      await blockchain.requireConnectedWalletRole('LGU');
+      await blockchain.requireConnectedWalletRole('LGUReceiver');
     } catch (error) {
-      return { ok: false, message: toFriendlyTxError(error, 'Connect the LGU MetaMask wallet to submit this report.') };
+      return { ok: false, message: toFriendlyTxError(error, 'Connect the LGUReceiver MetaMask wallet to submit this report.') };
     }
 
     const computed = computePriority(input);
@@ -857,7 +930,7 @@ export function useInventoryState(enabled = true) {
       ...computed
     };
 
-    setLguPriorityReports(prev => [optimistic, ...prev].sort((a, b) => b.urgencyScore - a.urgencyScore));
+    setLguPriorityReports(prev => deduplicateLguPriorityReports([optimistic, ...prev]));
 
     try {
       await backendApi.createLGUInventoryReport({ ...input, ...computed });
@@ -877,7 +950,7 @@ export function useInventoryState(enabled = true) {
       .then(({ incoming, outgoing, lguReports, discrepancyReports: discrepancyRows }) => {
         setIncomingGoodsList(incoming.map(mapIncomingManifest));
         setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
-        setLguPriorityReports(lguReports.map(mapLGUInventoryReport).sort((a, b) => b.urgencyScore - a.urgencyScore));
+        setLguPriorityReports(deduplicateLguPriorityReports(lguReports.map(mapLGUInventoryReport)));
         setDiscrepancyReports((discrepancyRows ?? []).map(mapDiscrepancyReport));
         setIntegrationMode('backend');
       })
@@ -885,8 +958,12 @@ export function useInventoryState(enabled = true) {
 
     loadDashboard();
     const unsubscribe = backendApi.subscribeDashboard(loadDashboard);
+    const pollTimer = setInterval(loadDashboard, 5000);
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      clearInterval(pollTimer);
+    };
   }, [enabled]);
 
   const requestOutgoingCorrection = (drNumber: string, note: string) => {

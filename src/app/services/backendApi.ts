@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { PANAY_LGUS } from '../data/panayLguDirectory';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -42,6 +43,8 @@ export interface OutgoingPayload {
   allocatedBatches?: { batchTokenId: string; quantity: number }[];
   senderGps?: string;
   receiverGps?: string;
+  destinationAddress?: string;
+  destination_address?: string;
   txHash?: string;
   walletAddress?: string;
   assignedTruckId?: string | null;
@@ -77,8 +80,12 @@ export interface OutgoingUpdatePayload {
   allocatedBatches?: { batchTokenId: string; quantity: number }[];
   senderGps?: string;
   receiverGps?: string;
+  destinationAddress?: string;
+  destination_address?: string;
   txHash?: string;
   handoverContractId?: string;
+  adminSignature?: string;
+  admin_signature?: string;
   senderSignature?: string;
   receiverSignature?: string;
   walletAddress?: string;
@@ -114,6 +121,8 @@ export interface TruckerReleaseRecord {
   assigned_truck_id?: string | null;
   tx_hash?: string | null;
   wallet_address?: string | null;
+  receiver_gps?: string | null;
+  destination_address?: string | null;
 }
 
 const throwIfError = (error: unknown, context: string) => {
@@ -152,6 +161,39 @@ export const backendApi = {
       lguReports: lguReportsResult.error ? [] : lguReportsResult.data ?? [],
       discrepancyReports: discrepancyResult.error ? [] : discrepancyResult.data ?? []
     };
+  },
+
+  async getLguPriorityReports(municipality?: string) {
+    try {
+      let query = supabase
+        .from('lgu_inventory_reports')
+        .select('*')
+        .order('reported_at', { ascending: false });
+
+      if (municipality) {
+        query = query.ilike('municipality', `%${municipality.trim()}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) return [];
+      return (data ?? []).map((row: Record<string, any>) => ({
+        id: String(row.id ?? ''),
+        lguName: String(row.lgu_name ?? row.municipality ?? ''),
+        municipality: String(row.municipality ?? ''),
+        province: String(row.province ?? ''),
+        foodPacks: Number(row.food_packs ?? 0),
+        hygieneKits: Number(row.hygiene_kits ?? 0),
+        familyKits: Number(row.family_kits ?? 0),
+        affectedFamilies: Number(row.affected_families ?? 0),
+        damageIndex: Number(row.damage_index ?? 0),
+        urgencyScore: Number(row.urgency_score ?? 0),
+        priorityColor: String(row.priority_color ?? 'Green'),
+        recommendation: String(row.recommendation ?? ''),
+        reportedAt: String(row.reported_at ?? new Date().toISOString())
+      }));
+    } catch {
+      return [];
+    }
   },
 
   async createIncoming(payload: IncomingPayload) {
@@ -218,6 +260,7 @@ export const backendApi = {
         allocated_batches: payload.allocatedBatches,
         sender_gps: payload.senderGps,
         receiver_gps: payload.receiverGps,
+        destination_address: payload.destinationAddress ?? payload.destination_address,
         tx_hash: payload.txHash,
         wallet_address: payload.walletAddress,
         assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null
@@ -236,7 +279,8 @@ export const backendApi = {
       allocated_batches: payload.allocatedBatches,
       sender_gps: payload.senderGps,
       receiver_gps: payload.receiverGps,
-      tx_hash: payload.txHash,
+      destination_address: payload.destinationAddress ?? payload.destination_address,
+      tx_hash: payload.txHash ?? payload.adminSignature,
       handover_contract_id: payload.handoverContractId,
       sender_signature: payload.senderSignature,
       receiver_signature: payload.receiverSignature,
@@ -247,7 +291,7 @@ export const backendApi = {
     const { error } = await supabase
       .from('outgoing_requests')
       .update(updates)
-      .eq('dr_number', drNumber);
+      .ilike('dr_number', drNumber.trim());
 
     throwIfError(error, 'Failed to update outgoing request');
     return { ok: true };
@@ -339,11 +383,98 @@ export const backendApi = {
     return { ok: true };
   },
 
+  async recordLguReceipt(params: {
+    drNumber: string;
+    lguName: string;
+    municipality?: string;
+    province?: string;
+    category: string;
+    quantity: number;
+    receiverGps?: string;
+    receiverSignature?: string;
+    txHash?: string;
+  }) {
+    // 1. Mark outgoing request as Accepted
+    const updates: Record<string, unknown> = {
+      delivery_status: 'Accepted'
+    };
+    if (params.receiverGps) updates.receiver_gps = params.receiverGps;
+    if (params.receiverSignature) updates.receiver_signature = params.receiverSignature;
+    if (params.txHash) updates.tx_hash = params.txHash;
+
+    const cleanDr = params.drNumber.trim();
+    const { error: outError } = await supabase
+      .from('outgoing_requests')
+      .update(updates)
+      .ilike('dr_number', cleanDr);
+
+    if (outError) {
+      console.warn('Failed to update outgoing request on LGU receipt:', outError.message);
+    }
+
+    // 2. Mark truck live location done so it disappears from live map
+    await this.markTruckLiveLocationDoneByDr(cleanDr);
+
+    // 3. Record or update inventory for this LGU in lgu_inventory_reports
+    try {
+      let muni = (params.municipality || params.lguName || '').trim();
+      const matchedDirectoryLgu = PANAY_LGUS.find(
+        (l) =>
+          l.municipality.toLowerCase() === muni.toLowerCase() ||
+          muni.toLowerCase().includes(l.municipality.toLowerCase()) ||
+          l.municipality.toLowerCase().includes(muni.toLowerCase())
+      );
+
+      if (matchedDirectoryLgu) {
+        muni = matchedDirectoryLgu.municipality;
+      } else {
+        muni = muni.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim();
+      }
+
+      const prov = params.province || matchedDirectoryLgu?.province || 'Iloilo';
+      const isFood = params.category.toLowerCase().includes('food');
+      const isHygiene = params.category.toLowerCase().includes('hygiene');
+      const isFamily = params.category.toLowerCase().includes('family');
+
+      // Check existing report for this municipality
+      const { data: existing } = await supabase
+        .from('lgu_inventory_reports')
+        .select('*')
+        .ilike('municipality', muni)
+        .order('reported_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const foodPacks = (existing?.food_packs ?? 0) + (isFood ? params.quantity : 0);
+      const hygieneKits = (existing?.hygiene_kits ?? 0) + (isHygiene ? params.quantity : 0);
+      const familyKits = (existing?.family_kits ?? 0) + (isFamily ? params.quantity : 0);
+
+      await supabase.from('lgu_inventory_reports').insert({
+        municipality: muni,
+        province: prov,
+        lgu_name: muni,
+        food_packs: foodPacks,
+        hygiene_kits: hygieneKits,
+        family_kits: familyKits,
+        affected_families: existing?.affected_families ?? 100,
+        damage_index: existing?.damage_index ?? 10,
+        urgency_score: Math.max(10, (existing?.urgency_score ?? 30) - 15),
+        priority_color: foodPacks > 300 ? 'Green' : foodPacks > 100 ? 'Yellow' : 'Red',
+        recommendation: `Received ${params.quantity} ${params.category} via ${params.drNumber}. Live stock updated.`,
+        reported_at: new Date().toISOString()
+      });
+    } catch (invErr) {
+      console.warn('Failed to update LGU inventory report:', invErr);
+    }
+
+    return { ok: true };
+  },
+
   async getTruckerReleases(truckId?: string | null) {
     let query = supabase
       .from('outgoing_requests')
-      .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,tx_hash,wallet_address')
-      .ilike('delivery_mode', 'truck')
+      .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,tx_hash,wallet_address,receiver_gps,destination_address')
+      .or('delivery_mode.ilike.truck,delivery_mode.eq.Direct Delivery')
       .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
       .order('created_at', { ascending: false });
 
@@ -431,19 +562,29 @@ export const backendApi = {
 
   async markTruckLiveLocationDoneByDr(drNumber: string) {
     try {
-      await supabase
+      const cleanDr = drNumber.trim();
+      const { data } = await supabase
         .from('outgoing_requests')
-        .update({ delivery_status: 'Delivered' })
-        .eq('dr_number', drNumber);
+        .select('assigned_truck_id')
+        .ilike('dr_number', cleanDr)
+        .maybeSingle();
+
+      if (data?.assigned_truck_id) {
+        await supabase
+          .from('truck_live_locations')
+          .delete()
+          .eq('truck_id', data.assigned_truck_id);
+      }
     } catch (error) {
-      console.warn('Failed to mark delivery done by DR:', error);
+      console.warn('Failed to clean up truck live location by DR:', error);
     }
     return { ok: true };
   },
 
   subscribeDashboard(onChange: () => void) {
+    const channelName = `dashboard-db-changes-${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
-      .channel('dashboard-db-changes')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incoming_manifests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_requests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, onChange)
@@ -464,8 +605,9 @@ export const backendApi = {
       .then((locations) => locations.forEach(onUpsert))
       .catch(() => {});
 
+    const channelName = `truck-live-locations-${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
-      .channel('truck-live-locations-channel')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, (payload) => {
         if (payload.eventType === 'DELETE') {
           const deletedId = (payload.old as { truck_id?: string })?.truck_id;

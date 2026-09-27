@@ -1,6 +1,7 @@
 import { BrowserProvider, Contract, ethers } from 'ethers';
 import { EthereumProvider as WalletConnectProvider } from '@walletconnect/ethereum-provider';
 import type { UserRole } from '../hooks/useInventoryState';
+import { supabase } from '../lib/supabase';
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -32,6 +33,15 @@ export interface MintBatchInput {
   destination: string;
 }
 
+export interface OutgoingMintAndAuthorizeInput {
+  drNumber: string;
+  batchTokenId: string;
+  category: string;
+  quantity: number;
+  warehouseSource: string;
+  lguName: string;
+}
+
 export interface SignReleaseInput {
   drNumber: string;
   handoverContractId: string;
@@ -51,8 +61,21 @@ export interface ConfirmReceiptInput {
   gps: string;
 }
 
-const batchTokenContractAddress = import.meta.env.VITE_BATCH_TOKEN_CONTRACT_ADDRESS;
-const handoverContractAddress = import.meta.env.VITE_HANDOVER_CONTRACT_ADDRESS;
+export const generateBatchTokenId = (): string => {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const random10 = Math.floor(1000000000 + Math.random() * 9000000000);
+  return `BATCH-${yyyy}-${mm}${dd}-${random10}`;
+};
+
+const contractAddress =
+  import.meta.env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
+  import.meta.env.VITE_BATCH_TOKEN_CONTRACT_ADDRESS ||
+  import.meta.env.VITE_HANDOVER_CONTRACT_ADDRESS;
+const batchTokenContractAddress = contractAddress;
+const handoverContractAddress = contractAddress;
 const targetChainId = Number(import.meta.env.VITE_BLOCKCHAIN_CHAIN_ID ?? 11155111);
 const targetChainName = import.meta.env.VITE_BLOCKCHAIN_CHAIN_NAME ?? 'Sepolia';
 const targetRpcUrl = import.meta.env.VITE_BLOCKCHAIN_RPC_URL;
@@ -61,11 +84,27 @@ const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https:/
 let walletConnectProviderPromise: Promise<EthereumProvider> | null = null;
 type AuthorizedRole = Exclude<UserRole, 'Unregistered'>;
 
-const walletRoles: Array<{ role: AuthorizedRole; address: string | undefined }> = [
-  { role: 'Admin', address: import.meta.env.VITE_ADMIN_WALLET_ADDRESS },
-  { role: 'Trucker', address: import.meta.env.VITE_TRUCKER_WALLET_ADDRESS },
-  { role: 'LGU', address: import.meta.env.VITE_LGU_WALLET_ADDRESS }
-];
+const resolveWalletRoleFromDb = async (address?: string | null): Promise<UserRole> => {
+  const normalized = address?.trim().toLowerCase();
+  if (!normalized) return 'Unregistered';
+
+  try {
+    const { data } = await supabase
+      .from('profiles')
+      .select('role, lgu_name')
+      .ilike('wallet_address', normalized)
+      .maybeSingle();
+
+    if (!data) return 'Unregistered';
+    if (data.role === 'dswd_admin') return 'Admin';
+    if (data.role === 'receiver' && data.lgu_name) return 'LGUReceiver';
+    if (data.role === 'receiver') return 'Receiver';
+  } catch {
+    // Fall through to Unregistered
+  }
+
+  return 'Unregistered';
+};
 
 export const getWalletErrorMessage = (error: unknown, fallback = 'MetaMask request failed.') => {
   const readMessage = (value: unknown, depth = 0): string | null => {
@@ -110,6 +149,10 @@ const throwWalletError = (error: unknown, fallback: string): never => {
 const batchTokenAbi = [
   'function mintBatchToken(string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination) returns (uint256)',
   'function getBatchByTokenId(string batchTokenId) view returns (tuple(uint256 batchId,string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination,address mintedBy,uint256 mintedAt))',
+  'function currentBatchId() view returns (uint256)',
+  'function isAuthorizedAdmin(address admin) view returns (bool)',
+  'function setAdmin(address admin,bool authorized)',
+  'function owner() view returns (address)',
   'function setApprovalForAll(address operator,bool approved)',
   'function isApprovedForAll(address account,address operator) view returns (bool)'
 ];
@@ -119,17 +162,24 @@ const handoverAbi = [
   'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)'
 ];
 
+export const isMobileBrowser = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 const getWalletConnectProvider = async () => {
   if (!walletConnectProjectId) {
     throw new Error('WalletConnect project ID is missing. Add VITE_WALLETCONNECT_PROJECT_ID to your .env file.');
   }
+
+  const isMobile = isMobileBrowser();
 
   if (!walletConnectProviderPromise) {
     walletConnectProviderPromise = WalletConnectProvider.init({
       projectId: walletConnectProjectId,
       chains: [targetChainId],
       optionalChains: [targetChainId],
-      showQrModal: true,
+      showQrModal: !isMobile,
       methods: [
         'eth_requestAccounts',
         'eth_sendTransaction',
@@ -148,6 +198,13 @@ const getWalletConnectProvider = async () => {
       },
       rpcMap: targetRpcUrl ? { [targetChainId]: targetRpcUrl } : undefined
     }).then(async (provider) => {
+      if (isMobile) {
+        provider.on('display_uri', (uri: string) => {
+          // Immediately redirect directly to MetaMask mobile app without showing selector modal
+          window.location.href = `metamask://wc?uri=${encodeURIComponent(uri)}`;
+        });
+      }
+
       if (!provider.accounts?.length) {
         await provider.connect?.();
       }
@@ -196,13 +253,6 @@ const getConnectedWalletAddress = async (ethereum: EthereumProvider) => {
 };
 
 const normalizeAddress = (address?: string | null) => address?.trim().toLowerCase() ?? '';
-
-const resolveWalletRole = (address?: string | null): UserRole | 'Unregistered' => {
-  const normalized = normalizeAddress(address);
-  if (!normalized) return 'Unregistered';
-
-  return walletRoles.find(entry => normalizeAddress(entry.address) === normalized)?.role ?? 'Unregistered';
-};
 
 const getSigner = async () => {
   const ethereum = await getEthereum();
@@ -253,6 +303,11 @@ const signFallbackProof = async (message: string): Promise<BlockchainProof> => {
   let signature: string;
 
   try {
+    if (isMobileBrowser() && !window.ethereum) {
+      setTimeout(() => {
+        window.location.href = 'metamask://';
+      }, 100);
+    }
     signature = String(await ethereum.request({
       method: 'personal_sign',
       params: [encodedMessage, walletAddress]
@@ -269,8 +324,12 @@ const signFallbackProof = async (message: string): Promise<BlockchainProof> => {
 };
 
 export const blockchain = {
-  getWalletRole(address?: string | null): UserRole | 'Unregistered' {
-    return resolveWalletRole(address);
+  getWalletRole(_address?: string | null): UserRole | 'Unregistered' {
+    return 'Unregistered';
+  },
+
+  async getWalletRoleFromDb(address?: string | null): Promise<UserRole> {
+    return resolveWalletRoleFromDb(address);
   },
 
   onAccountsChanged(handler: () => void) {
@@ -286,12 +345,13 @@ export const blockchain = {
     };
   },
 
-  async connectWallet(): Promise<{ walletAddress: string; role: UserRole | 'Unregistered' }> {
+  async connectWallet(): Promise<{ walletAddress: string; role: UserRole }> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
+    const role = await resolveWalletRoleFromDb(walletAddress);
     return {
       walletAddress,
-      role: resolveWalletRole(walletAddress)
+      role
     };
   },
 
@@ -310,10 +370,10 @@ export const blockchain = {
   async requireConnectedWalletRole(expectedRole: AuthorizedRole): Promise<string> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
-    const actualRole = resolveWalletRole(walletAddress);
+    const actualRole = await resolveWalletRoleFromDb(walletAddress);
 
     if (actualRole !== expectedRole) {
-      throw new Error(`RBAC: connect the ${expectedRole} MetaMask wallet to continue. Current wallet is ${actualRole}.`);
+      throw new Error(`RBAC: connect the ${expectedRole} MetaMask wallet to continue. Current wallet is tagged as ${actualRole}.`);
     }
 
     return walletAddress;
@@ -376,25 +436,141 @@ export const blockchain = {
     );
   },
 
+  async mintAndAuthorizeRelease(input: OutgoingMintAndAuthorizeInput): Promise<BlockchainProof> {
+    const signer = await getSigner();
+    const walletAddress = await signer.getAddress();
+
+    if (batchTokenContractAddress) {
+      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+      const tx = await contract.mintBatchToken(
+        input.drNumber,
+        input.batchTokenId,
+        input.drNumber,
+        input.category,
+        input.quantity,
+        input.lguName
+      );
+      const receipt = await tx.wait();
+      return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+    }
+
+    return signFallbackProof(
+      `DSWD Outgoing Dispatch Authorization\nDR: ${input.drNumber}\nBatch Token: ${input.batchTokenId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nFrom: ${input.warehouseSource}\nDestination: ${input.lguName}`
+    );
+  },
+
+  async setAuthorizedAdmin(adminAddress: string, authorized: boolean): Promise<BlockchainProof> {
+    if (!ethers.isAddress(adminAddress)) {
+      throw new Error('Invalid wallet address for admin authorization.');
+    }
+    const signer = await getSigner();
+    const walletAddress = await signer.getAddress();
+    if (!batchTokenContractAddress) {
+      throw new Error('Smart contract address is not configured in .env.');
+    }
+    const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+    const tx = await contract.setAdmin(adminAddress, authorized);
+    const receipt = await tx.wait();
+    return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+  },
+
+  async isContractAdmin(address: string): Promise<boolean> {
+    if (!batchTokenContractAddress || !ethers.isAddress(address)) return false;
+    try {
+      const ethereum = await getEthereum(false);
+      const provider = ethereum ? new BrowserProvider(ethereum) : new ethers.JsonRpcProvider(targetRpcUrl);
+      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, provider);
+      const [isOwner, isAdmin] = await Promise.all([
+        contract.owner().then((o: string) => o.toLowerCase() === address.toLowerCase()).catch(() => false),
+        contract.isAuthorizedAdmin(address).catch(() => false)
+      ]);
+      return isOwner || isAdmin;
+    } catch {
+      return false;
+    }
+  },
+
+  async authorizeOperator(operatorAddress: string): Promise<BlockchainProof> {
+    if (!ethers.isAddress(operatorAddress)) {
+      throw new Error('Invalid wallet address for custody authorization.');
+    }
+    const signer = await getSigner();
+    const walletAddress = await signer.getAddress();
+    const targetContract = handoverContractAddress || batchTokenContractAddress;
+    if (!targetContract) {
+      throw new Error('Smart contract address is not configured in .env.');
+    }
+    const contract = new Contract(targetContract, batchTokenAbi, signer);
+    // Approve receiver wallet as operator for ERC-1155 tokens
+    const tx = await contract.setApprovalForAll(operatorAddress, true);
+    const receipt = await tx.wait();
+    return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+  },
+
+  async isOperatorAuthorized(operatorAddress: string): Promise<boolean> {
+    const targetContract = handoverContractAddress || batchTokenContractAddress;
+    if (!targetContract || !ethers.isAddress(operatorAddress)) return false;
+    try {
+      const ethereum = await getEthereum(false);
+      const provider = ethereum ? new BrowserProvider(ethereum) : new ethers.JsonRpcProvider(targetRpcUrl);
+      const contract = new Contract(targetContract, batchTokenAbi, provider);
+      const owner = await contract.owner();
+      if (owner.toLowerCase() === operatorAddress.toLowerCase()) return true;
+      const [isApproved, isAdmin] = await Promise.all([
+        contract.isApprovedForAll(owner, operatorAddress).catch(() => false),
+        contract.isAuthorizedAdmin(operatorAddress).catch(() => false)
+      ]);
+      return Boolean(isApproved || isAdmin);
+    } catch {
+      return false;
+    }
+  },
+
   async signRelease(input: SignReleaseInput): Promise<BlockchainProof> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
 
     if (handoverContractAddress) {
+      if (isMobileBrowser() && !window.ethereum) {
+        setTimeout(() => {
+          window.location.href = 'metamask://';
+        }, 100);
+      }
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
-      const tx = await contract.signRelease(
-        input.drNumber,
-        input.handoverContractId,
-        input.category,
-        input.quantity,
-        input.batchTokenIds,
-        input.batchQuantities,
-        input.from,
-        input.to,
-        input.gps
-      );
-      const receipt = await tx.wait();
-      return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+      try {
+        const tx = await contract.signRelease(
+          input.drNumber,
+          input.handoverContractId,
+          input.category,
+          input.quantity,
+          input.batchTokenIds,
+          input.batchQuantities,
+          input.from,
+          input.to,
+          input.gps
+        );
+        const receipt = await tx.wait();
+        return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+      } catch (contractErr: any) {
+        console.error('Contract signRelease failed on Sepolia:', contractErr);
+        const text = `${contractErr?.reason || ''} ${contractErr?.shortMessage || ''} ${contractErr?.data?.message || ''} ${contractErr?.message || ''}`.toLowerCase();
+        if (text.includes('not approved to transfer custody') || text.includes('sender not approved')) {
+          throw new Error('On-Chain Revert: Receiver wallet is not approved by DSWD Admin to transfer relief custody. Please have the Admin authorize this wallet in Account Management.');
+        }
+        if (text.includes('batch token not found')) {
+          throw new Error('On-Chain Revert: Batch token not found on Sepolia. Please ensure Admin approved and minted this release.');
+        }
+        if (text.includes('dr already released') || text.includes('handover already exists')) {
+          throw new Error('On-Chain Revert: This delivery release has already been recorded on the blockchain.');
+        }
+        if (text.includes('insufficient funds') || text.includes('exceeds balance')) {
+          throw new Error('MetaMask: Insufficient Sepolia ETH balance to cover gas fees for this transaction.');
+        }
+        if (text.includes('user rejected') || text.includes('action_rejected')) {
+          throw new Error('MetaMask transaction was cancelled by user.');
+        }
+        throw new Error(`Smart Contract Reverted: ${contractErr?.reason || contractErr?.shortMessage || contractErr?.message || 'Transaction failed on Sepolia.'}`);
+      }
     }
 
     return signFallbackProof(
@@ -408,7 +584,7 @@ export const blockchain = {
     }
 
     return signFallbackProof(
-      `Sign trucker GPS proof\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
+      `Sign receiver GPS proof\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
     );
   },
 
@@ -417,10 +593,36 @@ export const blockchain = {
     const walletAddress = await signer.getAddress();
 
     if (handoverContractAddress) {
+      if (isMobileBrowser() && !window.ethereum) {
+        setTimeout(() => {
+          window.location.href = 'metamask://';
+        }, 100);
+      }
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
-      const tx = await contract.confirmReceipt(input.drNumber, input.handoverContractId, input.destination, input.gps);
-      const receipt = await tx.wait();
-      return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+      try {
+        const tx = await contract.confirmReceipt(input.drNumber, input.handoverContractId, input.destination, input.gps);
+        const receipt = await tx.wait();
+        return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+      } catch (contractErr: any) {
+        console.error('Contract confirmReceipt failed on Sepolia:', contractErr);
+        const text = `${contractErr?.reason || ''} ${contractErr?.shortMessage || ''} ${contractErr?.data?.message || ''} ${contractErr?.message || ''}`.toLowerCase();
+        if (text.includes('handover not found')) {
+          throw new Error('On-Chain Revert: Handover not found on-chain. Driver custody scan must be completed first.');
+        }
+        if (text.includes('handover is not releasable')) {
+          throw new Error('On-Chain Revert: Handover is not in releasable status or already accepted.');
+        }
+        if (text.includes('destination mismatch')) {
+          throw new Error('On-Chain Revert: Delivery destination does not match the smart contract record.');
+        }
+        if (text.includes('insufficient funds') || text.includes('exceeds balance')) {
+          throw new Error('MetaMask: Insufficient Sepolia ETH balance to cover gas fees for this transaction.');
+        }
+        if (text.includes('user rejected') || text.includes('action_rejected')) {
+          throw new Error('MetaMask transaction was cancelled by user.');
+        }
+        throw new Error(`Smart Contract Receipt Failed: ${contractErr?.reason || contractErr?.shortMessage || contractErr?.message || 'Transaction failed on Sepolia.'}`);
+      }
     }
 
     return signFallbackProof(

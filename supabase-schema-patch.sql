@@ -298,6 +298,12 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles
+add column if not exists avatar_url text;
+
+alter table public.profiles
+add column if not exists wallet_address text;
+
+alter table public.profiles
 drop constraint if exists profiles_role_check;
 
 update public.profiles
@@ -314,7 +320,7 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, full_name, role, truck_id, lgu_name)
+  insert into public.profiles (id, email, full_name, role, truck_id, lgu_name, wallet_address)
   values (
     new.id,
     coalesce(new.email, ''),
@@ -324,14 +330,16 @@ begin
       else 'receiver'
     end,
     new.raw_user_meta_data->>'truck_id',
-    null
+    new.raw_user_meta_data->>'lgu_name',
+    new.raw_user_meta_data->>'wallet_address'
   )
   on conflict (id) do update set
     email = excluded.email,
     full_name = excluded.full_name,
     role = excluded.role,
     truck_id = excluded.truck_id,
-    lgu_name = excluded.lgu_name;
+    lgu_name = coalesce(excluded.lgu_name, public.profiles.lgu_name),
+    wallet_address = coalesce(excluded.wallet_address, public.profiles.wallet_address);
 
   return new;
 end;
@@ -471,3 +479,65 @@ on public.outgoing_requests for update
 to authenticated, anon
 using (true)
 with check (true);
+
+-- ==============================================================================
+-- PROFILES RLS UPDATE: ALLOW DSWD ADMIN TO VIEW AND ASSIGN LGU TO RECEIVERS
+-- ==============================================================================
+
+drop policy if exists "Users can read own profile" on public.profiles;
+drop policy if exists "Admins can view all profiles" on public.profiles;
+drop policy if exists "Allow profile read" on public.profiles;
+
+create policy "Allow profile read"
+on public.profiles for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Admins can update profiles" on public.profiles;
+drop policy if exists "Allow profile update" on public.profiles;
+
+create policy "Allow profile update"
+on public.profiles for update
+to authenticated
+using (
+  auth.uid() = id or
+  public.current_user_role() = 'dswd_admin' or
+  exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'dswd_admin'
+  )
+)
+with check (
+  auth.uid() = id or
+  public.current_user_role() = 'dswd_admin' or
+  exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'dswd_admin'
+  )
+);
+
+do $$
+begin
+  alter publication supabase_realtime add table public.profiles;
+exception
+  when duplicate_object then null;
+end $$;
+
+drop policy if exists "Allow update LGU inventory reports" on public.lgu_inventory_reports;
+create policy "Allow update LGU inventory reports"
+on public.lgu_inventory_reports for update
+to authenticated, anon
+using (true)
+with check (true);
+
+-- Add status column to profiles (for signup verification)
+alter table public.profiles
+add column if not exists status text not null default 'pending';
+
+-- Ensure existing active profiles are marked verified
+update public.profiles
+set status = 'verified'
+where status is null;
+
+

@@ -872,3 +872,23 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.outgoing_requests;
 
 ---
 
+## 6. Simulated Testing Guide (Without Physical Trucks)
+
+To test the live GPS streaming and route calculation on the Admin Map without moving physical vehicles:
+
+1. Open the Admin Dashboard (`http://localhost:5173`) and navigate to **Trucking & Live GPS Tracking**.
+2. Press **`F12`** (Console tab) and paste the following snippet:
+   ```javascript
+   import('/src/app/services/backendApi.ts').then(({ backendApi }) => {
+     backendApi.upsertTruckLiveLocation({
+       truck_id: 'TRUCK-PASS-01',
+       latitude: 10.9412,
+       longitude: 122.6281,
+       gps_text: '10.9412, 122.6281',
+       accuracy: 15,
+       wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+       updated_at: new Date().toISOString()
+     }).then(() => console.log('✓ Live truck stream dispatched to Supabase!'));
+   });
+   ```
+3. The Admin Road Map will immediately display **`TRUCK-PASS-01`** snapped to the highway network, compute drive time and distance, and render transit checkpoints.
