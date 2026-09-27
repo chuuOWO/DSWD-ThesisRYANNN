@@ -86,7 +86,7 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
     modifier onlyAdmin() {
         require(
             msg.sender == owner() || isAuthorizedAdmin[msg.sender],
-            "RBAC: Caller is not an authorized DSWD Admin"
+            "Admin only"
         );
         _;
     }
@@ -138,12 +138,12 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
         uint256 quantity,
         string memory destination
     ) external onlyAdmin nonReentrant returns (uint256) {
-        require(quantity > 0, "Quantity must be greater than 0");
-        require(bytes(manifestNumber).length > 0, "Manifest number is required");
-        require(bytes(batchTokenId).length > 0, "Batch token ID is required");
-        require(bytes(manifestHash).length > 0, "Manifest hash is required");
-        require(batchIdByTokenId[batchTokenId] == 0, "Batch token already exists");
-        require(batchIdByManifestNumber[manifestNumber] == 0, "Manifest already minted");
+        require(quantity > 0, "Invalid qty");
+        require(bytes(manifestNumber).length > 0, "Manifest required");
+        require(bytes(batchTokenId).length > 0, "Batch ID required");
+        require(bytes(manifestHash).length > 0, "Hash required");
+        require(batchIdByTokenId[batchTokenId] == 0, "Batch exists");
+        require(batchIdByManifestNumber[manifestNumber] == 0, "Manifest minted");
 
         currentBatchId += 1;
         uint256 newBatchId = currentBatchId;
@@ -196,8 +196,8 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
         uint256 allocatedTotal = 0;
         for (uint256 i = 0; i < batchTokenIds.length; i++) {
             uint256 batchId = batchIdByTokenId[batchTokenIds[i]];
-            require(batchId != 0, "Batch token not found");
-            require(batchQuantities[i] > 0, "Batch quantity must be greater than 0");
+            require(batchId != 0, "Batch not found");
+            require(batchQuantities[i] > 0, "Invalid batch qty");
             allocatedTotal += batchQuantities[i];
 
             address tokenHolder = batches[batchId].mintedBy != address(0) ? batches[batchId].mintedBy : owner();
@@ -205,7 +205,7 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
                 _safeTransferFrom(tokenHolder, sender, batchId, batchQuantities[i], "");
             }
         }
-        require(allocatedTotal == expectedQuantity, "Batch quantities must match release quantity");
+        require(allocatedTotal == expectedQuantity, "Batch qty mismatch");
         handovers[hid].batchTokenIds = batchTokenIds;
         handovers[hid].batchQuantities = batchQuantities;
     }
@@ -223,15 +223,15 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
     ) external returns (uint256) {
         require(
             msg.sender == owner() || isAuthorizedAdmin[msg.sender] || isApprovedForAll(owner(), msg.sender),
-            "Sender not approved to transfer custody"
+            "Unauthorized sender"
         );
-        require(quantity > 0, "Quantity must be greater than 0");
-        require(bytes(drNumber).length > 0, "DR number is required");
-        require(bytes(handoverContractId).length > 0, "Handover ID is required");
-        require(bytes(senderGps).length > 0 && bytes(senderGps).length <= 100, "Invalid sender GPS");
+        require(quantity > 0, "Invalid qty");
+        require(bytes(drNumber).length > 0, "DR required");
+        require(bytes(handoverContractId).length > 0, "Handover required");
+        require(bytes(senderGps).length > 0 && bytes(senderGps).length <= 100, "Invalid GPS");
         require(batchTokenIds.length > 0 && batchTokenIds.length == batchQuantities.length, "Invalid batches");
-        require(handoverIdByDrNumber[drNumber] == 0, "DR already released");
-        require(handoverIdByContractId[handoverContractId] == 0, "Handover already exists");
+        require(handoverIdByDrNumber[drNumber] == 0, "DR released");
+        require(handoverIdByContractId[handoverContractId] == 0, "Handover exists");
 
         currentHandoverId += 1;
         uint256 newHandoverId = currentHandoverId;
@@ -252,21 +252,21 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
         string memory destination,
         string memory receiverGps
     ) external nonReentrant returns (uint256) {
-        require(bytes(receiverGps).length > 0 && bytes(receiverGps).length <= 100, "Invalid receiver GPS");
+        require(bytes(receiverGps).length > 0 && bytes(receiverGps).length <= 100, "Invalid GPS");
 
         uint256 handoverId = handoverIdByDrNumber[drNumber];
         require(handoverId != 0, "Handover not found");
 
         Handover storage handover = handovers[handoverId];
-        require(handover.status == HandoverStatus.Released, "Handover is not releasable");
+        require(handover.status == HandoverStatus.Released, "Not releasable");
         require(
             keccak256(bytes(handover.handoverContractId)) == keccak256(bytes(handoverContractId)),
-            "Handover ID mismatch"
+            "ID mismatch"
         );
         require(
             bytes(destination).length == 0 ||
                 keccak256(bytes(handover.destination)) == keccak256(bytes(destination)),
-            "Destination mismatch"
+            "Dest mismatch"
         );
 
         handover.receiver = msg.sender;
@@ -287,58 +287,5 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
         uint256 batchId = batchIdByTokenId[batchTokenId];
         require(batchId != 0, "Batch not found");
         return batches[batchId];
-    }
-
-    function getHandover(string memory drNumber) external view returns (
-        uint256 handoverId,
-        string memory handoverContractId,
-        string memory category,
-        uint256 quantity,
-        address sender,
-        address receiver,
-        HandoverStatus status
-    ) {
-        uint256 hid = handoverIdByDrNumber[drNumber];
-        require(hid != 0, "Handover not found");
-        Handover storage h = handovers[hid];
-        return (
-            h.handoverId,
-            h.handoverContractId,
-            h.category,
-            h.quantity,
-            h.sender,
-            h.receiver,
-            h.status
-        );
-    }
-
-    function getHandoverBatches(string memory drNumber) external view returns (
-        string[] memory batchTokenIds,
-        uint256[] memory batchQuantities
-    ) {
-        uint256 hid = handoverIdByDrNumber[drNumber];
-        require(hid != 0, "Handover not found");
-        return (handovers[hid].batchTokenIds, handovers[hid].batchQuantities);
-    }
-
-    function getHandoverRoute(string memory drNumber) external view returns (
-        string memory fromLocation,
-        string memory destination,
-        string memory senderGps,
-        string memory receiverGps,
-        uint256 releasedAt,
-        uint256 acceptedAt
-    ) {
-        uint256 hid = handoverIdByDrNumber[drNumber];
-        require(hid != 0, "Handover not found");
-        Handover storage h = handovers[hid];
-        return (
-            h.fromLocation,
-            h.destination,
-            h.senderGps,
-            h.receiverGps,
-            h.releasedAt,
-            h.acceptedAt
-        );
     }
 }
