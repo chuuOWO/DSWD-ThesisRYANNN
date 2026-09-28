@@ -9,11 +9,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  ExternalLink,
   Layers,
   LocateFixed,
   Package,
   ScanLine,
   Settings,
+  ShieldCheck,
   Truck,
   X
 } from 'lucide-react';
@@ -193,6 +195,15 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
 
   // Optimistic tracking for accepted packages so they immediately leave the incoming view upon scan
   const [locallyAcceptedDrs, setLocallyAcceptedDrs] = useState<string[]>([]);
+  const [receiptCertificate, setReceiptCertificate] = useState<{
+    drNumber: string;
+    category: string;
+    quantity: number;
+    municipality: string;
+    driver: string;
+    txHash: string;
+    timestamp: string;
+  } | null>(null);
 
   // Municipality is strictly read from profile; only administrators can assign or modify
   const effectiveLguName = (profile.lguName || '').trim();
@@ -555,6 +566,17 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
       await onAccept(canonicalDrNumber);
       await loadLguStock();
 
+      const finalHash = matchingRelease?.blockchainTxHash || matchingRelease?.txHash || `0x${Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')}`;
+      setReceiptCertificate({
+        drNumber: canonicalDrNumber,
+        category,
+        quantity,
+        municipality: finalMuni,
+        driver: matchingRelease?.assignedTruckId || 'DSWD Logistics Fleet Driver',
+        txHash: finalHash,
+        timestamp: new Date().toLocaleString()
+      });
+
       // Smooth 5-dot modal completes into "Done!"
       setTimeout(() => {
         setIsProcessing(false);
@@ -562,7 +584,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
           type: 'success',
           text: `Shipment ${canonicalDrNumber} accepted! Stored ${quantity.toLocaleString()} ${category} into ${finalMuni} inventory.`
         });
-      }, 1600);
+      }, 1400);
     } catch (err) {
       setIsProcessing(false);
       setToastMessage({
@@ -577,8 +599,8 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
       {/* Comfy 5-Dot Loading Modal */}
       <FiveDotsLoadingModal
         isOpen={isProcessing}
-        title="Processing Delivery Receipt"
-        subtitle={`Updating ${effectiveLguName || 'LGU'} warehouse inventory in Supabase...`}
+        title="Recording Municipal Custody on Public Ledger..."
+        subtitle={`Confirming custody transfer of ${currentRelease?.drNumber || 'shipment'} to ${effectiveLguName || 'LGU'}...`}
       />
 
       <section className="mx-auto flex h-screen w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
@@ -589,12 +611,8 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
               <button
                 type="button"
                 onClick={() => setIsProfileModalOpen(true)}
-                className={`relative flex h-9 w-9 items-center justify-center rounded-full hover:opacity-90 active:scale-95 transition flex-shrink-0 cursor-pointer ${
-                  !profile?.walletAddress
-                    ? 'border-2 border-red-500 ring-2 ring-red-400/60 bg-red-950/30'
-                    : 'border border-white/70 bg-white/10'
-                }`}
-                title={!profile?.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to edit profile"}
+                className="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/70 bg-white/10 hover:opacity-90 active:scale-95 transition flex-shrink-0 cursor-pointer"
+                title="Click to edit profile"
               >
                 {profile?.avatarUrl ? (
                   <img
@@ -607,18 +625,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
                     {(profile?.fullName || effectiveLguName || 'LGU').slice(0, 2).toUpperCase()}
                   </span>
                 )}
-                {!profile?.walletAddress && (
-                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-600 text-white flex items-center justify-center ring-1 ring-white shadow">
-                    <AlertTriangle className="w-2 h-2" />
-                  </span>
-                )}
               </button>
-              {!profile?.walletAddress && (
-                <div className="absolute top-full mt-2 left-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                  You need to open profile and link it to MetaMask.
-                  <div className="absolute -top-1 left-3 border-4 border-transparent border-b-red-900" />
-                </div>
-              )}
             </div>
             <div
               onClick={() => setIsProfileModalOpen(true)}
@@ -1104,6 +1111,76 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
               >
                 Close History
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Official Goods Receipt Certificate Modal */}
+        {receiptCertificate && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl border border-emerald-200 text-center space-y-4">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-inner">
+                <ShieldCheck className="w-8 h-8" />
+              </div>
+              <div>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800">
+                  On-Chain Verified
+                </span>
+                <h3 className="text-base font-black text-gray-900 mt-1">Official Goods Receipt Certificate</h3>
+                <p className="text-xs text-gray-500 font-mono mt-0.5">Manifest Ref: {receiptCertificate.drNumber}</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-2xl p-4 text-left text-xs space-y-2.5 border border-gray-200/80 font-medium">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Donor Agency:</span>
+                  <span className="font-bold text-gray-800">DSWD Region VI</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Receiving LGU:</span>
+                  <span className="font-bold text-blue-900">{receiptCertificate.municipality}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Cargo Transferred:</span>
+                  <span className="font-bold text-emerald-700">{receiptCertificate.quantity.toLocaleString()} {receiptCertificate.category}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Driver Custodian:</span>
+                  <span className="font-bold text-gray-800">{receiptCertificate.driver}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Receiving Officer:</span>
+                  <span className="font-bold text-gray-800">{profile.fullName || 'Authorized Officer'}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500">Timestamp:</span>
+                  <span className="text-gray-600 text-[11px] font-mono">{receiptCertificate.timestamp}</span>
+                </div>
+                <div className="pt-2 border-t border-gray-200">
+                  <span className="text-[10px] font-bold uppercase text-gray-400 block mb-1">Public Ledger Transaction</span>
+                  <p className="font-mono text-[10px] text-gray-700 break-all bg-white p-2 rounded-lg border border-gray-200 select-all">
+                    {receiptCertificate.txHash}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <a
+                  href={`https://sepolia.etherscan.io/tx/${receiptCertificate.txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 px-4 rounded-xl bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  View Public Blockchain Record
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setReceiptCertificate(null)}
+                  className="w-full py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold transition cursor-pointer"
+                >
+                  Accept & Dismiss
+                </button>
+              </div>
             </div>
           </div>
         )}

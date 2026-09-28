@@ -4,6 +4,7 @@ interface MetaMaskMismatchModalProps {
   isOpen: boolean;
   registeredWallet: string;
   activeWallet: string | null;
+  userRole?: string | null;
   onSignOut: () => void | Promise<void>;
   onSwitchAccount?: () => void | Promise<void>;
 }
@@ -17,10 +18,16 @@ export function MetaMaskMismatchModal({
   isOpen,
   registeredWallet,
   activeWallet,
+  userRole,
   onSignOut,
   onSwitchAccount
 }: MetaMaskMismatchModalProps) {
   if (!isOpen) return null;
+
+  // Strictly render if and only if user is Admin - field users never see MetaMask warnings
+  if (userRole && userRole !== 'Admin' && userRole !== 'dswd_admin') {
+    return null;
+  }
 
   const handleRequestSwitch = async () => {
     if (onSwitchAccount) {

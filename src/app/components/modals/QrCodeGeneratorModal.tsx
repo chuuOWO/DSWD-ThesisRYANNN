@@ -165,37 +165,168 @@ export function QrCodeGeneratorModal({
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
+    const packagingDate = currentRelease?.dateAllocated || new Date().toISOString().split('T')[0];
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>DSWD Manifest QR - ${payload.drNumber}</title>
+          <title>CARGO STICKER - ${payload?.drNumber}</title>
           <style>
-            body { font-family: sans-serif; text-align: center; padding: 40px; color: #111; }
-            .card { max-width: 450px; margin: 0 auto; border: 2px solid #2500ba; border-radius: 16px; padding: 24px; }
-            h1 { font-size: 20px; color: #2500ba; margin: 0 0 4px 0; }
-            h2 { font-size: 14px; color: #666; margin: 0 0 16px 0; }
-            img { width: 260px; height: 260px; }
-            .details { text-align: left; margin-top: 16px; font-size: 12px; line-height: 1.6; background: #f4f4ff; padding: 12px; border-radius: 8px; }
-            .blockchain { margin-top: 12px; font-size: 10px; color: #555; border-top: 1px dashed #ccc; padding-top: 8px; }
+            @page {
+              size: 4in 6in;
+              margin: 0.2in;
+            }
+            body {
+              font-family: Arial, Helvetica, sans-serif;
+              margin: 0;
+              padding: 10px;
+              color: #000;
+              background: #fff;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .cargo-label {
+              border: 3px solid #000;
+              padding: 12px;
+              height: calc(100% - 24px);
+              box-sizing: border-box;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+            }
+            .header-bar {
+              display: flex;
+              align-items: center;
+              gap: 10px;
+              border-bottom: 2px solid #000;
+              padding-bottom: 8px;
+            }
+            .seal {
+              width: 50px;
+              height: 50px;
+              object-contain: fit;
+            }
+            .agency-title {
+              font-size: 11px;
+              font-weight: 900;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+              line-height: 1.2;
+            }
+            .sub-title {
+              font-size: 9px;
+              font-weight: 700;
+              color: #333;
+            }
+            .manifest-badge {
+              margin-top: 8px;
+              background: #000;
+              color: #fff;
+              padding: 4px 8px;
+              font-size: 13px;
+              font-weight: 900;
+              font-family: monospace;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .qr-container {
+              text-align: center;
+              margin: 8px 0;
+              padding: 6px;
+              border: 1px dashed #000;
+            }
+            .qr-container img {
+              width: 170px;
+              height: 170px;
+              display: block;
+              margin: 0 auto;
+            }
+            .tamper-text {
+              font-size: 8px;
+              font-weight: bold;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              margin-top: 4px;
+            }
+            .data-grid {
+              font-size: 10px;
+              border-top: 2px solid #000;
+              padding-top: 6px;
+              line-height: 1.4;
+            }
+            .data-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 3px;
+            }
+            .data-label {
+              font-weight: 700;
+              text-transform: uppercase;
+              font-size: 9px;
+              color: #444;
+            }
+            .data-val {
+              font-weight: 900;
+              font-size: 11px;
+            }
+            .footer-strip {
+              border-top: 1px solid #000;
+              padding-top: 4px;
+              font-size: 8px;
+              font-family: monospace;
+              display: flex;
+              justify-content: space-between;
+            }
           </style>
         </head>
         <body>
-          <div class="card">
-            <h1>DSWD Relief Goods Manifest</h1>
-            <h2>Delivery Receipt: ${payload.drNumber}</h2>
-            <img src="${qrDataUrl}" alt="QR Code" />
-            <div class="details">
-              <div><strong>Destination LGU:</strong> ${payload.to}</div>
-              <div><strong>Category:</strong> ${payload.category}</div>
-              <div><strong>Quantity:</strong> ${payload.quantity.toLocaleString()} kits</div>
-              <div><strong>Origin:</strong> ${payload.from}</div>
-              <div><strong>Handover ID:</strong> ${payload.handoverContractId}</div>
+          <div class="cargo-label">
+            <div>
+              <div class="header-bar">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/7/76/Seal_of_the_Department_of_Social_Welfare_and_Development.svg" class="seal" alt="DSWD Seal" />
+                <div>
+                  <div class="agency-title">DSWD FIELD OPERATIONS</div>
+                  <div class="sub-title">RELIEF CARGO DISPATCH MANIFEST</div>
+                </div>
+              </div>
+              <div class="manifest-badge">
+                <span>MANIFEST REF:</span>
+                <span>${payload?.drNumber}</span>
+              </div>
             </div>
-            <div class="blockchain">
-              <div><strong>Blockchain Slot:</strong> Sepolia Testnet</div>
-              <div><strong>Contract:</strong> ${payload.blockchain.contractAddress}</div>
-              <div><strong>Hash:</strong> ${payload.blockchain.merkleRootHash.slice(0, 24)}...</div>
+
+            <div class="qr-container">
+              <img src="${qrDataUrl}" alt="Cargo QR" />
+              <div class="tamper-text">TAMPER-EVIDENT PHYSICAL QR STICKER</div>
+            </div>
+
+            <div class="data-grid">
+              <div class="data-row">
+                <span class="data-label">Item Category:</span>
+                <span class="data-val">${payload?.category}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">Pack Quantity:</span>
+                <span class="data-val">${payload?.quantity.toLocaleString()} Units</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">Destination LGU:</span>
+                <span class="data-val">${payload?.to}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">Dispatched By:</span>
+                <span class="data-val">${payload?.from}</span>
+              </div>
+              <div class="data-row">
+                <span class="data-label">Packaging Date:</span>
+                <span class="data-val">${packagingDate}</span>
+              </div>
+            </div>
+
+            <div class="footer-strip">
+              <span>LEDGER: SEPOLIA (11155111)</span>
+              <span>CUSTODIAL HANDOVER READY</span>
             </div>
           </div>
           <script>
@@ -355,7 +486,7 @@ export function QrCodeGeneratorModal({
             className="flex items-center justify-center gap-1.5 rounded-xl bg-gray-800 px-3 py-2 text-xs font-bold text-white shadow hover:bg-gray-900 transition"
           >
             <Printer size={13} />
-            Print Manifest
+            Print Cargo Sticker (4x6)
           </button>
           <button
             type="button"

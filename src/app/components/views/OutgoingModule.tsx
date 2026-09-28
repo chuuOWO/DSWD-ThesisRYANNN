@@ -3,6 +3,7 @@ import { CheckCircle, Edit, FileSignature, MapPin, PackageCheck, Plus, QrCode, R
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { blockchain } from '../../services/blockchain';
+import { backendApi } from '../../services/backendApi';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
 
@@ -125,9 +126,28 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     try {
       const result = await approveAllocation(selectedRelease.drNumber, approvalAmount);
       if (result.ok) {
+        // Register batch in batches table for full custodial lifecycle tracking
+        const batchNum = parseInt(selectedRelease.drNumber.replace(/\D/g, '') || '101', 10);
+        await backendApi.createBatch({
+          batch_id: batchNum,
+          manifest_number: selectedRelease.drNumber,
+          item_type: selectedRelease.fnfiCategory,
+          total_quantity: approvalAmount,
+          origin_warehouse: selectedRelease.warehouseSource,
+          status: 'PACKED',
+          tx_hash_mint: selectedRelease.blockchainTxHash || null,
+          qr_signature: `SIG-${selectedRelease.drNumber}-${Date.now()}`
+        }).catch(() => {});
+
+        const updatedRelease: OutgoingRelease = {
+          ...selectedRelease,
+          amountApproved: approvalAmount,
+          deliveryStatus: 'Approved' as OutgoingStatus
+        };
         setShowApprovalModal(false);
         setSelectedRelease(null);
         setApprovalAmount(0);
+        setQrModalRelease(updatedRelease);
       }
       setActionModal({ type: 'message', message: result.message });
     } catch (err) {

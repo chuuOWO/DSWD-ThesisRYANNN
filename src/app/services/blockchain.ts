@@ -628,5 +628,37 @@ export const blockchain = {
     return signFallbackProof(
       `Confirm receipt\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nDestination: ${input.destination}\nGPS: ${input.gps}`
     );
+  },
+
+  getExplorerUrl(txHash?: string | null): string {
+    if (!txHash) return '';
+    const cleanHash = txHash.trim();
+    const baseUrl = import.meta.env.VITE_EXPLORER_BASE_URL || 'https://sepolia.etherscan.io';
+    return `${baseUrl.replace(/\/+$/, '')}/tx/${cleanHash}`;
+  },
+
+  async fetchOnChainBatchDetails(batchTokenId: string) {
+    if (!batchTokenContractAddress) return null;
+    const rpc = targetRpcUrl || 'https://ethereum-sepolia-rpc.publicnode.com';
+    const provider = new ethers.JsonRpcProvider(rpc);
+    const contract = new Contract(batchTokenContractAddress, batchTokenAbi, provider);
+
+    try {
+      const b = await contract.getBatchByTokenId(batchTokenId);
+      return {
+        batchId: Number(b.batchId),
+        manifestNumber: b.manifestNumber,
+        batchTokenId: b.batchTokenId,
+        manifestHash: b.manifestHash,
+        category: b.category,
+        quantity: Number(b.quantity),
+        destination: b.destination,
+        mintedBy: b.mintedBy,
+        mintedAt: Number(b.mintedAt)
+      };
+    } catch (err) {
+      console.warn('Could not fetch on-chain batch:', err);
+      return null;
+    }
   }
 };

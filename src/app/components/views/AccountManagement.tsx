@@ -445,13 +445,16 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
   const handleVerifyUser = async (user: UserProfile) => {
     setVerifyingUserId(user.id);
     setModalTitle('Verifying Account');
-    setModalSubtitle(`Activating ${user.email} for DSWD system access...`);
+    setModalSubtitle(`Activating ${user.email} and provisioning custodial Web3 key...`);
     setIsModalOpen(true);
     try {
+      if (user.role === 'receiver' && !user.walletAddress) {
+        await authApi.provisionCustodialWallet(user.id);
+      }
       await authApi.verifyProfile(user.id);
       setToastMessage({
         type: 'success',
-        text: `Account for ${user.fullName} (${user.email}) has been successfully verified!`
+        text: `Account for ${user.fullName} (${user.email}) verified and custodial key provisioned!`
       });
       await loadProfiles();
     } catch (err: any) {
@@ -949,7 +952,25 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                             )}
                           </div>
                         ) : (
-                          <span className="text-xs text-gray-400 italic">No wallet linked</span>
+                          <div className="space-y-1">
+                            <span className="text-xs text-gray-400 italic block">No wallet provisioned</span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await authApi.provisionCustodialWallet(profile.id);
+                                  await loadProfiles();
+                                  setToastMessage({ type: 'success', text: `Custodial Web3 wallet provisioned for ${profile.fullName || profile.email}` });
+                                } catch (e: any) {
+                                  setToastMessage({ type: 'error', text: e?.message || 'Provisioning failed' });
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                            >
+                              <Key className="w-2.5 h-2.5" />
+                              Provision Custodial Key
+                            </button>
+                          </div>
                         )}
                       </td>
 

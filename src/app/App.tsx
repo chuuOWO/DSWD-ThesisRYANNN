@@ -111,14 +111,6 @@ export default function App() {
           onAccept={inventoryState.receiverAcceptWithGps}
           onSignOut={requestSignOut}
         />
-        <MetaMaskMismatchModal
-          isOpen={walletMismatch && Boolean(profile?.walletAddress)}
-          registeredWallet={profile?.walletAddress || ''}
-          activeWallet={walletAddress}
-          onSignOut={async () => {
-            await signOut();
-          }}
-        />
         <ConfirmLogoutModal
           isOpen={isLogoutConfirmOpen}
           onConfirm={async () => {
@@ -136,14 +128,6 @@ export default function App() {
     return (
       <>
         <ReceiverPage profile={activeProfile} onSignOut={requestSignOut} />
-        <MetaMaskMismatchModal
-          isOpen={walletMismatch && Boolean(profile?.walletAddress)}
-          registeredWallet={profile?.walletAddress || ''}
-          activeWallet={walletAddress}
-          onSignOut={async () => {
-            await signOut();
-          }}
-        />
         <ConfirmLogoutModal
           isOpen={isLogoutConfirmOpen}
           onConfirm={async () => {
@@ -242,6 +226,7 @@ export default function App() {
         isOpen={walletMismatch && Boolean(profile?.walletAddress)}
         registeredWallet={profile?.walletAddress || ''}
         activeWallet={walletAddress}
+        userRole={activeProfile.role}
         onSignOut={async () => {
           await signOut();
         }}

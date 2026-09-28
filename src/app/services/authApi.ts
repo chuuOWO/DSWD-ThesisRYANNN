@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { createAndEncryptCustodialWallet } from '../lib/cryptoWallet';
 
 export type UserRole = 'dswd_admin' | 'receiver';
 export type AccountStatus = 'pending' | 'verified' | 'rejected';
@@ -11,6 +12,9 @@ export interface UserProfile {
   truckId?: string | null;
   lguName?: string | null;
   walletAddress?: string | null;
+  encryptedPrivateKey?: string | null;
+  keyIv?: string | null;
+  keyAuthTag?: string | null;
   avatarUrl?: string | null;
   createdAt?: string | null;
   status: AccountStatus;
@@ -49,6 +53,9 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => ({
   truckId: row.truck_id ? String(row.truck_id) : null,
   lguName: row.lgu_name ? String(row.lgu_name) : null,
   walletAddress: row.wallet_address ? String(row.wallet_address) : null,
+  encryptedPrivateKey: row.encrypted_private_key ? String(row.encrypted_private_key) : null,
+  keyIv: row.key_iv ? String(row.key_iv) : null,
+  keyAuthTag: row.key_auth_tag ? String(row.key_auth_tag) : null,
   avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
   createdAt: row.created_at ? String(row.created_at) : null,
   status: normalizeStatus(row.status)
@@ -161,6 +168,24 @@ export const authApi = {
       }
     }
 
+    // Auto-provision custodial wallet for field workers (receivers / drivers / LGU receivers)
+    let finalWalletAddress = payload.walletAddress || null;
+    let encryptedKey: string | null = null;
+    let keyIv: string | null = null;
+    let keyAuthTag: string | null = null;
+
+    if (payload.role === 'receiver' && !finalWalletAddress) {
+      try {
+        const custodial = await createAndEncryptCustodialWallet();
+        finalWalletAddress = custodial.walletAddress;
+        encryptedKey = custodial.encryptedPrivateKey;
+        keyIv = custodial.keyIv;
+        keyAuthTag = custodial.keyAuthTag;
+      } catch (custodialErr) {
+        console.warn('Failed to auto-provision custodial wallet during signup:', custodialErr);
+      }
+    }
+
     // 3. Create the auth user with pending verification status
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
@@ -170,7 +195,7 @@ export const authApi = {
           full_name: payload.fullName,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
-          wallet_address: payload.walletAddress || null,
+          wallet_address: finalWalletAddress,
           lgu_name: null,
           status: 'pending'
         }
@@ -187,7 +212,10 @@ export const authApi = {
           full_name: payload.fullName,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
-          wallet_address: payload.walletAddress || null,
+          wallet_address: finalWalletAddress,
+          encrypted_private_key: encryptedKey,
+          key_iv: keyIv,
+          key_auth_tag: keyAuthTag,
           lgu_name: null,
           status: 'pending'
         });
@@ -202,6 +230,24 @@ export const authApi = {
     } catch {}
 
     return data;
+  },
+
+  async provisionCustodialWallet(userId: string): Promise<UserProfile> {
+    const custodial = await createAndEncryptCustodialWallet();
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({
+        wallet_address: custodial.walletAddress,
+        encrypted_private_key: custodial.encryptedPrivateKey,
+        key_iv: custodial.keyIv,
+        key_auth_tag: custodial.keyAuthTag
+      })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to provision custodial wallet: ${error.message}`);
+    return mapProfile(data);
   },
 
   async verifyProfile(userId: string) {

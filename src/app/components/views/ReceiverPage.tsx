@@ -1210,21 +1210,19 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
     let activeWalletAddr = profile?.walletAddress || '0xReceiverWallet';
 
     try {
-      const proof = await blockchain.signReleaseProof({
-        drNumber: payload.drNumber,
-        handoverContractId: payload.handoverContractId || `HANDOVER-${payload.drNumber.replace('DR-', '')}`,
-        category: payload.category,
-        quantity: payload.quantity,
-        batchTokenIds: payload.batchTokenIds || [],
-        batchQuantities: payload.batchQuantities || [payload.quantity],
-        from: payload.from || 'DSWD Logistics Hub',
-        to: payload.to || 'Assigned LGU',
-        gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`
-      });
-      activeProofHash = proof.hash;
-      activeWalletAddr = proof.walletAddress;
-      if (proof.hash) {
-        setConfirmedTxHash(proof.hash);
+      const relayRes = await backendApi.relayDriverPickup(
+        payload.drNumber,
+        { lat: nextLocation.latitude, lng: nextLocation.longitude },
+        payload.drNumber
+      );
+
+      if (!relayRes.ok) {
+        throw new Error(relayRes.error || 'Driver release signature failed to broadcast.');
+      }
+
+      activeProofHash = relayRes.txHash;
+      if (relayRes.txHash) {
+        setConfirmedTxHash(relayRes.txHash);
       }
 
       await backendApi.assignTruckToRelease(payload.drNumber, receiverId, 'In Transit');
@@ -1873,10 +1871,10 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
 
                 {metaMaskSignError && (
                   <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-[10.5px] text-red-700 leading-tight">
-                    <p className="font-bold">MetaMask Signature Required</p>
+                    <p className="font-bold">Custodial Ledger Verification Failed</p>
                     <p className="mt-0.5">{metaMaskSignError}</p>
                     <p className="mt-1 text-[9.5px] text-red-600 font-semibold">
-                      Cryptographic signature on Sepolia is required to accept delivery custody. Tap below to retry.
+                      Please check device internet connection and tap below to retry broadcast.
                     </p>
                   </div>
                 )}
@@ -1884,9 +1882,9 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                 {isMetaMaskSigning && (
                   <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-2.5 text-center text-[10.5px] text-indigo-900">
                     <Loader2 size={16} className="animate-spin mx-auto text-[#2500ba] mb-1" />
-                    <p className="font-bold">Opening MetaMask App...</p>
+                    <p className="font-bold">Signing Custodial Release...</p>
                     <p className="text-[9.5px] text-indigo-700 mt-0.5">
-                      Please switch to MetaMask to approve cryptographic proof of custody.
+                      Submitting driver signature to Sepolia public ledger via secure relay...
                     </p>
                   </div>
                 )}
@@ -1902,17 +1900,17 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                   {isMetaMaskSigning ? (
                     <>
                       <Loader2 size={15} className="animate-spin" />
-                      <span>Opening MetaMask...</span>
+                      <span>Recording Custody on Ledger...</span>
                     </>
                   ) : metaMaskSignError ? (
                     <>
                       <ShieldCheck size={16} />
-                      <span>Retry MetaMask Signature</span>
+                      <span>Retry Ledger Signature</span>
                     </>
                   ) : (
                     <>
                       <ShieldCheck size={16} />
-                      <span>Sign Custody with MetaMask</span>
+                      <span>Confirm Pickup & Sign Ledger</span>
                     </>
                   )}
                 </button>

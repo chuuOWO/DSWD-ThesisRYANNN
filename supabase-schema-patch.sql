@@ -540,4 +540,105 @@ update public.profiles
 set status = 'verified'
 where status is null;
 
+-- ==============================================================================
+-- HYBRID CUSTODIAL WEB3 ARCHITECTURE PATCH
+-- ==============================================================================
+
+-- 1. Profiles Table: Encrypted Custodial Key Storage (AES-256-GCM)
+alter table public.profiles
+add column if not exists encrypted_private_key text,
+add column if not exists key_iv text,
+add column if not exists key_auth_tag text;
+
+-- Ensure wallet_address has a unique index if not null
+create unique index if not exists profiles_wallet_address_key
+on public.profiles (wallet_address)
+where wallet_address is not null;
+
+-- 2. Batches Table: Complete Cargo Lifecycle Metadata
+create table if not exists public.batches (
+  batch_id bigint primary key,
+  manifest_number text not null,
+  item_type text not null,
+  total_quantity integer not null,
+  origin_warehouse text not null,
+  destination_lgu_id uuid references public.profiles(id) on delete set null,
+  assigned_driver_id uuid references public.profiles(id) on delete set null,
+  status text default 'PACKED' check (status in ('PACKED', 'IN_TRANSIT', 'DELIVERED', 'ACCEPTED', 'CANCELLED')),
+  tx_hash_mint text,
+  tx_hash_release text,
+  tx_hash_receipt text,
+  qr_signature text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists batches_manifest_idx on public.batches (manifest_number);
+create index if not exists batches_status_idx on public.batches (status);
+
+-- 3. Custody Scan Logs Table: Two-Party Digital Handover Audit Trail
+create table if not exists public.custody_scan_logs (
+  id uuid primary key default gen_random_uuid(),
+  batch_id bigint references public.batches(batch_id) on delete cascade,
+  scanned_by uuid references public.profiles(id) on delete set null,
+  scan_type text check (scan_type in ('DRIVER_PICKUP', 'LGU_RECEIPT')),
+  device_latitude double precision,
+  device_longitude double precision,
+  tx_hash text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists custody_scan_logs_batch_idx on public.custody_scan_logs (batch_id);
+create index if not exists custody_scan_logs_scanned_by_idx on public.custody_scan_logs (scanned_by);
+
+-- 4. Enable Realtime Publications
+do $$
+begin
+  alter publication supabase_realtime add table public.batches;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.custody_scan_logs;
+exception
+  when duplicate_object then null;
+end $$;
+
+-- 5. Row Level Security for Batches and Custody Scan Logs
+alter table public.batches enable row level security;
+alter table public.custody_scan_logs enable row level security;
+
+drop policy if exists "Allow read batches" on public.batches;
+create policy "Allow read batches"
+on public.batches for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow insert batches" on public.batches;
+create policy "Allow insert batches"
+on public.batches for insert
+to authenticated, anon
+with check (true);
+
+drop policy if exists "Allow update batches" on public.batches;
+create policy "Allow update batches"
+on public.batches for update
+to authenticated, anon
+using (true)
+with check (true);
+
+drop policy if exists "Allow read custody scan logs" on public.custody_scan_logs;
+create policy "Allow read custody scan logs"
+on public.custody_scan_logs for select
+to authenticated, anon
+using (true);
+
+drop policy if exists "Allow insert custody scan logs" on public.custody_scan_logs;
+create policy "Allow insert custody scan logs"
+on public.custody_scan_logs for insert
+to authenticated, anon
+with check (true);
+
+
 

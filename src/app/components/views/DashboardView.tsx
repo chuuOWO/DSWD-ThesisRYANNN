@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { AlertTriangle, CheckCircle, ChevronDown, ClipboardCheck, FileSignature, MapPin, Package, TrendingUp, TruckIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, ArrowRight, CheckCircle, ChevronDown, ClipboardCheck, FileSignature, MapPin, Package, ShieldCheck, TrendingUp, TruckIcon } from 'lucide-react';
 import type { DiscrepancyReport, IncomingGoods, InventoryItem, LGUPriorityReport, OutgoingRelease } from '../../hooks/useInventoryState';
+import { backendApi, type BatchRecord } from '../../services/backendApi';
 
 interface DashboardState {
   inventory: InventoryItem[];
@@ -24,6 +25,15 @@ const priorityClasses = {
 export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps) {
   const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports, discrepancyReports } = inventoryState;
   const [showWarehouseOverview, setShowWarehouseOverview] = useState(false);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
+
+  useEffect(() => {
+    backendApi.getBatches().then(setBatches);
+    const unsub = backendApi.subscribeDashboard(() => {
+      backendApi.getBatches().then(setBatches);
+    });
+    return () => unsub();
+  }, []);
 
   const totalInventory = inventory.reduce((sum, item) => sum + item.warehouseA + item.warehouseB, 0);
   const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
@@ -33,6 +43,17 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
   const activeReleases = outgoingReleasesList.filter(item => ['Released', 'In Transit', 'Correction Requested'].includes(item.deliveryStatus));
   const incomingForReview = incomingGoodsList.filter(item => item.status === 'Pending Verification').length;
 
+  const totalBatches = batches.length;
+  const inTransitBatches = batches.filter(b => b.status === 'IN_TRANSIT').length;
+  const deliveredBatches = batches.filter(b => b.status === 'DELIVERED' || b.status === 'ACCEPTED').length;
+  const totalPossibleProofs = totalBatches * 3;
+  const verifiedProofsCount = batches.reduce((acc, b) => {
+    return acc + (b.tx_hash_mint ? 1 : 0) + (b.tx_hash_release ? 1 : 0) + (b.tx_hash_receipt ? 1 : 0);
+  }, 0);
+  const proofVerificationRate = totalPossibleProofs > 0 
+    ? Math.round((verifiedProofsCount / totalPossibleProofs) * 100) 
+    : 100;
+
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-r from-slate-900 to-blue-900 rounded-xl p-6 text-white shadow-md">
@@ -40,6 +61,52 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         <p className="text-sm text-blue-100 mt-1">
           Operational view of warehouse stock, incoming deliveries, outgoing releases, GPS-confirmed receipts, and LGU priority needs.
         </p>
+      </div>
+
+      {/* Realtime Blockchain Custody & Tokenization Panel */}
+      <div className="bg-white rounded-xl border border-blue-100 shadow-sm p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#2500ba]/10 flex items-center justify-center text-[#2500ba]">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-bold text-gray-900 text-base">Realtime Blockchain Custody & Audit Ledger</h2>
+              <p className="text-xs text-gray-500">Decentralized asset tokenization & zero-MetaMask field custody verification on Sepolia</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('inventory')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#2500ba] text-white hover:bg-blue-800 rounded-lg text-xs font-bold transition shadow-sm"
+          >
+            <span>Inspect Blockchain Audit Trail</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Tokenized Batches</p>
+            <p className="text-2xl font-bold text-slate-900 mt-1">{totalBatches}</p>
+            <p className="text-[11px] text-slate-500 mt-1">On-chain cargo records</p>
+          </div>
+          <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">In Transit (Driver Signed)</p>
+            <p className="text-2xl font-bold text-amber-900 mt-1">{inTransitBatches}</p>
+            <p className="text-[11px] text-amber-600 mt-1">Cryptographic driver pickup proof</p>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-200/80 rounded-xl p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-emerald-700">Delivered (LGU Confirmed)</p>
+            <p className="text-2xl font-bold text-emerald-900 mt-1">{deliveredBatches}</p>
+            <p className="text-[11px] text-emerald-600 mt-1">Immutable LGU receipt proof</p>
+          </div>
+          <div className="bg-blue-50 border border-blue-200/80 rounded-xl p-4">
+            <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Cryptographic Proof Rate</p>
+            <p className="text-2xl font-bold text-blue-900 mt-1">{proofVerificationRate}%</p>
+            <p className="text-[11px] text-blue-600 mt-1">Verified on public ledger</p>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
