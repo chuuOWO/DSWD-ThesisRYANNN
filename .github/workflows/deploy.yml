@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - BlockchainAlt
   workflow_dispatch:
 
 permissions:
