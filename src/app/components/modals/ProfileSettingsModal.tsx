@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Camera, 
   Check, 
+  Clock,
   FlipHorizontal, 
   Lock,
   LogOut,
@@ -281,6 +282,11 @@ export function ProfileSettingsModal({
     return 'Authorized Receiver';
   };
 
+  const isDriverOrLgu = profile.role === 'receiver';
+  const unlinkedMessage = isDriverOrLgu
+    ? 'Custodial key pending provisioning by Admin.'
+    : 'You need to open profile and link it to MetaMask.';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
       <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
@@ -332,7 +338,7 @@ export function ProfileSettingsModal({
                     ? 'border-2 border-red-500 ring-4 ring-red-400/40'
                     : 'border-2 border-blue-600/30 focus:ring-4 focus:ring-blue-100'
                 }`}
-                title={!profile.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to change profile picture"}
+                title={!profile.walletAddress ? unlinkedMessage : "Click to change profile picture"}
               >
                 {avatarUrl ? (
                   <img
@@ -359,7 +365,7 @@ export function ProfileSettingsModal({
               {!profile.walletAddress && (
                 <span
                   className="absolute -top-1 -right-1 z-10 w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg ring-2 ring-white"
-                  title="You need to open profile and link it to MetaMask."
+                  title={unlinkedMessage}
                 >
                   <AlertTriangle className="w-3.5 h-3.5" />
                 </span>
@@ -382,7 +388,7 @@ export function ProfileSettingsModal({
             {!profile.walletAddress ? (
               <p className="text-[11px] text-red-600 font-semibold flex items-center gap-1 mt-0.5">
                 <AlertTriangle className="w-3 h-3 text-red-600 flex-shrink-0" />
-                You need to open profile and link it to MetaMask.
+                {unlinkedMessage}
               </p>
             ) : (
               <p className="text-[11px] text-gray-500">
@@ -539,44 +545,86 @@ export function ProfileSettingsModal({
           )}
 
           {/* Wallet Address Section */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-bold text-gray-700">
-                Linked MetaMask Wallet
-              </label>
-              {profile.walletAddress && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  <Lock size={10} className="text-emerald-600" />
-                  Permanently Bound
-                </span>
+          {isDriverOrLgu ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-gray-700">
+                  Custodial Blockchain Wallet
+                </label>
+                {profile.walletAddress ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                    <ShieldCheck size={10} className="text-blue-600" />
+                    Managed Key (Zero-MetaMask)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    <Clock size={10} className="text-amber-600" />
+                    Pending Provisioning
+                  </span>
+                )}
+              </div>
+              {profile.walletAddress ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
+                    <ShieldCheck size={14} className="text-blue-600 flex-shrink-0" />
+                    <span className="flex-1 font-semibold">{profile.walletAddress}</span>
+                  </div>
+                  <p className="text-[10.5px] text-gray-500 leading-tight">
+                    Cryptographic keypair managed securely by the DSWD system. Handovers and GNSS deliveries are signed on Ethereum Sepolia automatically without requiring MetaMask.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 space-y-0.5">
+                  <p className="font-bold flex items-center gap-1 text-[11px]">
+                    <Clock size={12} className="text-amber-600" />
+                    Custodial Key Provisioning Pending
+                  </p>
+                  <p className="text-[10.5px] text-amber-700 leading-tight">
+                    Your cryptographic Web3 key will be auto-generated upon admin verification. No MetaMask installation is required for field operations.
+                  </p>
+                </div>
               )}
             </div>
-            {profile.walletAddress ? (
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
-                  <Lock size={14} className="text-gray-400 flex-shrink-0" />
-                  <span className="flex-1 font-semibold">{profile.walletAddress}</span>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-gray-700">
+                  Linked MetaMask Wallet
+                </label>
+                {profile.walletAddress && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    <Lock size={10} className="text-emerald-600" />
+                    Permanently Bound
+                  </span>
+                )}
+              </div>
+              {profile.walletAddress ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
+                    <Lock size={14} className="text-gray-400 flex-shrink-0" />
+                    <span className="flex-1 font-semibold">{profile.walletAddress}</span>
+                  </div>
+                  <p className="text-[10.5px] text-gray-500 leading-tight">
+                    For blockchain accountability and audit integrity, linked wallets cannot be modified or unlinked after registration.
+                  </p>
                 </div>
-                <p className="text-[10.5px] text-gray-500 leading-tight">
-                  For blockchain accountability and audit integrity, linked wallets cannot be modified or unlinked after registration.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <button
-                  type="button"
-                  onClick={handleLinkWallet}
-                  disabled={isLinkingWallet}
-                  className="w-full py-2.5 px-4 rounded-xl border-2 border-dashed border-[#2500ba]/40 text-xs font-bold text-[#2500ba] hover:bg-[#2500ba]/5 disabled:opacity-50 transition cursor-pointer"
-                >
-                  {isLinkingWallet ? 'Connecting MetaMask...' : 'Link MetaMask Wallet'}
-                </button>
-                <p className="text-[10.5px] text-gray-500 leading-tight">
-                  Once linked, this wallet will be permanently bound to your account for signing delivery and receipt proofs.
-                </p>
-              </div>
-            )}
-          </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={handleLinkWallet}
+                    disabled={isLinkingWallet}
+                    className="w-full py-2.5 px-4 rounded-xl border-2 border-dashed border-[#2500ba]/40 text-xs font-bold text-[#2500ba] hover:bg-[#2500ba]/5 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {isLinkingWallet ? 'Connecting MetaMask...' : 'Link MetaMask Wallet'}
+                  </button>
+                  <p className="text-[10.5px] text-gray-500 leading-tight">
+                    Once linked, this wallet will be permanently bound to your account for signing delivery and receipt proofs.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Role & Assignment Info */}
           <div>

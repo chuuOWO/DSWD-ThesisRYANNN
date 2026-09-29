@@ -174,7 +174,7 @@ export const authApi = {
     let keyIv: string | null = null;
     let keyAuthTag: string | null = null;
 
-    if (payload.role === 'receiver' && !finalWalletAddress) {
+    if (payload.role === 'receiver') {
       try {
         const custodial = await createAndEncryptCustodialWallet();
         finalWalletAddress = custodial.walletAddress;

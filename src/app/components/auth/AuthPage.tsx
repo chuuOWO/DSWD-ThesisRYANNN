@@ -5,6 +5,7 @@ import {
   Eye,
   EyeOff,
   Mail,
+  ShieldCheck,
   Wallet,
   X
 } from 'lucide-react';
@@ -195,10 +196,10 @@ export function AuthPage() {
                     />
                   </div>
 
-                  {/* Wallet / Password */}
+                  {/* Password */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                      Wallet/Password
+                      Password
                     </label>
                     <div className="relative">
                       <input
@@ -280,7 +281,10 @@ export function AuthPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setRole('receiver')}
+                        onClick={() => {
+                          setRole('receiver');
+                          setWalletAddress('');
+                        }}
                         className={`py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
                           role === 'receiver'
                             ? 'bg-[#10069f] text-white shadow-sm'
@@ -338,45 +342,59 @@ export function AuthPage() {
                     />
                   </div>
 
-                  {/* Optional MetaMask Link */}
-                  <div>
-                    {walletAddress ? (
-                      <div className="w-full py-2 px-3 rounded-2xl border border-emerald-300 bg-emerald-50 text-[11px] font-mono text-emerald-800 flex items-center justify-between">
-                        <span className="truncate">{walletAddress}</span>
+                  {/* Web3 Wallet Setup */}
+                  {role === 'dswd_admin' ? (
+                    <div>
+                      {walletAddress ? (
+                        <div className="w-full py-2 px-3 rounded-2xl border border-emerald-300 bg-emerald-50 text-[11px] font-mono text-emerald-800 flex items-center justify-between">
+                          <span className="truncate">{walletAddress}</span>
+                          <button
+                            type="button"
+                            onClick={() => setWalletAddress('')}
+                            className="text-emerald-600 hover:text-emerald-800 ml-2 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
-                          onClick={() => setWalletAddress('')}
-                          className="text-emerald-600 hover:text-emerald-800 ml-2 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setErrorMessage(null);
-                          try {
-                            const { walletAddress: addr } = await blockchain.connectWallet();
-                            if (addr) {
-                              const isLinked = await authApi.isWalletLinked(addr);
-                              if (isLinked) {
-                                setErrorMessage('This wallet is already linked to another account.');
-                                return;
+                          onClick={async () => {
+                            setErrorMessage(null);
+                            try {
+                              const { walletAddress: addr } = await blockchain.connectWallet();
+                              if (addr) {
+                                const isLinked = await authApi.isWalletLinked(addr);
+                                if (isLinked) {
+                                  setErrorMessage('This wallet is already linked to another account.');
+                                  return;
+                                }
+                                setWalletAddress(addr);
                               }
-                              setWalletAddress(addr);
+                            } catch {
+                              // user cancelled
                             }
-                          } catch {
-                            // user cancelled
-                          }
-                        }}
-                        className="w-full py-2 rounded-2xl border border-dashed border-indigo-300 hover:border-[#10069f] text-xs font-medium text-[#10069f] hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Wallet className="w-3.5 h-3.5" />
-                        <span>Link MetaMask Wallet (Optional)</span>
-                      </button>
-                    )}
-                  </div>
+                          }}
+                          className="w-full py-2 rounded-2xl border border-dashed border-indigo-300 hover:border-[#10069f] text-xs font-medium text-[#10069f] hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <Wallet className="w-3.5 h-3.5" />
+                          <span>Link MetaMask Wallet (Optional)</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3 flex items-start gap-2.5">
+                      <div className="w-5 h-5 rounded-full bg-[#10069f]/10 text-[#10069f] flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">Zero-MetaMask Web3 Account</p>
+                        <p className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                          A cryptographic blockchain key is automatically provisioned for receivers and LGUs upon verification. No MetaMask needed.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Submit Register Button */}
                   <div className="pt-2">
@@ -753,7 +771,10 @@ export function AuthPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setRole('receiver')}
+                      onClick={() => {
+                        setRole('receiver');
+                        setWalletAddress('');
+                      }}
                       className={`py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
                         role === 'receiver'
                           ? 'bg-[#10069f] text-white shadow-sm'
@@ -811,45 +832,59 @@ export function AuthPage() {
                   />
                 </div>
 
-                {/* Optional MetaMask Link */}
-                <div>
-                  {walletAddress ? (
-                    <div className="w-full py-2 px-3 rounded-2xl border border-emerald-300 bg-emerald-50 text-[11px] font-mono text-emerald-800 flex items-center justify-between">
-                      <span className="truncate">{walletAddress}</span>
+                {/* Web3 Wallet Setup */}
+                {role === 'dswd_admin' ? (
+                  <div>
+                    {walletAddress ? (
+                      <div className="w-full py-2 px-3 rounded-2xl border border-emerald-300 bg-emerald-50 text-[11px] font-mono text-emerald-800 flex items-center justify-between">
+                        <span className="truncate">{walletAddress}</span>
+                        <button
+                          type="button"
+                          onClick={() => setWalletAddress('')}
+                          className="text-emerald-600 hover:text-emerald-800 ml-2 cursor-pointer"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => setWalletAddress('')}
-                        className="text-emerald-600 hover:text-emerald-800 ml-2 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setErrorMessage(null);
-                        try {
-                          const { walletAddress: addr } = await blockchain.connectWallet();
-                          if (addr) {
-                            const isLinked = await authApi.isWalletLinked(addr);
-                            if (isLinked) {
-                              setErrorMessage('This wallet is already linked to another account.');
-                              return;
+                        onClick={async () => {
+                          setErrorMessage(null);
+                          try {
+                            const { walletAddress: addr } = await blockchain.connectWallet();
+                            if (addr) {
+                              const isLinked = await authApi.isWalletLinked(addr);
+                              if (isLinked) {
+                                setErrorMessage('This wallet is already linked to another account.');
+                                return;
+                              }
+                              setWalletAddress(addr);
                             }
-                            setWalletAddress(addr);
+                          } catch {
+                            // user cancelled
                           }
-                        } catch {
-                          // user cancelled
-                        }
-                      }}
-                      className="w-full py-2 rounded-2xl border border-dashed border-indigo-300 hover:border-[#10069f] text-xs font-medium text-[#10069f] hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <Wallet className="w-3.5 h-3.5" />
-                      <span>Link MetaMask Wallet (Optional)</span>
-                    </button>
-                  )}
-                </div>
+                        }}
+                        className="w-full py-2 rounded-2xl border border-dashed border-indigo-300 hover:border-[#10069f] text-xs font-medium text-[#10069f] hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Wallet className="w-3.5 h-3.5" />
+                        <span>Link MetaMask Wallet (Optional)</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 p-3 flex items-start gap-2.5">
+                    <div className="w-5 h-5 rounded-full bg-[#10069f]/10 text-[#10069f] flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">Zero-MetaMask Web3 Account</p>
+                      <p className="text-[11px] text-slate-500 leading-snug mt-0.5">
+                        A cryptographic blockchain key is automatically provisioned for receivers and LGUs upon verification. No MetaMask needed.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Submit Register Button */}
                 <div className="pt-2">

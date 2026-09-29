@@ -239,8 +239,8 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
   const priorityReports = inventoryState?.lguPriorityReports || [];
 
   const handleSubmitReport = async () => {
-    if (currentRole !== 'LGUReceiver') {
-      setSubmitMessage('RBAC: connect the LGU Receiver MetaMask wallet to submit municipality stock and damage reports.');
+    if (currentRole !== 'LGUReceiver' && currentRole !== 'Admin') {
+      setSubmitMessage('Unauthorized: only authorized administrators or LGU officers can submit reports.');
       return;
     }
 
@@ -324,12 +324,12 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div>
             <h3 className="font-bold text-indigo-950">LGU Stock & Damage Submission</h3>
-            <p className="text-sm text-indigo-800 mt-1">MetaMask role: <span className="font-bold">{currentRole}</span>. These LGU stock and damage reports are saved to Supabase and drive the Red/Yellow/Green prioritization cards.</p>
+            <p className="text-sm text-indigo-800 mt-1">Active role: <span className="font-bold">{currentRole}</span>. These LGU stock and damage reports are saved to Supabase and drive the Red/Yellow/Green prioritization cards.</p>
           </div>
           <button
             onClick={handleSubmitReport}
-            disabled={currentRole !== 'LGUReceiver'}
-            className={`px-5 py-3 rounded-lg font-bold text-sm ${currentRole === 'LGUReceiver' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+            disabled={currentRole !== 'LGUReceiver' && currentRole !== 'Admin'}
+            className={`px-5 py-3 rounded-lg font-bold text-sm ${currentRole === 'LGUReceiver' || currentRole === 'Admin' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
           >
             Submit LGU Report
           </button>
