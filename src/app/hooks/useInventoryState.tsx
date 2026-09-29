@@ -76,6 +76,8 @@ export interface OutgoingRelease {
   correctionNote?: string;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
+  walletAddress?: string;
+  wallet_address?: string | null;
   auditTrail: AuditEvent[];
 }
 

@@ -98,6 +98,7 @@ export const authApi = {
         lguName: null,
         walletAddress: user.user_metadata?.wallet_address || null,
         avatarUrl: user.user_metadata?.avatar_url || null,
+        status: normalizeStatus(user.user_metadata?.status),
         createdAt: user.created_at
       };
     }
