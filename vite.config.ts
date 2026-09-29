@@ -33,6 +33,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,
     allowedHosts: [
       'stays-hardwood-saga.ngrok-free.dev',
       '.ngrok-free.dev',
