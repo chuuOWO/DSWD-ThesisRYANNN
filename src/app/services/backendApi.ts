@@ -273,31 +273,61 @@ export const backendApi = {
   },
 
   async createOutgoing(payload: OutgoingPayload) {
-    const { data, error } = await supabase
+    const rawPayload: Record<string, any> = {
+      dr_number: payload.drNumber,
+      date_allocated: payload.dateAllocated || new Date().toISOString().split('T')[0],
+      lgu_name: payload.lguName || 'Assigned LGU',
+      province: payload.province || 'Iloilo',
+      municipality: payload.municipality || 'Panay',
+      category: payload.fnfiCategory || 'Relief Goods',
+      amount_requested: Number(payload.amountRequested) || 0,
+      amount_approved: Number(payload.amountApproved) || 0,
+      warehouse_source: payload.warehouseSource || 'Oton Main Warehouse',
+      delivery_mode: payload.deliveryMode || 'Truck',
+      delivery_status: payload.deliveryStatus ?? 'Allocating',
+      incident_code: payload.incidentCode || 'INC-2026',
+      allocated_batches: payload.allocatedBatches ?? [],
+      sender_gps: payload.senderGps ?? null,
+      receiver_gps: payload.receiverGps ?? null,
+      destination_address: payload.destinationAddress ?? payload.destination_address ?? null,
+      tx_hash: payload.txHash ?? null,
+      wallet_address: payload.walletAddress ?? null,
+      assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null
+    };
+
+    const insertPayload = Object.fromEntries(
+      Object.entries(rawPayload).filter(([_, v]) => v !== undefined)
+    );
+
+    let { data, error } = await supabase
       .from('outgoing_requests')
-      .insert({
-        dr_number: payload.drNumber,
-        date_allocated: payload.dateAllocated,
-        lgu_name: payload.lguName,
-        province: payload.province,
-        municipality: payload.municipality,
-        category: payload.fnfiCategory,
-        amount_requested: payload.amountRequested,
-        amount_approved: payload.amountApproved,
-        warehouse_source: payload.warehouseSource,
-        delivery_mode: payload.deliveryMode,
-        delivery_status: payload.deliveryStatus ?? 'Allocating',
-        incident_code: payload.incidentCode,
-        allocated_batches: payload.allocatedBatches,
-        sender_gps: payload.senderGps,
-        receiver_gps: payload.receiverGps,
-        destination_address: payload.destinationAddress ?? payload.destination_address,
-        tx_hash: payload.txHash,
-        wallet_address: payload.walletAddress,
-        assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null
-      })
+      .insert(insertPayload)
       .select('id')
       .single();
+
+    // If destination_address column does not exist on table, retry without it
+    if (error && (error.message?.includes('destination_address') || (error as any).code === '42703')) {
+      delete insertPayload.destination_address;
+      const retry = await supabase
+        .from('outgoing_requests')
+        .insert(insertPayload)
+        .select('id')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // If duplicate dr_number, append unique suffix and retry
+    if (error && ((error as any).code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('dr_number'))) {
+      insertPayload.dr_number = `${payload.drNumber}-${Date.now().toString().slice(-4)}`;
+      const retryDr = await supabase
+        .from('outgoing_requests')
+        .insert(insertPayload)
+        .select('id')
+        .single();
+      data = retryDr.data;
+      error = retryDr.error;
+    }
 
     throwIfError(error, 'Failed to create outgoing request');
     return data;

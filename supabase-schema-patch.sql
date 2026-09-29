@@ -88,6 +88,9 @@ add column if not exists allocated_batches jsonb;
 alter table public.outgoing_requests
 add column if not exists assigned_truck_id text;
 
+alter table public.outgoing_requests
+add column if not exists destination_address text;
+
 create unique index if not exists outgoing_requests_dr_number_key
 on public.outgoing_requests (dr_number);
 

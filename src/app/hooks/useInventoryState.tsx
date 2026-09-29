@@ -661,13 +661,19 @@ export function useInventoryState(enabled = true) {
   };
 
   const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => {
-    const nextIndex = outgoingReleasesList.reduce((max, release) => {
+    let nextIndex = outgoingReleasesList.reduce((max, release) => {
       const match = release.drNumber.match(/DR-\d{4}-(\d+)/i);
       if (!match) return max;
       const value = Number.parseInt(match[1], 10);
       return Number.isFinite(value) ? Math.max(max, value) : max;
     }, 0) + 1;
-    const newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
+
+    let newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
+    while (outgoingReleasesList.some(r => r.drNumber === newDR)) {
+      nextIndex++;
+      newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
+    }
+
     const isDirect = newRelease.deliveryMode === 'Direct Delivery';
     const status: OutgoingStatus = isDirect ? 'Approved' : (newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus);
     const releaseWithDR: OutgoingRelease = {
@@ -689,6 +695,7 @@ export function useInventoryState(enabled = true) {
     }).then(() => {
       setIntegrationMode('backend');
     }).catch(error => {
+      console.warn('Create outgoing request error:', error);
       logBackendError('Create outgoing request')(error);
       setIntegrationMode('mock');
     });

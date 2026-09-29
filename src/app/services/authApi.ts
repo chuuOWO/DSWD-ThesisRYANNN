@@ -310,32 +310,74 @@ export const authApi = {
     return { ok: true };
   },
 
-  async updateProfile(userId: string, updates: { fullName?: string; avatarUrl?: string | null }) {
-    // 1. Update Supabase Auth user metadata
-    try {
-      const metaUpdates: Record<string, unknown> = {};
-      if (updates.fullName !== undefined) metaUpdates.full_name = updates.fullName;
-      if (updates.avatarUrl !== undefined) metaUpdates.avatar_url = updates.avatarUrl;
-      if (Object.keys(metaUpdates).length > 0) {
-        await supabase.auth.updateUser({ data: metaUpdates });
+  async updateProfile(userId: string, updates: {
+    fullName?: string;
+    email?: string;
+    avatarUrl?: string | null;
+    truckId?: string | null;
+    needsAdminVerification?: boolean;
+  }) {
+    const trimmedEmail = updates.email?.trim().toLowerCase();
+
+    // 1. If email is changing, verify it is not taken by another user
+    if (trimmedEmail) {
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id, email')
+        .ilike('email', trimmedEmail)
+        .neq('id', userId)
+        .maybeSingle();
+
+      if (existing) {
+        throw new Error('This email address is already in use by another account.');
       }
-    } catch (metaErr) {
-      console.warn('Auth user metadata update error:', metaErr);
+
+      // Update Supabase Auth user email and metadata
+      try {
+        await supabase.auth.updateUser({
+          email: trimmedEmail,
+          data: {
+            full_name: updates.fullName,
+            truck_id: updates.truckId
+          }
+        });
+      } catch (authErr: any) {
+        console.warn('Auth email update warning:', authErr);
+      }
+    } else if (updates.fullName !== undefined || updates.avatarUrl !== undefined || updates.truckId !== undefined) {
+      try {
+        const metaUpdates: Record<string, unknown> = {};
+        if (updates.fullName !== undefined) metaUpdates.full_name = updates.fullName;
+        if (updates.avatarUrl !== undefined) metaUpdates.avatar_url = updates.avatarUrl;
+        if (updates.truckId !== undefined) metaUpdates.truck_id = updates.truckId;
+        await supabase.auth.updateUser({ data: metaUpdates });
+      } catch (metaErr) {
+        console.warn('Auth user metadata update error:', metaErr);
+      }
     }
 
     // 2. Update public.profiles row
-    try {
-      const profileUpdates: Record<string, unknown> = {};
-      if (updates.fullName !== undefined) profileUpdates.full_name = updates.fullName;
-      if (updates.avatarUrl !== undefined) profileUpdates.avatar_url = updates.avatarUrl;
-      if (Object.keys(profileUpdates).length > 0) {
-        await supabase.from('profiles').update(profileUpdates).eq('id', userId);
-      }
-    } catch (dbErr) {
-      console.warn('Database profiles update error:', dbErr);
+    const profileUpdates: Record<string, unknown> = {};
+    if (updates.fullName !== undefined) profileUpdates.full_name = updates.fullName.trim();
+    if (trimmedEmail) profileUpdates.email = trimmedEmail;
+    if (updates.avatarUrl !== undefined) profileUpdates.avatar_url = updates.avatarUrl;
+    if (updates.truckId !== undefined) profileUpdates.truck_id = updates.truckId ? updates.truckId.trim() : null;
+
+    // If marked for re-verification, reset status to 'pending' so Main Admin must verify
+    if (updates.needsAdminVerification) {
+      profileUpdates.status = 'pending';
     }
 
-    return { ok: true };
+    const { error: dbErr } = await supabase
+      .from('profiles')
+      .update(profileUpdates)
+      .eq('id', userId);
+
+    if (dbErr) {
+      throw new Error(`Failed to update profile: ${dbErr.message}`);
+    }
+
+    return { ok: true, requiresVerification: Boolean(updates.needsAdminVerification) };
   },
 
   async updateWalletAddress(userId: string, walletAddress: string | null) {

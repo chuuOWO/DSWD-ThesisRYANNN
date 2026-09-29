@@ -39,6 +39,8 @@ export function ProfileSettingsModal({
   const { refreshProfile } = useAuth();
 
   const [fullName, setFullName] = useState(profile.fullName || '');
+  const [email, setEmail] = useState(profile.email || '');
+  const [truckId, setTruckId] = useState(profile.truckId || '');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatarUrl || null);
   const [isPhotoMenuOpen, setIsPhotoMenuOpen] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -75,6 +77,8 @@ export function ProfileSettingsModal({
   useEffect(() => {
     if (isOpen) {
       setFullName(profile.fullName || '');
+      setEmail(profile.email || '');
+      setTruckId(profile.truckId || '');
       setAvatarUrl(profile.avatarUrl || null);
       setIsPhotoMenuOpen(false);
       setIsCameraActive(false);
@@ -205,24 +209,52 @@ export function ProfileSettingsModal({
       setFeedbackMessage({ type: 'error', text: 'Full name cannot be empty.' });
       return;
     }
+    if (!email.trim() || !email.includes('@')) {
+      setFeedbackMessage({ type: 'error', text: 'Please enter a valid email address.' });
+      return;
+    }
 
     setIsSaving(true);
     setFeedbackMessage(null);
 
+    const isEmailChanged = email.trim().toLowerCase() !== (profile.email || '').toLowerCase();
+    const isNameChanged = fullName.trim() !== (profile.fullName || '');
+    const isTruckChanged = profile.role === 'receiver' && truckId.trim() !== (profile.truckId || '');
+    const hasCoreChanges = isEmailChanged || isNameChanged || isTruckChanged;
+
+    // Field operators (drivers, LGU receivers) need re-verification by Main Admin if they change core identity
+    const isMainAdmin = profile.role === 'dswd_admin';
+    const needsAdminVerification = hasCoreChanges && !isMainAdmin;
+
     try {
-      await authApi.updateProfile(profile.id, {
+      const res = await authApi.updateProfile(profile.id, {
         fullName: fullName.trim(),
-        avatarUrl
+        email: email.trim(),
+        avatarUrl,
+        truckId: profile.role === 'receiver' ? truckId.trim() : undefined,
+        needsAdminVerification
       });
 
       await refreshProfile();
       onProfileUpdated?.();
 
-      setFeedbackMessage({ type: 'success', text: 'Profile updated successfully.' });
-      setTimeout(() => {
-        setIsSaving(false);
-        onClose();
-      }, 900);
+      if (res.requiresVerification) {
+        setFeedbackMessage({
+          type: 'success',
+          text: 'Profile changes saved! Your account requires verification by the Main DSWD Admin before becoming active.'
+        });
+        setTimeout(() => {
+          setIsSaving(false);
+          onClose();
+          onSignOut?.();
+        }, 2200);
+      } else {
+        setFeedbackMessage({ type: 'success', text: 'Profile updated successfully.' });
+        setTimeout(() => {
+          setIsSaving(false);
+          onClose();
+        }, 900);
+      }
     } catch (err) {
       setIsSaving(false);
       setFeedbackMessage({
@@ -463,18 +495,48 @@ export function ProfileSettingsModal({
             />
           </div>
 
-          {/* Email (Read-Only) */}
+          {/* Account Email Field (Editable) */}
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
-              Account Email
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-gray-700">
+                Account Email
+              </label>
+              {profile.role !== 'dswd_admin' && (
+                <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                  Requires Admin Verification
+                </span>
+              )}
+            </div>
             <input
               type="email"
-              value={profile.email}
-              disabled
-              className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 bg-gray-100 text-xs font-mono text-gray-500 cursor-not-allowed"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="e.g. user@dswd.gov.ph"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 bg-white text-xs font-mono text-gray-800 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+              required
             />
+            {profile.role !== 'dswd_admin' && (
+              <p className="text-[10.5px] text-gray-500 mt-1">
+                Editing your email or name flags your account for review by the Main DSWD Administrator.
+              </p>
+            )}
           </div>
+
+          {/* Truck ID (for field drivers) */}
+          {profile.role === 'receiver' && !profile.lguName && (
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Assigned Truck ID / Plate Number
+              </label>
+              <input
+                type="text"
+                value={truckId}
+                onChange={(e) => setTruckId(e.target.value.toUpperCase())}
+                placeholder="e.g. TRUCK-01 or ABC-1234"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+              />
+            </div>
+          )}
 
           {/* Wallet Address Section */}
           <div>
