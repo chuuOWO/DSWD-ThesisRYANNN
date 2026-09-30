@@ -67,6 +67,8 @@ const throwIfError = (error: unknown, context: string) => {
 const definedOnly = <T extends Record<string, unknown>>(values: T) =>
   Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
 
+export const REALTIME_FALLBACK_REFRESH_MS = 30_000;
+
 export const backendApi = {
   async getDashboard() {
     const [incomingResult, outgoingResult] = await Promise.all([

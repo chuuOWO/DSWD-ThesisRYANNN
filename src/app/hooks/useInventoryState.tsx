@@ -1,6 +1,13 @@
+<<<<<<< Updated upstream
 import { useEffect, useMemo, useState } from 'react';
 import { backendApi } from '../services/backendApi';
 import { blockchain } from '../services/blockchain';
+=======
+import { useEffect, useState } from 'react';
+import { backendApi, REALTIME_FALLBACK_REFRESH_MS } from '../services/backendApi';
+import { blockchain, generateBatchTokenId } from '../services/blockchain';
+import { findPanayLgu } from '../data/panayLguDirectory';
+>>>>>>> Stashed changes
 
 export interface InventoryItem {
   category: string;
@@ -698,6 +705,10 @@ export function useInventoryState() {
 
     loadDashboard();
     const unsubscribe = backendApi.subscribeDashboard(loadDashboard);
+<<<<<<< Updated upstream
+=======
+    const pollTimer = setInterval(loadDashboard, REALTIME_FALLBACK_REFRESH_MS);
+>>>>>>> Stashed changes
 
     return unsubscribe;
   }, []);
