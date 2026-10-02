@@ -237,7 +237,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       .filter((lgu) => !lgu.lguName.includes('Main Warehouse'))
       .map((lgu) => {
         const foodStock = lgu.currentStock?.['Food Pack'] || 0;
-        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + v, 0) : 0;
+        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum: number, v: number) => sum + (v || 0), 0) : 0;
         const pending = lgu.pendingDeliveries;
         const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodStock / 10) + (pending * 5))));
         const priorityColor = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
@@ -436,7 +436,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
               <div className="flex justify-between items-center">
                 <span className="text-sm font-semibold text-gray-600">Current Stock</span>
                 <span className="text-sm font-bold text-purple-600">
-                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} kits
+                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum: number, val: number) => sum + (val || 0), 0).toLocaleString() : 0} kits
                 </span>
               </div>
 
