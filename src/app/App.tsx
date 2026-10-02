@@ -36,7 +36,6 @@ export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [currentRole, setCurrentRole] = useState<UserRole>('Unregistered');
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [walletMessage, setWalletMessage] = useState<string | null>(null);
   const [walletMismatch, setWalletMismatch] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
@@ -245,7 +244,6 @@ export default function App() {
         onSignOut={requestSignOut}
         currentRole={currentRole}
         walletAddress={walletAddress}
-        walletMessage={walletMessage}
         onConnectWallet={handleConnectWallet}
         onOpenProfileSettings={() => setIsProfileModalOpen(true)}
       />

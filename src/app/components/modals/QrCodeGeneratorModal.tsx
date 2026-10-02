@@ -4,19 +4,13 @@ import {
   Check, 
   Copy, 
   Download, 
-  ExternalLink, 
-  Layers, 
   Printer, 
   QrCode as QrCodeIcon, 
-  RefreshCw, 
-  Shield, 
   ShieldCheck, 
-  Sparkles, 
-  Truck, 
   X 
 } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
-import { PANAY_LGUS } from '../../lib/lguCoordinates';
+import { findPanayLgu } from '../../data/panayLguDirectory';
 
 interface QrCodeGeneratorModalProps {
   releases?: OutgoingRelease[];
@@ -82,13 +76,9 @@ export function QrCodeGeneratorModal({
     if (!releaseCoords) {
       const lguName = currentRelease.destinationAddress || currentRelease.lguName || currentRelease.municipality;
       if (lguName) {
-        const found = PANAY_LGUS.find((l) =>
-          lguName.toLowerCase().includes(l.canonicalName.toLowerCase()) ||
-          l.canonicalName.toLowerCase().includes(lguName.toLowerCase()) ||
-          l.aliases.some((a) => lguName.toLowerCase().includes(a))
-        );
+        const found = findPanayLgu(lguName, currentRelease.province);
         if (found) {
-          releaseCoords = found.position;
+          releaseCoords = [found.lat, found.lng];
         }
       }
     }
@@ -218,7 +208,7 @@ export function QrCodeGeneratorModal({
         <div>
           <div className="flex items-center gap-2 text-blue-700 font-bold text-lg">
             <QrCodeIcon className="w-6 h-6" />
-            <h2>Thesis Relief Goods QR Code Generator</h2>
+            <h2>Delivery Receipt QR Code Generator</h2>
           </div>
           <p className="text-xs text-gray-500 mt-1">
             Generates a scannable manifest QR code directly compatible with the <strong>Receiver / Trucker App</strong>. It provides immediate manifest details on scan, with a dedicated slot reserved for blockchain smart contracts.

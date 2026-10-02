@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle, Edit, FileSignature, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { CheckCircle, Edit, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { blockchain } from '../../services/blockchain';
@@ -74,7 +74,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [approvalAmount, setApprovalAmount] = useState(0);
   const [isApproving, setIsApproving] = useState(false);
   const [actionModal, setActionModal] = useState<ReleaseActionModalState | null>(null);
-  const [qrModalRelease, setQrModalRelease] = useState<OutgoingRelease | null | 'generic'>(null);
+  const [qrModalRelease, setQrModalRelease] = useState<OutgoingRelease | null>(null);
   const autoCloseDelayMs = 1800;
 
   const handleAddRelease = (newRelease: ReleaseForm) => {
@@ -218,16 +218,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <button
-              onClick={() => setQrModalRelease('generic')}
-              className="flex items-center justify-center gap-2 bg-white text-green-700 px-6 py-3 rounded-lg font-semibold hover:bg-green-50 transition-all shadow-sm"
-              title="Open the Thesis Demo QR Code Generator"
-            >
-              <QrCode className="w-5 h-5 text-green-700" />
-              Generate Demo QR
-            </button>
-            <button
               onClick={() => setShowReleaseModal(true)}
-              className="flex items-center justify-center gap-2 bg-white text-green-700 px-6 py-3 rounded-lg font-semibold hover:bg-green-50 transition-all shadow-sm"
+              className="flex items-center justify-center gap-2 bg-white text-green-700 px-6 py-3 rounded-lg font-semibold hover:bg-green-50 transition-all shadow-sm cursor-pointer"
             >
               <Plus className="w-5 h-5" />
               New Release Draft
@@ -376,7 +368,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       <button
                         onClick={() => setQrModalRelease(release)}
                         className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition shadow-xs"
-                        title="View & Print Scannable Demo QR Code for this release"
+                        title="View & Print Delivery Receipt QR Code"
                       >
                         <QrCode className="w-3.5 h-3.5" /> QR Code
                       </button>
@@ -666,7 +658,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       {qrModalRelease && (
         <QrCodeGeneratorModal
           releases={outgoingReleasesList}
-          initialRelease={qrModalRelease === 'generic' ? null : qrModalRelease}
+          initialRelease={qrModalRelease}
           onClose={() => setQrModalRelease(null)}
         />
       )}

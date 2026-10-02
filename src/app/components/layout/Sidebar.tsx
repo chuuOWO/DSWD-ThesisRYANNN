@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, LogOut, Sliders, Bell, QrCode, Users, User, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, LogOut, Users, User, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 

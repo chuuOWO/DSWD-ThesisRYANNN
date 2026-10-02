@@ -1,15 +1,12 @@
 import { FormEvent, useState } from 'react';
 import {
   ArrowLeft,
-  Briefcase,
   CheckCircle2,
   Clock,
   Eye,
   EyeOff,
-  FileText,
   Mail,
   Phone,
-  ShieldCheck,
   Upload,
   Wallet,
   X

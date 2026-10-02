@@ -128,8 +128,6 @@ const makeManifestHash = (item: Pick<IncomingGoods, 'dateReceived' | 'fnfiCatego
   return `MANIFEST-${Math.abs(hash).toString(16).toUpperCase().padStart(8, '0')}`;
 };
 
-const makeTxHash = (prefix: string) => `0x${prefix}${Math.random().toString(16).slice(2, 10)}${Date.now().toString(16)}`;
-
 const normalizeWarehouseName = (value: string): WarehouseName | null => {
   const normalized = value.trim().toLowerCase();
   if (normalized === 'oton main warehouse' || normalized === 'oton warehouse' || normalized === 'oton') {

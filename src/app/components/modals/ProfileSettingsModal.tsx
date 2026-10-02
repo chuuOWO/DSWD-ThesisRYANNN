@@ -6,7 +6,6 @@ import {
   Camera, 
   Check, 
   FlipHorizontal, 
-  Lock,
   LogOut,
   RefreshCw, 
   Save, 

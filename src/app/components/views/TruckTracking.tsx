@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
-import { CircleMarker, MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
-import { CheckCircle, ChevronDown, Clock, Flag, MapPin, Navigation, PackageCheck, Route, Truck } from 'lucide-react';
+import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
+import { CheckCircle, Clock, Navigation, Route, Truck } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import { backendApi, type TruckLiveLocation, type TruckerReleaseRecord } from '../../services/backendApi';
 import { authApi, type UserProfile } from '../../services/authApi';
-import { resolveLgu } from '../../lib/lguCoordinates';
 import { findPanayLgu } from '../../data/panayLguDirectory';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';

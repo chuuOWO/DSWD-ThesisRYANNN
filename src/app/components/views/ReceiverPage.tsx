@@ -2,7 +2,6 @@
 
 import { Component, Fragment, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode, type RefObject } from 'react';
 import {
-  AlertCircle,
   AlertTriangle,
   Check,
   ChevronDown,
@@ -23,15 +22,14 @@ import {
   UserRound,
   Trash2,
   X,
-  Zap,
   ExternalLink
 } from 'lucide-react';
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 
 import type { UserProfile } from '../../services/authApi';
-import { backendApi, type TruckLiveLocation, type TruckerReleaseRecord } from '../../services/backendApi';
+import { backendApi, type TruckerReleaseRecord } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
 import { findPanayLgu } from '../../data/panayLguDirectory';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';

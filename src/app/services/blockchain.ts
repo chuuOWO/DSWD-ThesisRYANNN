@@ -324,10 +324,6 @@ const signFallbackProof = async (message: string): Promise<BlockchainProof> => {
 };
 
 export const blockchain = {
-  getWalletRole(_address?: string | null): UserRole | 'Unregistered' {
-    return 'Unregistered';
-  },
-
   async getWalletRoleFromDb(address?: string | null): Promise<UserRole> {
     return resolveWalletRoleFromDb(address);
   },

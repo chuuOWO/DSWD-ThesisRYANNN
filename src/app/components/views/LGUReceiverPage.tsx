@@ -1,10 +1,9 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
-  Building2,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -17,7 +16,7 @@ import {
   Truck,
   X
 } from 'lucide-react';
-import { CircleMarker, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 
 import type { OutgoingRelease } from '../../hooks/useInventoryState';

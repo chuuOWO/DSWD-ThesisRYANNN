@@ -1,10 +1,31 @@
 import { useMemo, useState } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit } from 'lucide-react';
-import { AddLGUModal } from '../modals/AddLGUModal';
-import { EditLGUModal, LGUDelivery } from '../modals/EditLGUModal';
-import type { LGUInventoryReportInput, LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock } from 'lucide-react';
+import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
 import { PANAY_LGUS } from '../../data/panayLguDirectory';
-import { sanitizeTextOnly, sanitizeNumbersOnly } from '../../lib/inputValidation';
+
+export interface LGUDelivery {
+  id: string;
+  lguName: string;
+  municipality: string;
+  province: string;
+  totalItemsReleased: number;
+  deliveryCount: number;
+  completedDeliveries: number;
+  pendingDeliveries: number;
+  lastDeliveryDate: string;
+  contactPerson?: string;
+  contactNumber?: string;
+  remarks?: string;
+  currentStock?: {
+    'Hygiene Kit': number;
+    'Food Pack': number;
+    'Sleeping Kit': number;
+    'Kitchen Kit': number;
+    'Family Kit': number;
+    'Laminated Sack': number;
+    'RTEF': number;
+  };
+}
 
 interface RecentActivity {
   id: string;
@@ -41,31 +62,14 @@ interface LGUMonitoringProps {
     inventory?: { category: string; warehouseA: number; warehouseB: number }[];
     outgoingReleasesList?: OutgoingRelease[];
     lguPriorityReports: LGUPriorityReport[];
-    submitLGUInventoryReport?: (input: LGUInventoryReportInput) => Promise<{ ok: boolean; message: string }>;
   };
-  currentRole: UserRole;
+  currentRole?: UserRole;
 }
 
-export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProps) {
+export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGUMonitoringProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
-  const [submitMessage, setSubmitMessage] = useState<string | null>(null);
-  const [customLguList, setCustomLguList] = useState<LGUDelivery[]>([]);
-
-  const [reportForm, setReportForm] = useState<LGUInventoryReportInput>({
-    lguName: 'Leon Municipal Office',
-    municipality: 'Leon',
-    province: 'Iloilo',
-    foodPacks: 95,
-    hygieneKits: 80,
-    familyKits: 50,
-    affectedFamilies: 920,
-    damageIndex: 88
-  });
 
   // Dynamically compute live LGU list from outgoing releases, reports, and Panay directory (Zero static mock data)
   const baseLguList = useMemo<LGUDelivery[]>(() => {
@@ -187,40 +191,7 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
     return [...mainWarehouses, ...Array.from(lguEntriesMap.values())];
   }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.inventory]);
 
-  // Combine base dynamic list with any custom added LGUs
-  const displayLGUList = useMemo(() => {
-    const combined = [...customLguList, ...baseLguList];
-    const unique = new Map<string, LGUDelivery>();
-    combined.forEach((item) => {
-      if (!unique.has(item.municipality)) {
-        unique.set(item.municipality, item);
-      }
-    });
-    return Array.from(unique.values());
-  }, [customLguList, baseLguList]);
-
-  const handleAddLGU = (newLGU: Omit<LGUDelivery, 'id'>) => {
-    const newId = `LGU-${String(customLguList.length + 1).padStart(3, '0')}`;
-    const lguWithId: LGUDelivery = {
-      ...newLGU,
-      id: newId
-    };
-    setCustomLguList([...customLguList, lguWithId]);
-    setShowAddModal(false);
-  };
-
-  const handleEditLGU = (updatedLGU: LGUDelivery) => {
-    setCustomLguList((prev) =>
-      prev.map((lgu) => (lgu.id === updatedLGU.id ? updatedLGU : lgu))
-    );
-    setShowEditModal(false);
-    setSelectedLGU(null);
-  };
-
-  const openEditModal = (lgu: LGUDelivery) => {
-    setSelectedLGU(lgu);
-    setShowEditModal(true);
-  };
+  const displayLGUList = baseLguList;
 
   // Recent activity dynamically populated from live outgoing releases
   const recentActivity = useMemo<RecentActivity[]>(() => {
@@ -237,16 +208,6 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
   }, [inventoryState?.outgoingReleasesList]);
 
   const priorityReports = inventoryState?.lguPriorityReports || [];
-
-  const handleSubmitReport = async () => {
-    if (currentRole !== 'LGUReceiver') {
-      setSubmitMessage('RBAC: connect the LGU Receiver MetaMask wallet to submit municipality stock and damage reports.');
-      return;
-    }
-
-    const result = await inventoryState?.submitLGUInventoryReport?.(reportForm);
-    setSubmitMessage(result?.message ?? 'LGU report submission is unavailable.');
-  };
 
   const filteredLGUs = displayLGUList.filter(lgu => {
     const matchesSearch = lgu.lguName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -311,138 +272,6 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
           <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-sm"
-        >
-          <Plus className="w-5 h-5" />
-          Add New LGU
-        </button>
-      </div>
-
-      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-5">
-        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-          <div>
-            <h3 className="font-bold text-indigo-950">LGU Stock & Damage Submission</h3>
-            <p className="text-sm text-indigo-800 mt-1">MetaMask role: <span className="font-bold">{currentRole}</span>. These LGU stock and damage reports are saved to Supabase and drive the Red/Yellow/Green prioritization cards.</p>
-          </div>
-          <button
-            onClick={handleSubmitReport}
-            disabled={currentRole !== 'LGUReceiver'}
-            className={`px-5 py-3 rounded-lg font-bold text-sm ${currentRole === 'LGUReceiver' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
-          >
-            Submit LGU Report
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3 mt-4">
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">LGU Office</span>
-            <input
-              type="text"
-              value={reportForm.lguName}
-              onChange={(e) => setReportForm({ ...reportForm, lguName: sanitizeTextOnly(e.target.value) })}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="Leon Municipal Office"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Municipality</span>
-            <input
-              type="text"
-              value={reportForm.municipality}
-              onChange={(e) => setReportForm({ ...reportForm, municipality: sanitizeTextOnly(e.target.value) })}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="Leon"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Province</span>
-            <input
-              type="text"
-              value={reportForm.province}
-              onChange={(e) => setReportForm({ ...reportForm, province: sanitizeTextOnly(e.target.value) })}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="Iloilo"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Food Packs On Hand</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={reportForm.foodPacks || ''}
-              onChange={(e) => {
-                const c = sanitizeNumbersOnly(e.target.value);
-                setReportForm({ ...reportForm, foodPacks: c ? parseInt(c, 10) : 0 });
-              }}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="0"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Hygiene Kits On Hand</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={reportForm.hygieneKits || ''}
-              onChange={(e) => {
-                const c = sanitizeNumbersOnly(e.target.value);
-                setReportForm({ ...reportForm, hygieneKits: c ? parseInt(c, 10) : 0 });
-              }}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="0"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Family Kits On Hand</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={reportForm.familyKits || ''}
-              onChange={(e) => {
-                const c = sanitizeNumbersOnly(e.target.value);
-                setReportForm({ ...reportForm, familyKits: c ? parseInt(c, 10) : 0 });
-              }}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="0"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Affected Families</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={reportForm.affectedFamilies || ''}
-              onChange={(e) => {
-                const c = sanitizeNumbersOnly(e.target.value);
-                setReportForm({ ...reportForm, affectedFamilies: c ? parseInt(c, 10) : 0 });
-              }}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="0"
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-bold text-indigo-950">Damage Index 0-100</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={reportForm.damageIndex || ''}
-              onChange={(e) => {
-                const c = sanitizeNumbersOnly(e.target.value);
-                const n = c ? Math.min(100, parseInt(c, 10)) : 0;
-                setReportForm({ ...reportForm, damageIndex: n });
-              }}
-              className="w-full px-3 py-2 rounded border border-indigo-200 text-sm"
-              placeholder="0"
-            />
-          </label>
-        </div>
-        {submitMessage && <p className="text-sm font-semibold text-indigo-900 mt-3">{submitMessage}</p>}
       </div>
 
       {/* Summary Cards */}
@@ -717,26 +546,6 @@ export function LGUMonitoring({ inventoryState, currentRole }: LGUMonitoringProp
           </table>
         </div>
       </div>
-
-      {/* Add LGU Modal */}
-      {showAddModal && (
-        <AddLGUModal
-          onClose={() => setShowAddModal(false)}
-          onSubmit={handleAddLGU}
-        />
-      )}
-
-      {/* Edit LGU Modal */}
-      {showEditModal && selectedLGU && (
-        <EditLGUModal
-          lgu={selectedLGU}
-          onClose={() => {
-            setShowEditModal(false);
-            setSelectedLGU(null);
-          }}
-          onSubmit={handleEditLGU}
-        />
-      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { AlertTriangle, LogOut } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import type { UserRole } from '../../hooks/useInventoryState';
 import type { UserProfile } from '../../services/authApi';
 
@@ -9,7 +9,7 @@ interface HeaderProps {
   onSignOut?: () => void;
   currentRole: UserRole;
   walletAddress: string | null;
-  walletMessage: string | null;
+  walletMessage?: string | null;
   onConnectWallet: () => void;
   onOpenProfileSettings?: () => void;
 }
@@ -25,7 +25,7 @@ const shortenWallet = (address: string) => `${address.slice(0, 6)}...${address.s
 
 export function Header({
   profile,
-  email = 'novrindept@swsu.com',
+  email = '',
   roleLabel = 'DSWD Admin',
   onSignOut,
   currentRole,
