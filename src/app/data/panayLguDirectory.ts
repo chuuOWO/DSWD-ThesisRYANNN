@@ -218,3 +218,13 @@ export function findPanayLgu(query: string, provinceFilter?: string | null): Lgu
 
   return bestScore >= 50 ? bestMatch : undefined;
 }
+
+export const PANAY_PROVINCES = ['Iloilo', 'Aklan', 'Antique', 'Capiz'] as const;
+export type PanayProvince = typeof PANAY_PROVINCES[number];
+
+export const PANAY_MUNICIPALITIES_BY_PROVINCE: Record<string, string[]> = {
+  'Iloilo': PANAY_LGUS.filter(l => l.province === 'Iloilo').map(l => l.municipality).sort(),
+  'Aklan': PANAY_LGUS.filter(l => l.province === 'Aklan').map(l => l.municipality).sort(),
+  'Antique': PANAY_LGUS.filter(l => l.province === 'Antique').map(l => l.municipality).sort(),
+  'Capiz': PANAY_LGUS.filter(l => l.province === 'Capiz').map(l => l.municipality).sort(),
+};

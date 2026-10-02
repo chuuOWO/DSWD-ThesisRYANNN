@@ -359,14 +359,44 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
     return null;
   }, [currentRelease, lguInfo]);
 
-  // Route points: Moving Truck -> Official LGU Destination Pin (only when picked up & in transit)
-  const routePath = useMemo<[number, number][]>(() => {
-    if (!isPickedUp) return [];
-    const points: [number, number][] = [];
-    if (truckLocation && isValidCoordinate(truckLocation)) points.push(truckLocation);
-    if (lguDestinationCoords && isValidCoordinate(lguDestinationCoords)) points.push(lguDestinationCoords);
-    return points;
-  }, [isPickedUp, truckLocation, lguDestinationCoords]);
+  // Real OSRM Road Route Geometry: Driver Truck -> LGU Destination Pin
+  const [roadRoute, setRoadRoute] = useState<[number, number][]>([]);
+
+  useEffect(() => {
+    if (!isPickedUp || !truckLocation || !lguDestinationCoords) {
+      setRoadRoute([]);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchOsrmRoute = async () => {
+      try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${truckLocation[1]},${truckLocation[0]};${lguDestinationCoords[1]},${lguDestinationCoords[0]}?overview=full&geometries=geojson`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('OSRM network response was not ok');
+        const data = await res.json();
+        if (data.code === 'Ok' && data.routes?.[0]?.geometry?.coordinates?.length) {
+          const coords: [number, number][] = data.routes[0].geometry.coordinates.map((pt: [number, number]) => [pt[1], pt[0]]);
+          if (isMounted) {
+            setRoadRoute(coords);
+          }
+          return;
+        }
+      } catch (err) {
+        console.warn('OSRM road route fetch fallback:', err);
+      }
+      if (isMounted) {
+        setRoadRoute([truckLocation, lguDestinationCoords]);
+      }
+    };
+
+    fetchOsrmRoute();
+    return () => {
+      isMounted = false;
+    };
+  }, [isPickedUp, truckLocation?.[0], truckLocation?.[1], lguDestinationCoords?.[0], lguDestinationCoords?.[1]]);
+
+  const routePath = roadRoute;
 
   // 4. LGU Inventory Drawer State & Supabase Stock
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
@@ -514,6 +544,18 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
           text: `Shipment ${canonicalDrNumber} has already been received and accepted into ${effectiveLguName || 'LGU'} inventory. This QR code has completed its delivery cycle and is no longer active.`
         });
         return;
+      }
+
+      // STRICT CHAIN OF CUSTODY VALIDATION:
+      // Manifest MUST pass from Central Admin -> Assigned Truck Driver (Receiver) -> LGU Receiver.
+      // Direct Admin -> LGU scan is strictly prohibited.
+      if (matchingRelease) {
+        const allowedTransitStatuses = ['In Transit', 'Delivered'];
+        if (!allowedTransitStatuses.includes(matchingRelease.deliveryStatus)) {
+          throw new Error(
+            `Chain of Custody Violation: Shipment ${canonicalDrNumber} is currently "${matchingRelease.deliveryStatus}". It must be picked up and scanned into transit by the designated truck driver (receiver) before the LGU can accept it.`
+          );
+        }
       }
 
       // OPTION A: STRICT DESTINATION VALIDATION

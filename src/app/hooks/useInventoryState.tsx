@@ -868,6 +868,16 @@ export function useInventoryState(enabled = true) {
     const release = outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
     if (!release) return { ok: false, message: 'Release not found.' };
     const canonicalDr = release.drNumber;
+
+    // Strict Chain of Custody Validation:
+    // LGU cannot receive shipments directly from Admin without Driver transit
+    if (!['In Transit', 'Delivered'].includes(release.deliveryStatus)) {
+      return {
+        ok: false,
+        message: `Chain of Custody Violation: Shipment ${canonicalDr} is currently "${release.deliveryStatus}". It must be picked up and scanned into transit by the designated truck driver (receiver) before the LGU can accept it.`
+      };
+    }
+
     const lguLookup = findPanayLgu(release?.destinationAddress || release?.lguName || release?.municipality || '', release?.province);
     const latestGps = release?.receiverGps || (lguLookup ? `${lguLookup.lat}, ${lguLookup.lng}` : '10.7202, 122.5621');
     const handoverContractId = release.handoverContractId ?? `HANDOVER-${canonicalDr.replace('DR-', '')}`;
@@ -886,7 +896,7 @@ export function useInventoryState(enabled = true) {
       return { ok: false, message: msg };
     }
 
-    setOutgoingReleasesList(prev => prev.map(item => item.drNumber.trim().toUpperCase() === targetDrUpper && ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(item.deliveryStatus)
+    setOutgoingReleasesList(prev => prev.map(item => item.drNumber.trim().toUpperCase() === targetDrUpper && ['In Transit', 'Delivered'].includes(item.deliveryStatus)
       ? {
           ...item,
           deliveryStatus: 'Accepted',
@@ -908,7 +918,6 @@ export function useInventoryState(enabled = true) {
       backendApi.markTruckLiveLocationDoneByDr(canonicalDr).catch(() => {});
     }).catch(error => {
       logBackendError('Accept outgoing handover')(error);
-      setIntegrationMode('mock');
     });
 
     return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };

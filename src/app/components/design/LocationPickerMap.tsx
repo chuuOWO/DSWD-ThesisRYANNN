@@ -2,13 +2,32 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import { Crosshair, MapPin, Search, Loader2, Info } from 'lucide-react';
-import { findPanayLgu, PANAY_LGUS } from '../../data/panayLguDirectory';
+import {
+  findPanayLgu,
+  PANAY_LGUS,
+  PANAY_PROVINCES,
+  PANAY_MUNICIPALITIES_BY_PROVINCE
+} from '../../data/panayLguDirectory';
+
+export interface LocationAddressDetails {
+  building: string;
+  street: string;
+  barangay: string;
+  district: string;
+  municipality: string;
+  province: string;
+}
 
 interface LocationPickerMapProps {
   latitude: number;
   longitude: number;
   destinationAddress?: string;
-  onLocationChange: (lat: number, lng: number, address?: string) => void;
+  onLocationChange: (
+    lat: number,
+    lng: number,
+    address?: string,
+    details?: LocationAddressDetails
+  ) => void;
   province?: string;
   municipality?: string;
 }
@@ -69,6 +88,18 @@ export function LocationPickerMap({
   province = 'Iloilo',
   municipality = ''
 }: LocationPickerMapProps) {
+  // Structured Panay Island address components
+  const [building, setBuilding] = useState('');
+  const [street, setStreet] = useState('');
+  const [barangay, setBarangay] = useState('');
+  const [district, setDistrict] = useState('NA');
+  const [selectedProvince, setSelectedProvince] = useState<string>(
+    PANAY_PROVINCES.includes(province as any) ? province : 'Iloilo'
+  );
+  const [selectedMunicipality, setSelectedMunicipality] = useState<string>(
+    municipality || 'Oton'
+  );
+
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
@@ -76,35 +107,94 @@ export function LocationPickerMap({
   const markerRef = useRef<L.Marker | null>(null);
 
   // Fallback initial position if 0 or invalid
-  const validLat = typeof latitude === 'number' && !isNaN(latitude) && latitude !== 0 ? latitude : 10.6415;
-  const validLng = typeof longitude === 'number' && !isNaN(longitude) && longitude !== 0 ? longitude : 122.2352;
+  const validLat = typeof latitude === 'number' && !isNaN(latitude) && latitude !== 0 ? latitude : 10.6975;
+  const validLng = typeof longitude === 'number' && !isNaN(longitude) && longitude !== 0 ? longitude : 122.4764;
 
-  // React to municipality or province changes from the parent form
+  // Helper to compile structured address string
+  const compileAddress = (
+    b: string,
+    s: string,
+    brgy: string,
+    dist: string,
+    mun: string,
+    prov: string
+  ) => {
+    const parts: string[] = [];
+    if (b.trim()) parts.push(b.trim());
+    if (s.trim()) parts.push(s.trim());
+    if (brgy.trim()) parts.push(brgy.trim());
+    if (dist.trim() && dist.trim().toUpperCase() !== 'NA') parts.push(dist.trim());
+    if (mun.trim()) parts.push(mun.trim());
+    if (prov.trim()) parts.push(prov.trim());
+    return parts.join(', ');
+  };
+
+  const updateAddressFields = (
+    nextBuilding: string,
+    nextStreet: string,
+    nextBarangay: string,
+    nextDistrict: string,
+    nextMun: string,
+    nextProv: string,
+    newLat = validLat,
+    newLng = validLng
+  ) => {
+    const compiled = compileAddress(nextBuilding, nextStreet, nextBarangay, nextDistrict, nextMun, nextProv);
+    onLocationChange(newLat, newLng, compiled, {
+      building: nextBuilding,
+      street: nextStreet,
+      barangay: nextBarangay,
+      district: nextDistrict,
+      municipality: nextMun,
+      province: nextProv
+    });
+  };
+
+  // Sync province/municipality if passed from outside
   useEffect(() => {
-    if (!municipality) return;
-    const lgu = findPanayLgu(municipality, province);
-    if (lgu) {
-      onLocationChange(
-        lgu.lat,
-        lgu.lng,
-        destinationAddress || `${lgu.defaultFacility}, ${lgu.municipality}, ${lgu.province}`
-      );
+    if (province && PANAY_PROVINCES.includes(province as any) && province !== selectedProvince) {
+      setSelectedProvince(province);
     }
-  }, [municipality, province]);
+  }, [province]);
+
+  useEffect(() => {
+    if (municipality && municipality !== selectedMunicipality) {
+      setSelectedMunicipality(municipality);
+    }
+  }, [municipality]);
+
+  const handleProvinceSelect = (newProv: string) => {
+    setSelectedProvince(newProv);
+    const munList = PANAY_MUNICIPALITIES_BY_PROVINCE[newProv] || [];
+    const newMun = munList[0] || '';
+    setSelectedMunicipality(newMun);
+    const lgu = findPanayLgu(newMun, newProv);
+    const newLat = lgu?.lat || validLat;
+    const newLng = lgu?.lng || validLng;
+    updateAddressFields(building, street, barangay, district, newMun, newProv, newLat, newLng);
+  };
+
+  const handleMunicipalitySelect = (newMun: string) => {
+    setSelectedMunicipality(newMun);
+    const lgu = findPanayLgu(newMun, selectedProvince);
+    const newLat = lgu?.lat || validLat;
+    const newLng = lgu?.lng || validLng;
+    updateAddressFields(building, street, barangay, district, newMun, selectedProvince, newLat, newLng);
+  };
 
   const handleMarkerDragEnd = () => {
     const marker = markerRef.current;
     if (marker) {
       const latLng = marker.getLatLng();
-      onLocationChange(latLng.lat, latLng.lng, destinationAddress);
+      updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, latLng.lat, latLng.lng);
     }
   };
 
   const handleMapClick = (lat: number, lng: number) => {
-    onLocationChange(lat, lng, destinationAddress);
+    updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, lat, lng);
   };
 
-  // Landmark search using OpenStreetMap Nominatim with local Panay fallback
+  // Landmark search using OpenStreetMap Nominatim with local Panay directory fallback
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const query = searchQuery.trim();
@@ -121,11 +211,13 @@ export function LocationPickerMap({
       ).map((lgu) => ({
         label: `${lgu.defaultFacility} (${lgu.municipality}, ${lgu.province})`,
         lat: lgu.lat,
-        lng: lgu.lng
+        lng: lgu.lng,
+        muni: lgu.municipality,
+        prov: lgu.province
       }));
 
-      // 2. Query Nominatim API for exact landmark in Panay / Western Visayas
-      const fullSearchTerm = `${query}, ${municipality || ''} ${province || 'Panay'}, Philippines`;
+      // 2. Query Nominatim API for exact landmark in Panay
+      const fullSearchTerm = `${query}, ${selectedMunicipality || ''} ${selectedProvince || 'Panay'}, Philippines`;
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullSearchTerm)}&limit=4`,
         { headers: { 'Accept-Language': 'en' } }
@@ -135,19 +227,22 @@ export function LocationPickerMap({
       const onlineMatches = (data as Array<{ display_name: string; lat: string; lon: string }>).map((item) => ({
         label: item.display_name.split(',').slice(0, 3).join(', '),
         lat: parseFloat(item.lat),
-        lng: parseFloat(item.lon)
+        lng: parseFloat(item.lon),
+        muni: selectedMunicipality,
+        prov: selectedProvince
       }));
 
       const combined = [...localMatches, ...onlineMatches];
       setSearchResults(combined.slice(0, 5));
     } catch {
-      // Fallback to local matches if offline or API limit
       const localMatches = PANAY_LGUS.filter((lgu) =>
         lgu.municipality.toLowerCase().includes(query.toLowerCase())
       ).map((lgu) => ({
         label: `${lgu.defaultFacility} (${lgu.municipality}, ${lgu.province})`,
         lat: lgu.lat,
-        lng: lgu.lng
+        lng: lgu.lng,
+        muni: lgu.municipality,
+        prov: lgu.province
       }));
       setSearchResults(localMatches);
     } finally {
@@ -155,42 +250,182 @@ export function LocationPickerMap({
     }
   };
 
-  const selectSearchResult = (item: { label: string; lat: number; lng: number }) => {
-    onLocationChange(item.lat, item.lng, item.label);
+  const selectSearchResult = (item: { label: string; lat: number; lng: number; muni?: string; prov?: string }) => {
+    if (item.prov && PANAY_PROVINCES.includes(item.prov as any)) {
+      setSelectedProvince(item.prov);
+    }
+    if (item.muni) {
+      setSelectedMunicipality(item.muni);
+    }
+    setBuilding(item.label.split(',')[0] || building);
+    updateAddressFields(
+      item.label.split(',')[0] || building,
+      street,
+      barangay,
+      district,
+      item.muni || selectedMunicipality,
+      item.prov || selectedProvince,
+      item.lat,
+      item.lng
+    );
     setSearchQuery(item.label);
     setShowResults(false);
   };
 
   const resetToMunicipalityCenter = () => {
-    const lgu = findPanayLgu(municipality || 'Miag-ao', province);
+    const lgu = findPanayLgu(selectedMunicipality || 'Oton', selectedProvince);
     if (lgu) {
-      onLocationChange(lgu.lat, lgu.lng, `${lgu.defaultFacility}, ${lgu.municipality}`);
+      updateAddressFields(
+        building || lgu.defaultFacility,
+        street,
+        barangay,
+        district,
+        lgu.municipality,
+        lgu.province,
+        lgu.lat,
+        lgu.lng
+      );
     }
   };
 
   const currentCenter = useMemo<[number, number]>(() => [validLat, validLng], [validLat, validLng]);
 
   return (
-    <div className="space-y-2 rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
+    <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-1.5 text-xs font-bold text-gray-800 uppercase tracking-wide">
-          <MapPin className="h-4 w-4 text-red-600" />
-          Delivery Destination Pin & Full Address
+          <MapPin className="h-4 w-4 text-[#2500ba]" />
+          Destination Delivery Location & Address (Panay Only)
         </label>
         <span className="text-[11px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
           {validLat.toFixed(5)}, {validLng.toFixed(5)}
         </span>
       </div>
 
-      {/* Full Address Input (Shopee-style) */}
-      <div>
-        <input
-          type="text"
-          value={destinationAddress}
-          onChange={(e) => onLocationChange(validLat, validLng, e.target.value)}
-          placeholder="e.g. Miag-ao Municipal Evacuation Center, Brgy. Kirayan, Miag-ao"
-          className="w-full rounded-lg border border-gray-300 px-3.5 py-2 text-xs font-medium text-gray-800 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
-        />
+      {/* Structured Address Entry (Panay Island Only) */}
+      <div className="space-y-2.5 bg-gray-50/80 p-3 rounded-xl border border-gray-200">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-gray-700">Detailed Address Breakdown</span>
+          <span className="text-[10px] font-semibold text-[#2500ba] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+            Panay Island Only (Region VI)
+          </span>
+        </div>
+
+        {/* Row 1: Building / Facility & Street */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">
+              Building / Facility Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={building}
+              onChange={(e) => {
+                setBuilding(e.target.value);
+                updateAddressFields(e.target.value, street, barangay, district, selectedMunicipality, selectedProvince);
+              }}
+              placeholder="e.g. Municipal Evacuation Center / Gym"
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">
+              Street / Road Name
+            </label>
+            <input
+              type="text"
+              value={street}
+              onChange={(e) => {
+                setStreet(e.target.value);
+                updateAddressFields(building, e.target.value, barangay, district, selectedMunicipality, selectedProvince);
+              }}
+              placeholder="e.g. Rizal Street, National Highway"
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+            />
+          </div>
+        </div>
+
+        {/* Row 2: Barangay & District */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">
+              Barangay <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={barangay}
+              onChange={(e) => {
+                setBarangay(e.target.value);
+                updateAddressFields(building, street, e.target.value, district, selectedMunicipality, selectedProvince);
+              }}
+              placeholder="e.g. Brgy. Kirayan Sur"
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">
+              District (if applicable, else NA)
+            </label>
+            <input
+              type="text"
+              value={district}
+              onChange={(e) => {
+                setDistrict(e.target.value);
+                updateAddressFields(building, street, barangay, e.target.value, selectedMunicipality, selectedProvince);
+              }}
+              placeholder="NA"
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+            />
+          </div>
+        </div>
+
+        {/* Row 3: Province & Municipality Dropdowns */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">
+              Province <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={selectedProvince}
+              onChange={(e) => handleProvinceSelect(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+            >
+              {PANAY_PROVINCES.map((prov) => (
+                <option key={prov} value={prov}>
+                  {prov}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">
+              Municipality / City <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={selectedMunicipality}
+              onChange={(e) => handleMunicipalitySelect(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+            >
+              {(PANAY_MUNICIPALITIES_BY_PROVINCE[selectedProvince] || []).map((mun) => (
+                <option key={mun} value={mun}>
+                  {mun}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Compiled Address Summary */}
+        <div className="pt-1">
+          <label className="block text-[10.5px] font-semibold text-gray-500 mb-0.5">
+            Compiled Full Destination Address:
+          </label>
+          <div className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 truncate select-all">
+            {destinationAddress || 'Building, Barangay, Municipality, Province'}
+          </div>
+        </div>
       </div>
 
       {/* Mini-Map Search Bar */}
@@ -202,25 +437,25 @@ export function LocationPickerMap({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search landmark, street, gym, or building..."
-              className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-blue-500 focus:outline-none"
+              placeholder="Search Panay landmark, gym, or school..."
+              className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
             />
           </div>
           <button
             type="button"
             onClick={() => handleSearch()}
             disabled={isSearching}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-1"
+            className="rounded-lg bg-[#2500ba] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
           >
             {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Search'}
           </button>
           <button
             type="button"
             onClick={resetToMunicipalityCenter}
-            title="Snap to Municipal Hall"
-            className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1"
+            title="Snap to Municipal Center"
+            className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1 cursor-pointer"
           >
-            <Crosshair className="h-3.5 w-3.5 text-red-600" />
+            <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
             <span className="hidden sm:inline">Center</span>
           </button>
         </form>
@@ -235,7 +470,7 @@ export function LocationPickerMap({
                 onClick={() => selectSearchResult(result)}
                 className="w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition flex items-center gap-2"
               >
-                <MapPin className="h-3 w-3 text-red-500 flex-shrink-0" />
+                <MapPin className="h-3 w-3 text-[#2500ba] flex-shrink-0" />
                 <span className="truncate">{result.label}</span>
               </button>
             ))}
@@ -271,7 +506,7 @@ export function LocationPickerMap({
 
         <div className="absolute bottom-2 left-2 z-[999] rounded bg-white/90 px-2 py-1 text-[10px] font-semibold text-gray-600 shadow backdrop-blur-sm flex items-center gap-1">
           <Info size={12} className="text-[#2500ba] flex-shrink-0" />
-          <span>Drag pin or click map to set exact drop-off point</span>
+          <span>Drag pin or click map to pinpoint exact delivery facility</span>
         </div>
       </div>
     </div>

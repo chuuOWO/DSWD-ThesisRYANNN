@@ -7,6 +7,11 @@ export interface UserProfile {
   id: string;
   email: string;
   fullName: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  phoneNumber?: string | null;
+  jobPosition?: string | null;
+  workIdUrl?: string | null;
   role: UserRole;
   truckId?: string | null;
   lguName?: string | null;
@@ -19,7 +24,12 @@ export interface UserProfile {
 export interface SignUpPayload {
   email: string;
   password: string;
-  fullName: string;
+  fullName?: string;
+  firstName: string;
+  lastName: string;
+  phoneNumber?: string;
+  jobPosition?: string;
+  workIdUrl?: string;
   role: UserRole;
   truckId?: string;
   walletAddress?: string;
@@ -41,18 +51,29 @@ const normalizeStatus = (status: unknown): AccountStatus => {
   return 'verified'; // Existing profiles default to verified
 };
 
-const mapProfile = (row: Record<string, unknown>): UserProfile => ({
-  id: String(row.id),
-  email: String(row.email ?? ''),
-  fullName: String(row.full_name ?? ''),
-  role: normalizeRole(row.role),
-  truckId: row.truck_id ? String(row.truck_id) : null,
-  lguName: row.lgu_name ? String(row.lgu_name) : null,
-  walletAddress: row.wallet_address ? String(row.wallet_address) : null,
-  avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
-  createdAt: row.created_at ? String(row.created_at) : null,
-  status: normalizeStatus(row.status)
-});
+const mapProfile = (row: Record<string, unknown>): UserProfile => {
+  const fName = row.first_name ? String(row.first_name) : null;
+  const lName = row.last_name ? String(row.last_name) : null;
+  const computedFullName = (fName || lName) ? `${fName || ''} ${lName || ''}`.trim() : '';
+
+  return {
+    id: String(row.id),
+    email: String(row.email ?? ''),
+    fullName: String(row.full_name || computedFullName || ''),
+    firstName: fName,
+    lastName: lName,
+    phoneNumber: row.phone_number ? String(row.phone_number) : null,
+    jobPosition: row.job_position ? String(row.job_position) : null,
+    workIdUrl: row.work_id_url ? String(row.work_id_url) : null,
+    role: normalizeRole(row.role),
+    truckId: row.truck_id ? String(row.truck_id) : null,
+    lguName: row.lgu_name ? String(row.lgu_name) : null,
+    walletAddress: row.wallet_address ? String(row.wallet_address) : null,
+    avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
+    createdAt: row.created_at ? String(row.created_at) : null,
+    status: normalizeStatus(row.status)
+  };
+};
 
 export const authApi = {
   roleLabels,
@@ -82,16 +103,26 @@ export const authApi = {
     const { data: userData } = await supabase.auth.getUser();
     const user = userData?.user;
     if (user && user.id === userId) {
+      const fName = user.user_metadata?.first_name ? String(user.user_metadata.first_name) : null;
+      const lName = user.user_metadata?.last_name ? String(user.user_metadata.last_name) : null;
+      const computedName = (fName || lName) ? `${fName || ''} ${lName || ''}`.trim() : '';
+
       return {
         id: user.id,
         email: user.email ?? '',
-        fullName: user.user_metadata?.full_name || user.email?.split('@')[0] || 'DSWD Officer',
+        fullName: user.user_metadata?.full_name || computedName || user.email?.split('@')[0] || 'DSWD Officer',
+        firstName: fName,
+        lastName: lName,
+        phoneNumber: user.user_metadata?.phone_number || null,
+        jobPosition: user.user_metadata?.job_position || null,
+        workIdUrl: user.user_metadata?.work_id_url || null,
         role: normalizeRole(user.user_metadata?.role),
         truckId: user.user_metadata?.truck_id || null,
         lguName: null,
         walletAddress: user.user_metadata?.wallet_address || null,
         avatarUrl: user.user_metadata?.avatar_url || null,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        status: normalizeStatus(user.user_metadata?.status)
       };
     }
 
@@ -135,6 +166,7 @@ export const authApi = {
 
   async signUp(payload: SignUpPayload) {
     const normalizedEmail = payload.email.trim().toLowerCase();
+    const computedFullName = payload.fullName || `${payload.firstName || ''} ${payload.lastName || ''}`.trim() || 'DSWD Officer';
 
     // 1. Prevent duplicate accounts with the same email
     const { data: existingEmail } = await supabase
@@ -167,7 +199,12 @@ export const authApi = {
       password: payload.password,
       options: {
         data: {
-          full_name: payload.fullName,
+          full_name: computedFullName,
+          first_name: payload.firstName,
+          last_name: payload.lastName,
+          phone_number: payload.phoneNumber || null,
+          job_position: payload.jobPosition || null,
+          work_id_url: payload.workIdUrl || null,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
           wallet_address: payload.walletAddress || null,
@@ -184,7 +221,12 @@ export const authApi = {
         await supabase.from('profiles').upsert({
           id: data.user.id,
           email: normalizedEmail,
-          full_name: payload.fullName,
+          full_name: computedFullName,
+          first_name: payload.firstName,
+          last_name: payload.lastName,
+          phone_number: payload.phoneNumber || null,
+          job_position: payload.jobPosition || null,
+          work_id_url: payload.workIdUrl || null,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
           wallet_address: payload.walletAddress || null,
@@ -264,11 +306,22 @@ export const authApi = {
     return { ok: true };
   },
 
-  async updateProfile(userId: string, updates: { fullName?: string; avatarUrl?: string | null }) {
+  async updateProfile(userId: string, updates: {
+    fullName?: string;
+    firstName?: string;
+    lastName?: string;
+    phoneNumber?: string;
+    jobPosition?: string;
+    avatarUrl?: string | null;
+  }) {
     // 1. Update Supabase Auth user metadata
     try {
       const metaUpdates: Record<string, unknown> = {};
       if (updates.fullName !== undefined) metaUpdates.full_name = updates.fullName;
+      if (updates.firstName !== undefined) metaUpdates.first_name = updates.firstName;
+      if (updates.lastName !== undefined) metaUpdates.last_name = updates.lastName;
+      if (updates.phoneNumber !== undefined) metaUpdates.phone_number = updates.phoneNumber;
+      if (updates.jobPosition !== undefined) metaUpdates.job_position = updates.jobPosition;
       if (updates.avatarUrl !== undefined) metaUpdates.avatar_url = updates.avatarUrl;
       if (Object.keys(metaUpdates).length > 0) {
         await supabase.auth.updateUser({ data: metaUpdates });
@@ -281,6 +334,10 @@ export const authApi = {
     try {
       const profileUpdates: Record<string, unknown> = {};
       if (updates.fullName !== undefined) profileUpdates.full_name = updates.fullName;
+      if (updates.firstName !== undefined) profileUpdates.first_name = updates.firstName;
+      if (updates.lastName !== undefined) profileUpdates.last_name = updates.lastName;
+      if (updates.phoneNumber !== undefined) profileUpdates.phone_number = updates.phoneNumber;
+      if (updates.jobPosition !== undefined) profileUpdates.job_position = updates.jobPosition;
       if (updates.avatarUrl !== undefined) profileUpdates.avatar_url = updates.avatarUrl;
       if (Object.keys(profileUpdates).length > 0) {
         await supabase.from('profiles').update(profileUpdates).eq('id', userId);

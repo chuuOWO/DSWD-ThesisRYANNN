@@ -1,10 +1,16 @@
 import { FormEvent, useState } from 'react';
 import {
   ArrowLeft,
+  Briefcase,
+  CheckCircle2,
   Clock,
   Eye,
   EyeOff,
+  FileText,
   Mail,
+  Phone,
+  ShieldCheck,
+  Upload,
   Wallet,
   X
 } from 'lucide-react';
@@ -46,11 +52,56 @@ export function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [jobPosition, setJobPosition] = useState('');
+  const [workIdUrl, setWorkIdUrl] = useState<string | null>(null);
+  const [workIdFileName, setWorkIdFileName] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState('');
   const [truckId] = useState(generateTruckId);
   const [submittedEmail, setSubmittedEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  // Work ID Image Upload Handler (reads, resizes, and base64 encodes)
+  const handleWorkIdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('Please upload a valid image file (PNG, JPG, or JPEG) for your Work ID.');
+      return;
+    }
+    setWorkIdFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 800;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          setWorkIdUrl(dataUrl);
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Transition state for mobile screen glide
   const [isMobileTransitioning, setIsMobileTransitioning] = useState(false);
@@ -103,15 +154,38 @@ export function AuthPage() {
     event.preventDefault();
     setErrorMessage(null);
 
+    if (!firstName.trim() || !lastName.trim()) {
+      setErrorMessage('Please enter both your First Name and Last Name.');
+      return;
+    }
+    if (!jobPosition.trim()) {
+      setErrorMessage('Please enter your Job Position / Designation.');
+      return;
+    }
+    if (!phoneNumber.trim()) {
+      setErrorMessage('Please enter your contact phone number.');
+      return;
+    }
+    if (!workIdUrl) {
+      setErrorMessage('Please upload a photo of your official DSWD Work ID or Government ID.');
+      return;
+    }
+
     setLoadingTitle('Creating Account');
     setLoadingSubtitle('Recording your details for verification...');
     setIsLoadingModalOpen(true);
 
     try {
+      const computedFullName = `${firstName.trim()} ${lastName.trim()}`;
       await authApi.signUp({
         email: email.trim(),
         password,
-        fullName: fullName.trim(),
+        fullName: computedFullName,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phoneNumber: phoneNumber.trim(),
+        jobPosition: jobPosition.trim(),
+        workIdUrl: workIdUrl || undefined,
         role,
         truckId: role === 'receiver' ? truckId.trim() : undefined,
         walletAddress: walletAddress.trim() || undefined
@@ -292,50 +366,153 @@ export function AuthPage() {
                     </div>
                   </div>
 
-                  {/* Full Name */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={fullName}
-                      onChange={(e) => setFullName(sanitizeTextOnly(e.target.value))}
-                      placeholder="Enter full name"
-                      className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
-                    />
+                  {/* Names (2 Columns) */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        First Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={firstName}
+                        onChange={(e) => setFirstName(sanitizeTextOnly(e.target.value))}
+                        placeholder="e.g. Maria"
+                        className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Last Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={lastName}
+                        onChange={(e) => setLastName(sanitizeTextOnly(e.target.value))}
+                        placeholder="e.g. Santos"
+                        className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Job Position & Contact Phone Number (2 Columns) */}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Job Position <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={jobPosition}
+                        onChange={(e) => setJobPosition(sanitizeTextOnly(e.target.value))}
+                        placeholder="e.g. Relief Driver / Officer"
+                        className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Contact Phone <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        placeholder="e.g. 09171234567"
+                        className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                      />
+                    </div>
                   </div>
 
                   {/* Username / Email */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Username / Email
+                      Email Address <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="email"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="Enter email address"
-                      className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                      placeholder="Enter official email address"
+                      className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                     />
                   </div>
 
                   {/* Password */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Password
+                      Password <span className="text-red-500">*</span>
                     </label>
-                    <input
-                      type="password"
-                      required
-                      minLength={6}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Minimum 6 characters"
-                      className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Minimum 6 characters"
+                        className="w-full px-3.5 py-2.5 pr-9 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Work ID Photo Upload */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Official Work ID / Driver&apos;s License <span className="text-red-500">*</span>
+                    </label>
+                    {workIdUrl ? (
+                      <div className="flex items-center gap-3 p-2 rounded-2xl border border-emerald-300 bg-emerald-50/70">
+                        <img
+                          src={workIdUrl}
+                          alt="Work ID Preview"
+                          className="w-12 h-12 object-cover rounded-xl border border-emerald-200"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-bold text-emerald-900 truncate">
+                            {workIdFileName || 'Work ID Photo Attached'}
+                          </p>
+                          <p className="text-[10px] text-emerald-700 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Ready for verification review
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWorkIdUrl(null);
+                            setWorkIdFileName(null);
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-600 transition cursor-pointer"
+                          title="Remove photo"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-indigo-200 hover:border-[#10069f] bg-slate-50/60 hover:bg-indigo-50/30 transition cursor-pointer text-xs text-[#10069f] font-semibold">
+                        <Upload className="w-4 h-4 text-[#10069f]" />
+                        <span>Upload Work ID / Driver&apos;s License</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleWorkIdFileChange}
+                          className="hidden"
+                          required
+                        />
+                      </label>
+                    )}
                   </div>
 
                   {/* Optional MetaMask Link */}
@@ -765,25 +942,70 @@ export function AuthPage() {
                   </div>
                 </div>
 
-                {/* Full Name */}
+                {/* First and Last Name */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      First Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={firstName}
+                      onChange={(e) => setFirstName(sanitizeTextOnly(e.target.value))}
+                      placeholder="e.g. Maria"
+                      className="w-full px-3 py-2 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Last Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={lastName}
+                      onChange={(e) => setLastName(sanitizeTextOnly(e.target.value))}
+                      placeholder="e.g. Santos"
+                      className="w-full px-3 py-2 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Job Position */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Full Name
+                    Job Position / Title <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
-                    value={fullName}
-                    onChange={(e) => setFullName(sanitizeTextOnly(e.target.value))}
-                    placeholder="Enter your name"
-                    className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                    value={jobPosition}
+                    onChange={(e) => setJobPosition(sanitizeTextOnly(e.target.value))}
+                    placeholder="e.g. Relief Truck Driver / Dispatcher"
+                    className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                   />
                 </div>
 
-                {/* User / Email */}
+                {/* Phone Number */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    User
+                    Contact Phone Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="e.g. 09171234567"
+                    className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Email Address <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="email"
@@ -791,24 +1013,81 @@ export function AuthPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="Enter email address"
-                    className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                    className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                   />
                 </div>
 
                 {/* Password */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Password
+                    Password <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimum 6 characters"
-                    className="w-full px-4 py-2.5 rounded-2xl border border-indigo-200/90 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full px-3.5 py-2.5 pr-9 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Work ID Photo Upload */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Official Work ID Photo <span className="text-red-500">*</span>
+                  </label>
+                  {workIdUrl ? (
+                    <div className="flex items-center gap-3 p-2 rounded-2xl border border-emerald-300 bg-emerald-50/70">
+                      <img
+                        src={workIdUrl}
+                        alt="Work ID Preview"
+                        className="w-12 h-12 object-cover rounded-xl border border-emerald-200"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-bold text-emerald-900 truncate">
+                          {workIdFileName || 'Work ID Photo Attached'}
+                        </p>
+                        <p className="text-[10px] text-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                          Attached
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWorkIdUrl(null);
+                          setWorkIdFileName(null);
+                        }}
+                        className="p-1 text-slate-400 hover:text-red-600 transition cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-indigo-200 hover:border-[#10069f] bg-slate-50/60 hover:bg-indigo-50/30 transition cursor-pointer text-xs text-[#10069f] font-semibold">
+                      <Upload className="w-4 h-4 text-[#10069f]" />
+                      <span>Upload Work ID Photo</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleWorkIdFileChange}
+                        className="hidden"
+                        required
+                      />
+                    </label>
+                  )}
                 </div>
 
                 {/* Optional MetaMask Link */}

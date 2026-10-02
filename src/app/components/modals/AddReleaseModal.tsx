@@ -40,15 +40,13 @@ const FNFI_CATEGORIES = [
   'RTEF'
 ];
 
-const PROVINCES = ['Iloilo', 'Antique', 'Capiz', 'Aklan', 'Guimaras', 'Negros Occidental'];
+const PROVINCES = ['Iloilo', 'Aklan', 'Antique', 'Capiz'];
 
 const MUNICIPALITIES: { [key: string]: string[] } = {
-  'Iloilo': ['Leon', 'Miag-ao', 'Banate', 'Guinhol', 'Iloilo City', 'Oton', 'Tigbauan', 'Pavia'],
-  'Antique': ['San Jose', 'Sibalom', 'Culasi', 'Bugasong'],
-  'Capiz': ['Roxas City', 'Pilar', 'Pontevedra', 'Panay'],
-  'Aklan': ['Kalibo', 'Ibajay', 'Makato', 'Altavas'],
-  'Guimaras': ['Jordan', 'Nueva Valencia', 'Buenavista'],
-  'Negros Occidental': ['Bacolod City', 'Silay', 'Talisay', 'Victorias']
+  'Iloilo': ['Iloilo City', 'Oton', 'Pototan', 'Passi City', 'Leon', 'Miag-ao', 'Banate', 'Pavia', 'Santa Barbara', 'Dumangas'],
+  'Aklan': ['Kalibo', 'Malay', 'Ibajay', 'Makato', 'Altavas', 'Numancia', 'Banga', 'New Washington'],
+  'Antique': ['San Jose', 'Sibalom', 'Culasi', 'Bugasong', 'Hamtic', 'Tibiao', 'Patnongon'],
+  'Capiz': ['Roxas City', 'Pilar', 'Pontevedra', 'Panay', 'Sigma', 'Dumalag', 'Mambusao']
 };
 
 const WAREHOUSE_OPTIONS = [
@@ -56,7 +54,7 @@ const WAREHOUSE_OPTIONS = [
   'Pototan Main Warehouse'
 ];
 
-const DELIVERY_MODES = ['Truck', 'Van', 'Pick-up', 'Boat', 'Helicopter', 'Air Cargo', 'Direct Delivery'];
+const DELIVERY_MODES = ['Truck'];
 
 const DELIVERY_STATUSES: OutgoingStatus[] = [
   'Draft',
@@ -135,14 +133,19 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     }
   }, [initialData]);
 
-  const handleLocationChange = (lat: number, lng: number, address?: string) => {
+  const handleLocationChange = (lat: number, lng: number, address?: string, details?: any) => {
     setPinLat(lat);
     setPinLng(lng);
     setFormData(prev => ({
       ...prev,
       receiverGps: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-      destinationAddress: address ?? prev.destinationAddress
+      destinationAddress: address ?? prev.destinationAddress,
+      province: details?.province || prev.province || 'Iloilo',
+      municipality: details?.municipality || prev.municipality || '',
+      lguName: details?.building ? `${details.building} (${details.municipality || prev.municipality})` : prev.lguName
     }));
+    if (details?.province) setSelectedProvince(details.province);
+    if (details?.municipality) setSelectedMunicipality(details.municipality);
   };
 
   // Get available stock for selected category and warehouse
@@ -313,46 +316,6 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                   </span>
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Province & Municipality */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Province <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.province}
-                onChange={(e) => handleChange('province', e.target.value)}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.province ? 'border-red-500' : 'border-gray-300'
-                }`}
-              >
-                <option value="">Select province...</option>
-                {PROVINCES.map(prov => (
-                  <option key={prov} value={prov}>{prov}</option>
-                ))}
-              </select>
-              {errors.province && (
-                <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  {errors.province}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Municipality
-              </label>
-              <input
-                type="text"
-                value={formData.municipality}
-                onChange={(e) => handleChange('municipality', sanitizeTextOnly(e.target.value))}
-                placeholder="e.g., Leon, Miag-ao (Optional)"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
             </div>
           </div>
 
@@ -636,41 +599,21 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
               )}
             </div>
 
-            {formData.deliveryMode !== 'Pick-up' && (
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">
-                  Delivery Mode <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={formData.deliveryMode}
-                  onChange={(e) => handleChange('deliveryMode', e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {DELIVERY_MODES.map(mode => (
-                    <option key={mode} value={mode}>{mode}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          {/* Delivery Mode (when Pick-up is selected) */}
-          {formData.deliveryMode === 'Pick-up' && (
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-2">
-                Delivery Mode <span className="text-red-500">*</span>
+                Transportation Method
               </label>
-              <select
-                value={formData.deliveryMode}
-                onChange={(e) => handleChange('deliveryMode', e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {DELIVERY_MODES.map(mode => (
-                  <option key={mode} value={mode}>{mode}</option>
-                ))}
-              </select>
+              <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TruckIcon className="w-4 h-4 text-[#2500ba]" />
+                  <span>DSWD Relief Truck Driver</span>
+                </div>
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-100 text-[#2500ba]">
+                  Truck Only
+                </span>
+              </div>
             </div>
-          )}
+          </div>
 
           {/* Incident Code */}
           <div>

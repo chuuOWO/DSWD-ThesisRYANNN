@@ -38,6 +38,10 @@ export function ProfileSettingsModal({
 }: ProfileSettingsModalProps) {
   const { refreshProfile } = useAuth();
 
+  const [firstName, setFirstName] = useState(profile.firstName || profile.fullName?.split(' ')[0] || '');
+  const [lastName, setLastName] = useState(profile.lastName || profile.fullName?.split(' ').slice(1).join(' ') || '');
+  const [jobPosition, setJobPosition] = useState(profile.jobPosition || '');
+  const [phoneNumber, setPhoneNumber] = useState(profile.phoneNumber || '');
   const [fullName, setFullName] = useState(profile.fullName || '');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatarUrl || null);
   const [isPhotoMenuOpen, setIsPhotoMenuOpen] = useState(false);
@@ -59,9 +63,9 @@ export function ProfileSettingsModal({
       }
       await authApi.updateWalletAddress(profile.id, walletAddress);
       await refreshProfile();
-      setFeedbackMessage({ type: 'success', text: `Wallet permanently linked: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
+      setFeedbackMessage({ type: 'success', text: `MetaMask wallet updated: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
     } catch (err) {
-      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to link wallet.' });
+      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update wallet.' });
     } finally {
       setIsLinkingWallet(false);
     }
@@ -74,6 +78,10 @@ export function ProfileSettingsModal({
   // Sync with profile prop when modal opens
   useEffect(() => {
     if (isOpen) {
+      setFirstName(profile.firstName || profile.fullName?.split(' ')[0] || '');
+      setLastName(profile.lastName || profile.fullName?.split(' ').slice(1).join(' ') || '');
+      setJobPosition(profile.jobPosition || '');
+      setPhoneNumber(profile.phoneNumber || '');
       setFullName(profile.fullName || '');
       setAvatarUrl(profile.avatarUrl || null);
       setIsPhotoMenuOpen(false);
@@ -201,8 +209,9 @@ export function ProfileSettingsModal({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim()) {
-      setFeedbackMessage({ type: 'error', text: 'Full name cannot be empty.' });
+    const compiledFullName = `${firstName.trim()} ${lastName.trim()}`.trim() || fullName.trim();
+    if (!compiledFullName) {
+      setFeedbackMessage({ type: 'error', text: 'Name cannot be empty.' });
       return;
     }
 
@@ -211,7 +220,11 @@ export function ProfileSettingsModal({
 
     try {
       await authApi.updateProfile(profile.id, {
-        fullName: fullName.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        fullName: compiledFullName,
+        jobPosition: jobPosition.trim(),
+        phoneNumber: phoneNumber.trim(),
         avatarUrl
       });
 
@@ -448,18 +461,61 @@ export function ProfileSettingsModal({
             </div>
           )}
 
-          {/* Full Name Field */}
+          {/* First & Last Name Fields */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                First Name
+              </label>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(sanitizeTextOnly(e.target.value))}
+                placeholder="e.g. Maria"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Last Name
+              </label>
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(sanitizeTextOnly(e.target.value))}
+                placeholder="e.g. Santos"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Job Position Field */}
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1">
-              Full Name
+              Job Position / Designation
             </label>
             <input
               type="text"
-              value={fullName}
-              onChange={(e) => setFullName(sanitizeTextOnly(e.target.value))}
-              placeholder="e.g. Maria Santos"
+              value={jobPosition}
+              onChange={(e) => setJobPosition(sanitizeTextOnly(e.target.value))}
+              placeholder="e.g. Logistics Officer / Relief Coordinator"
               className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-              required
+            />
+          </div>
+
+          {/* Phone Number Field */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1">
+              Contact Phone Number
+            </label>
+            <input
+              type="tel"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              placeholder="e.g. 09171234567"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
             />
           </div>
 
@@ -482,21 +538,33 @@ export function ProfileSettingsModal({
               <label className="block text-xs font-bold text-gray-700">
                 Linked MetaMask Wallet
               </label>
-              {profile.walletAddress && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  <Lock size={10} className="text-emerald-600" />
-                  Permanently Bound
+              {profile.walletAddress ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                  <ShieldCheck size={10} className="text-blue-600" />
+                  Connected Wallet
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                  <AlertTriangle size={10} className="text-amber-600" />
+                  Not Linked
                 </span>
               )}
             </div>
             {profile.walletAddress ? (
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
-                  <Lock size={14} className="text-gray-400 flex-shrink-0" />
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
                   <span className="flex-1 font-semibold">{profile.walletAddress}</span>
+                  <button
+                    type="button"
+                    onClick={handleLinkWallet}
+                    disabled={isLinkingWallet}
+                    className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-[#2500ba] text-white text-xs font-semibold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {isLinkingWallet ? 'Connecting...' : 'Change Wallet'}
+                  </button>
                 </div>
                 <p className="text-[10.5px] text-gray-500 leading-tight">
-                  For blockchain accountability and audit integrity, linked wallets cannot be modified or unlinked after registration.
+                  You can connect a new MetaMask account if your wallet changed or access was lost.
                 </p>
               </div>
             ) : (
@@ -510,7 +578,7 @@ export function ProfileSettingsModal({
                   {isLinkingWallet ? 'Connecting MetaMask...' : 'Link MetaMask Wallet'}
                 </button>
                 <p className="text-[10.5px] text-gray-500 leading-tight">
-                  Once linked, this wallet will be permanently bound to your account for signing delivery and receipt proofs.
+                  Connect your MetaMask wallet for signing dispatch orders, delivery manifests, and blockchain audits.
                 </p>
               </div>
             )}
