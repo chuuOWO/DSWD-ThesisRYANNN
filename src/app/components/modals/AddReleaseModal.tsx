@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
+import type { LguRecord } from '../../services/backendApi';
+import { PANAY_LGUS } from '../../data/panayLguDirectory';
 import { LocationPickerMap } from '../design/LocationPickerMap';
 import { sanitizeNumbersOnly, sanitizeTextOnly } from '../../lib/inputValidation';
 
 export interface ReleaseForm {
   dateAllocated: string;
+  lguId?: string;
   lguName: string;
   province: string;
   municipality: string;
@@ -28,6 +31,7 @@ interface AddReleaseModalProps {
   availableStock: { category: string; warehouseA: number; warehouseB: number }[];
   initialData?: ReleaseForm;
   mode?: 'add' | 'edit';
+  lgusList?: LguRecord[];
 }
 
 const FNFI_CATEGORIES = [
@@ -39,15 +43,6 @@ const FNFI_CATEGORIES = [
   'Laminated Sack',
   'RTEF'
 ];
-
-const PROVINCES = ['Iloilo', 'Aklan', 'Antique', 'Capiz'];
-
-const MUNICIPALITIES: { [key: string]: string[] } = {
-  'Iloilo': ['Iloilo City', 'Oton', 'Pototan', 'Passi City', 'Leon', 'Miag-ao', 'Banate', 'Pavia', 'Santa Barbara', 'Dumangas'],
-  'Aklan': ['Kalibo', 'Malay', 'Ibajay', 'Makato', 'Altavas', 'Numancia', 'Banga', 'New Washington'],
-  'Antique': ['San Jose', 'Sibalom', 'Culasi', 'Bugasong', 'Hamtic', 'Tibiao', 'Patnongon'],
-  'Capiz': ['Roxas City', 'Pilar', 'Pontevedra', 'Panay', 'Sigma', 'Dumalag', 'Mambusao']
-};
 
 const WAREHOUSE_OPTIONS = [
   'Oton Main Warehouse',
@@ -88,9 +83,45 @@ const defaultFormData: ReleaseForm = {
     directSource: undefined
 };
 
-export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData, mode = 'add' }: AddReleaseModalProps) {
+export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData, mode = 'add', lgusList }: AddReleaseModalProps) {
   const [formData, setFormData] = useState<ReleaseForm>(initialData ?? defaultFormData);
   const [directSource, setDirectSource] = useState<'LDRC' | 'VDRC'>('VDRC');
+
+  // Dynamically compute provinces and municipalities from lgusList (master Supabase table) or PANAY_LGUS directory
+  const availableLgus = useMemo(() => {
+    if (lgusList && lgusList.length > 0) {
+      return lgusList;
+    }
+    return PANAY_LGUS.map(l => ({
+      id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
+      municipality: l.municipality,
+      province: l.province,
+      lguName: l.defaultFacility,
+      latitude: l.lat,
+      longitude: l.lng,
+      isActive: true
+    })) as LguRecord[];
+  }, [lgusList]);
+
+  const provinces = useMemo(() => {
+    const set = new Set<string>();
+    availableLgus.forEach(l => {
+      if (l.province) set.add(l.province);
+    });
+    return Array.from(set).sort();
+  }, [availableLgus]);
+
+  const municipalitiesByProvince = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    availableLgus.forEach(l => {
+      if (!map[l.province]) map[l.province] = [];
+      if (!map[l.province].includes(l.municipality)) {
+        map[l.province].push(l.municipality);
+      }
+    });
+    Object.keys(map).forEach(p => map[p].sort());
+    return map;
+  }, [availableLgus]);
 
   useEffect(() => {
     if (formData.deliveryMode === 'Direct Delivery') {
@@ -99,7 +130,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     }
   }, [formData.deliveryMode]);
 
-  const [selectedProvince, setSelectedProvince] = useState('Iloilo');
+  const [selectedProvince, setSelectedProvince] = useState(provinces[0] || 'Iloilo');
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
   const [errors, setErrors] = useState<Partial<Record<keyof ReleaseForm, string>>>({});
 
@@ -122,7 +153,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
   useEffect(() => {
     if (!initialData) return;
     setFormData(initialData);
-    setSelectedProvince(initialData.province || 'Iloilo');
+    setSelectedProvince(initialData.province || provinces[0] || 'Iloilo');
     setSelectedMunicipality(initialData.municipality || '');
     if (initialData.receiverGps) {
       const parts = initialData.receiverGps.split(',').map(s => parseFloat(s.trim()));
@@ -131,21 +162,49 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
         setPinLng(parts[1]);
       }
     }
-  }, [initialData]);
+  }, [initialData, provinces]);
+
+  const handleSelectPredefinedLgu = (lguId: string) => {
+    const found = availableLgus.find(l => l.id === lguId);
+    if (!found) return;
+
+    setFormData(prev => ({
+      ...prev,
+      lguId: found.id,
+      lguName: found.lguName || `${found.municipality} Municipal Office`,
+      municipality: found.municipality,
+      province: found.province,
+      receiverGps: `${found.latitude.toFixed(5)}, ${found.longitude.toFixed(5)}`,
+      destinationAddress: `${found.lguName || found.municipality}, ${found.municipality}, ${found.province}`
+    }));
+    setSelectedProvince(found.province);
+    setSelectedMunicipality(found.municipality);
+    setPinLat(found.latitude);
+    setPinLng(found.longitude);
+  };
 
   const handleLocationChange = (lat: number, lng: number, address?: string, details?: any) => {
     setPinLat(lat);
     setPinLng(lng);
+    const resolvedProv = details?.province || formData.province || selectedProvince || 'Iloilo';
+    const resolvedMuni = details?.municipality || formData.municipality || selectedMunicipality || '';
+
+    const matchedLgu = availableLgus.find(l =>
+      l.municipality.toLowerCase() === resolvedMuni.toLowerCase() &&
+      l.province.toLowerCase() === resolvedProv.toLowerCase()
+    );
+
     setFormData(prev => ({
       ...prev,
+      lguId: matchedLgu ? matchedLgu.id : prev.lguId,
       receiverGps: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
       destinationAddress: address ?? prev.destinationAddress,
-      province: details?.province || prev.province || 'Iloilo',
-      municipality: details?.municipality || prev.municipality || '',
-      lguName: details?.building ? `${details.building} (${details.municipality || prev.municipality})` : prev.lguName
+      province: resolvedProv,
+      municipality: resolvedMuni,
+      lguName: details?.building ? `${details.building} (${resolvedMuni})` : (matchedLgu?.lguName || prev.lguName)
     }));
-    if (details?.province) setSelectedProvince(details.province);
-    if (details?.municipality) setSelectedMunicipality(details.municipality);
+    if (resolvedProv) setSelectedProvince(resolvedProv);
+    if (resolvedMuni) setSelectedMunicipality(resolvedMuni);
   };
 
   // Get available stock for selected category and warehouse
@@ -317,6 +376,25 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Quick Select Destination LGU */}
+          <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-3">
+            <label className="block text-xs font-bold text-blue-900 mb-1">
+              Quick Select Registered LGU (Auto-fills Destination, Facility, and GPS Pin)
+            </label>
+            <select
+              value={formData.lguId || ''}
+              onChange={(e) => handleSelectPredefinedLgu(e.target.value)}
+              className="w-full px-3 py-2 text-xs border border-blue-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select an LGU to populate location details...</option>
+              {availableLgus.map((lgu) => (
+                <option key={lgu.id} value={lgu.id}>
+                  {lgu.municipality} ({lgu.province}) &mdash; {lgu.lguName || 'Municipal Office'}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Shopee-style Destination Delivery Pin & Address Picker */}
@@ -512,7 +590,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                     }}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {PROVINCES.map(prov => (
+                    {provinces.map(prov => (
                       <option key={prov} value={prov}>{prov}</option>
                     ))}
                   </select>
@@ -533,7 +611,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                     }`}
                   >
                     <option value="">Select municipality...</option>
-                    {MUNICIPALITIES[selectedProvince]?.map(mun => (
+                    {(municipalitiesByProvince[selectedProvince] || []).map(mun => (
                       <option key={mun} value={mun}>{mun}</option>
                     ))}
                   </select>

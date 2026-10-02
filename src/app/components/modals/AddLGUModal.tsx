@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { X, MapPin, AlertCircle } from 'lucide-react';
 import { sanitizeTextOnly, sanitizeNumbersOnly, sanitizePhone } from '../../lib/inputValidation';
 
-interface LGUForm {
+export interface LGUForm {
   lguName: string;
   municipality: string;
   province: string;
+  latitude?: number;
+  longitude?: number;
   totalItemsReleased: number;
   deliveryCount: number;
   completedDeliveries: number;
@@ -27,17 +29,21 @@ interface LGUForm {
 
 interface AddLGUModalProps {
   onClose: () => void;
-  onSubmit: (data: LGUForm) => void;
+  onSubmit: (data: LGUForm) => void | Promise<void>;
 }
 
 const PROVINCES = ['Iloilo', 'Antique', 'Capiz', 'Aklan', 'Guimaras', 'Negros Occidental'];
 const FNFI_CATEGORIES = ['Hygiene Kit', 'Food Pack', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sack', 'RTEF'] as const;
 
 export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState<LGUForm>({
     lguName: '',
     municipality: '',
     province: '',
+    latitude: 10.7870,
+    longitude: 122.3892,
     totalItemsReleased: 0,
     deliveryCount: 0,
     completedDeliveries: 0,
@@ -123,11 +129,19 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (validate()) {
-      onSubmit(formData);
+      setIsSubmitting(true);
+      setSubmitError(null);
+      try {
+        await onSubmit(formData);
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : 'Failed to register LGU in database.');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -373,6 +387,36 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
             </div>
           </div>
 
+          {/* GPS Coordinates */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                Latitude (GPS)
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={formData.latitude ?? 10.7870}
+                onChange={(e) => handleChange('latitude', parseFloat(e.target.value) || 0)}
+                placeholder="10.7870"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                Longitude (GPS)
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={formData.longitude ?? 122.3892}
+                onChange={(e) => handleChange('longitude', parseFloat(e.target.value) || 0)}
+                placeholder="122.3892"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+          </div>
+
           {/* Remarks */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -387,20 +431,29 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
             />
           </div>
 
+          {submitError && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 pt-4 border-t border-gray-200">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+              disabled={isSubmitting}
+              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              disabled={isSubmitting}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm disabled:opacity-50"
             >
-              Add LGU
+              {isSubmitting ? 'Registering...' : 'Add LGU'}
             </button>
           </div>
         </form>

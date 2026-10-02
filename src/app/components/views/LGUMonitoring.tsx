@@ -1,11 +1,31 @@
 import { useMemo, useState } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit } from 'lucide-react';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock } from 'lucide-react';
 import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
 import { PANAY_LGUS } from '../../data/panayLguDirectory';
-import { AddLGUModal } from '../modals/AddLGUModal';
-import { EditLGUModal, type LGUDelivery } from '../modals/EditLGUModal';
 
-export type { LGUDelivery };
+export interface LGUDelivery {
+  id: string;
+  lguName: string;
+  municipality: string;
+  province: string;
+  totalItemsReleased: number;
+  deliveryCount: number;
+  completedDeliveries: number;
+  pendingDeliveries: number;
+  lastDeliveryDate: string;
+  contactPerson?: string;
+  contactNumber?: string;
+  remarks?: string;
+  currentStock?: {
+    'Hygiene Kit': number;
+    'Food Pack': number;
+    'Sleeping Kit': number;
+    'Kitchen Kit': number;
+    'Family Kit': number;
+    'Laminated Sack': number;
+    'RTEF': number;
+  };
+}
 
 interface RecentActivity {
   id: string;
@@ -50,10 +70,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
-  const [customLguList, setCustomLguList] = useState<LGUDelivery[]>([]);
 
   // Dynamically compute live LGU list from outgoing releases, reports, and Panay directory (Zero static mock data)
   const baseLguList = useMemo<LGUDelivery[]>(() => {
@@ -175,40 +191,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     return [...mainWarehouses, ...Array.from(lguEntriesMap.values())];
   }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.inventory]);
 
-  // Combine base dynamic list with any custom added LGUs
-  const displayLGUList = useMemo(() => {
-    const combined = [...customLguList, ...baseLguList];
-    const unique = new Map<string, LGUDelivery>();
-    combined.forEach((item) => {
-      if (!unique.has(item.municipality)) {
-        unique.set(item.municipality, item);
-      }
-    });
-    return Array.from(unique.values());
-  }, [customLguList, baseLguList]);
-
-  const handleAddLGU = (newLGU: Omit<LGUDelivery, 'id'>) => {
-    const newId = `LGU-${String(customLguList.length + 1).padStart(3, '0')}`;
-    const lguWithId: LGUDelivery = {
-      ...newLGU,
-      id: newId
-    };
-    setCustomLguList([...customLguList, lguWithId]);
-    setShowAddModal(false);
-  };
-
-  const handleEditLGU = (updatedLGU: LGUDelivery) => {
-    setCustomLguList((prev) =>
-      prev.map((lgu) => (lgu.id === updatedLGU.id ? updatedLGU : lgu))
-    );
-    setShowEditModal(false);
-    setSelectedLGU(null);
-  };
-
-  const openEditModal = (lgu: LGUDelivery) => {
-    setSelectedLGU(lgu);
-    setShowEditModal(true);
-  };
+  const displayLGUList = baseLguList;
 
   // Recent activity dynamically populated from live outgoing releases
   const recentActivity = useMemo<RecentActivity[]>(() => {
@@ -254,7 +237,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       .filter((lgu) => !lgu.lguName.includes('Main Warehouse'))
       .map((lgu) => {
         const foodStock = lgu.currentStock?.['Food Pack'] || 0;
-        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum: number, v: number) => sum + (v || 0), 0) : 0;
+        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + v, 0) : 0;
         const pending = lgu.pendingDeliveries;
         const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodStock / 10) + (pending * 5))));
         const priorityColor = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
@@ -289,13 +272,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-sm"
-        >
-          <Plus className="w-5 h-5" />
-          Add New LGU
-        </button>
       </div>
 
       {/* Summary Cards */}
@@ -460,7 +436,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
               <div className="flex justify-between items-center">
                 <span className="text-sm font-semibold text-gray-600">Current Stock</span>
                 <span className="text-sm font-bold text-purple-600">
-                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum: number, val: number) => sum + (val || 0), 0).toLocaleString() : 0} kits
+                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} kits
                 </span>
               </div>
 
@@ -570,27 +546,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           </table>
         </div>
       </div>
-
-      {/* Add LGU Modal */}
-      {showAddModal && (
-        <AddLGUModal
-          onClose={() => setShowAddModal(false)}
-          onSubmit={handleAddLGU}
-        />
-      )}
-
-      {/* Edit LGU Modal */}
-      {showEditModal && selectedLGU && (
-        <EditLGUModal
-          lgu={selectedLGU}
-          onClose={() => {
-            setShowEditModal(false);
-            setSelectedLGU(null);
-          }}
-          onSubmit={handleEditLGU}
-        />
-      )}
     </div>
   );
 }
-

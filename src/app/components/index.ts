@@ -33,4 +33,3 @@ export * from './modals/QrCodeGeneratorModal';
 export * from './modals/ProfileSettingsModal';
 export * from './modals/ConfirmLogoutModal';
 export * from './modals/MetaMaskMismatchModal';
-

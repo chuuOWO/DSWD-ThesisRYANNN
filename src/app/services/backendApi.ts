@@ -27,9 +27,46 @@ export interface IncomingUpdatePayload {
   walletAddress?: string;
 }
 
+export interface LguRecord {
+  id: string;
+  municipality: string;
+  province: string;
+  lguName: string;
+  contactPerson?: string;
+  contactNumber?: string;
+  latitude: number;
+  longitude: number;
+  remarks?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface LguInput {
+  municipality: string;
+  province: string;
+  lguName: string;
+  contactPerson?: string;
+  contactNumber?: string;
+  latitude?: number;
+  longitude?: number;
+  remarks?: string;
+  initialStock?: {
+    'Food Pack'?: number;
+    'Hygiene Kit'?: number;
+    'Family Kit'?: number;
+    'Sleeping Kit'?: number;
+    'Kitchen Kit'?: number;
+    'Laminated Sack'?: number;
+    'RTEF'?: number;
+  };
+}
+
 export interface OutgoingPayload {
   drNumber: string;
   dateAllocated: string;
+  lguId?: string;
+  lgu_id?: string;
   lguName: string;
   province: string;
   municipality: string;
@@ -97,6 +134,14 @@ export interface OutgoingUpdatePayload {
 
 export interface TruckLiveLocation {
   truck_id: string;
+  current_dr_number?: string | null;
+  destination_lgu_id?: string | null;
+  destination_name?: string | null;
+  driver_name?: string | null;
+  driver_phone?: string | null;
+  status?: 'In Transit' | 'Loading' | 'Delivered' | 'Idle' | string | null;
+  speed?: number | null;
+  heading?: number | null;
   latitude: number;
   longitude: number;
   gps_text: string;
@@ -139,11 +184,12 @@ const definedOnly = <T extends Record<string, unknown>>(values: T) =>
 
 export const backendApi = {
   async getDashboard() {
-    const [incomingResult, outgoingResult, lguReportsResult, discrepancyResult] = await Promise.all([
+    const [incomingResult, outgoingResult, lguReportsResult, discrepancyResult, lgusResult] = await Promise.all([
       supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
       supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }),
       supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }),
-      supabase.from('discrepancy_reports').select('*').order('reported_at', { ascending: false })
+      supabase.from('discrepancy_reports').select('*').order('reported_at', { ascending: false }),
+      supabase.from('lgus').select('*').eq('is_active', true).order('province', { ascending: true })
     ]);
 
     throwIfError(incomingResult.error, 'Failed to fetch incoming manifests');
@@ -157,12 +203,154 @@ export const backendApi = {
       console.warn('Discrepancy reports are not available yet. Run supabase-schema-patch.sql to create discrepancy_reports.', discrepancyResult.error);
     }
 
+    if (lgusResult.error) {
+      console.warn('Master LGUs table is not available yet. Run supabase-schema-patch.sql to create public.lgus.', lgusResult.error);
+    }
+
     return {
       incoming: incomingResult.data ?? [],
       outgoing: outgoingResult.data ?? [],
       lguReports: lguReportsResult.error ? [] : lguReportsResult.data ?? [],
-      discrepancyReports: discrepancyResult.error ? [] : discrepancyResult.data ?? []
+      discrepancyReports: discrepancyResult.error ? [] : discrepancyResult.data ?? [],
+      lgus: lgusResult.error ? [] : lgusResult.data ?? []
     };
+  },
+
+  async getLgus(): Promise<LguRecord[]> {
+    try {
+      const { data, error } = await supabase
+        .from('lgus')
+        .select('*')
+        .eq('is_active', true)
+        .order('province', { ascending: true })
+        .order('municipality', { ascending: true });
+
+      if (error || !data || data.length === 0) {
+        return PANAY_LGUS.map(l => ({
+          id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
+          municipality: l.municipality,
+          province: l.province,
+          lguName: l.defaultFacility,
+          contactPerson: '',
+          contactNumber: '',
+          latitude: l.lat,
+          longitude: l.lng,
+          remarks: '',
+          isActive: true
+        }));
+      }
+
+      return data.map((row: Record<string, any>) => ({
+        id: String(row.id),
+        municipality: String(row.municipality),
+        province: String(row.province),
+        lguName: String(row.lgu_name),
+        contactPerson: String(row.contact_person ?? ''),
+        contactNumber: String(row.contact_number ?? ''),
+        latitude: Number(row.latitude ?? 10.7870),
+        longitude: Number(row.longitude ?? 122.3892),
+        remarks: String(row.remarks ?? ''),
+        isActive: Boolean(row.is_active ?? true),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch {
+      return PANAY_LGUS.map(l => ({
+        id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
+        municipality: l.municipality,
+        province: l.province,
+        lguName: l.defaultFacility,
+        contactPerson: '',
+        contactNumber: '',
+        latitude: l.lat,
+        longitude: l.lng,
+        remarks: '',
+        isActive: true
+      }));
+    }
+  },
+
+  async createLgu(payload: LguInput): Promise<{ id: string }> {
+    const { data, error } = await supabase
+      .from('lgus')
+      .insert({
+        municipality: payload.municipality.trim(),
+        province: payload.province.trim(),
+        lgu_name: payload.lguName.trim(),
+        contact_person: payload.contactPerson?.trim() || '',
+        contact_number: payload.contactNumber?.trim() || '',
+        latitude: payload.latitude ?? 10.7870,
+        longitude: payload.longitude ?? 122.3892,
+        remarks: payload.remarks?.trim() || '',
+        is_active: true
+      })
+      .select('id')
+      .single();
+
+    throwIfError(error, 'Failed to create LGU in master directory');
+
+    if (payload.initialStock) {
+      try {
+        await supabase
+          .from('lgu_inventory_reports')
+          .insert({
+            lgu_id: data.id,
+            municipality: payload.municipality.trim(),
+            province: payload.province.trim(),
+            lgu_name: payload.lguName.trim(),
+            food_packs: payload.initialStock['Food Pack'] || 0,
+            hygiene_kits: payload.initialStock['Hygiene Kit'] || 0,
+            family_kits: payload.initialStock['Family Kit'] || 0,
+            reported_at: new Date().toISOString()
+          });
+      } catch (err) {
+        console.warn('Initial stock baseline creation warning:', err);
+      }
+    }
+
+    return data;
+  },
+
+  async updateLgu(id: string, payload: Partial<LguInput>): Promise<{ ok: boolean }> {
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString()
+    };
+    if (payload.lguName !== undefined) updates.lgu_name = payload.lguName.trim();
+    if (payload.province !== undefined) updates.province = payload.province.trim();
+    if (payload.municipality !== undefined) updates.municipality = payload.municipality.trim();
+    if (payload.contactPerson !== undefined) updates.contact_person = payload.contactPerson.trim();
+    if (payload.contactNumber !== undefined) updates.contact_number = payload.contactNumber.trim();
+    if (payload.latitude !== undefined) updates.latitude = payload.latitude;
+    if (payload.longitude !== undefined) updates.longitude = payload.longitude;
+    if (payload.remarks !== undefined) updates.remarks = payload.remarks.trim();
+
+    const { error } = await supabase
+      .from('lgus')
+      .update(updates)
+      .eq('id', id);
+
+    throwIfError(error, 'Failed to update LGU');
+
+    if (payload.initialStock && payload.municipality) {
+      try {
+        await supabase
+          .from('lgu_inventory_reports')
+          .insert({
+            lgu_id: id,
+            municipality: payload.municipality.trim(),
+            province: payload.province?.trim() || 'Iloilo',
+            lgu_name: payload.lguName?.trim() || `${payload.municipality.trim()} Municipal Office`,
+            food_packs: payload.initialStock['Food Pack'] || 0,
+            hygiene_kits: payload.initialStock['Hygiene Kit'] || 0,
+            family_kits: payload.initialStock['Family Kit'] || 0,
+            reported_at: new Date().toISOString()
+          });
+      } catch (err) {
+        console.warn('Updated stock baseline warning:', err);
+      }
+    }
+
+    return { ok: true };
   },
 
   async getLguPriorityReports(municipality?: string) {
@@ -249,6 +437,7 @@ export const backendApi = {
       .insert({
         dr_number: payload.drNumber,
         date_allocated: payload.dateAllocated,
+        lgu_id: payload.lguId ?? payload.lgu_id ?? null,
         lgu_name: payload.lguName,
         province: payload.province,
         municipality: payload.municipality,
@@ -524,6 +713,14 @@ export const backendApi = {
     try {
       const sanitizedPayload: Record<string, unknown> = {
         truck_id: payload.truck_id,
+        current_dr_number: payload.current_dr_number ?? null,
+        destination_lgu_id: payload.destination_lgu_id ?? null,
+        destination_name: payload.destination_name ?? null,
+        driver_name: payload.driver_name ?? null,
+        driver_phone: payload.driver_phone ?? null,
+        status: payload.status ?? 'In Transit',
+        speed: payload.speed ?? 0,
+        heading: payload.heading ?? 0,
         latitude: payload.latitude,
         longitude: payload.longitude,
         gps_text: payload.gps_text,
@@ -588,6 +785,7 @@ export const backendApi = {
     const channelName = `dashboard-db-changes-${Math.random().toString(36).slice(2, 9)}`;
     const channel = supabase
       .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lgus' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incoming_manifests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_requests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, onChange)
