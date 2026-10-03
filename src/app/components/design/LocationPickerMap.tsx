@@ -209,8 +209,11 @@ export function LocationPickerMap({
   };
 
   // Universal building-level search using Photon + Nominatim with Panay directory fallback
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSearch = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const query = searchQuery.trim();
     if (!query) return;
 
@@ -551,20 +554,27 @@ export function LocationPickerMap({
 
       {/* Mini-Map Search Bar */}
       <div className="relative">
-        <form onSubmit={handleSearch} className="flex gap-1.5">
+        <div className="flex gap-1.5">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSearch(e);
+                }
+              }}
               placeholder="Search Panay landmark, gym, or school..."
               className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
             />
           </div>
           <button
             type="button"
-            onClick={() => handleSearch()}
+            onClick={(e) => handleSearch(e)}
             disabled={isSearching}
             className="rounded-lg bg-[#2500ba] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
           >
@@ -579,7 +589,7 @@ export function LocationPickerMap({
             <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
             <span className="hidden sm:inline">Center</span>
           </button>
-        </form>
+        </div>
 
         {/* Search Results Dropdown */}
         {showResults && searchResults.length > 0 && (
