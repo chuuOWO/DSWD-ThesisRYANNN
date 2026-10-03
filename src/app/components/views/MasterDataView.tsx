@@ -1000,5 +1000,3 @@ export function MasterDataView() {
     </div>
   );
 }
-
-export default MasterDataView;

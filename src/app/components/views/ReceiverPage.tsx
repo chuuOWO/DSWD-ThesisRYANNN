@@ -35,6 +35,7 @@ import { findPanayLgu } from '../../data/panayLguDirectory';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
+import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 
 interface BarcodeDetectorResult {
   rawValue?: string;
@@ -1484,10 +1485,10 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
               className="h-full w-full"
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                subdomains={['a', 'b', 'c', 'd']}
-                maxZoom={19}
+                attribution={MAP_TILE_CONFIG.attribution}
+                url={MAP_TILE_CONFIG.url}
+                subdomains={MAP_TILE_CONFIG.subdomains}
+                maxZoom={MAP_TILE_CONFIG.maxZoom}
               />
               <MapController
                 center={currentPosition}

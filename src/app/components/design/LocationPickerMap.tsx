@@ -8,6 +8,7 @@ import {
   PANAY_PROVINCES,
   PANAY_MUNICIPALITIES_BY_PROVINCE
 } from '../../data/panayLguDirectory';
+import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 
 export interface LocationAddressDetails {
   building: string;
@@ -607,10 +608,10 @@ export function LocationPickerMap({
           className="h-full w-full"
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            subdomains={['a', 'b', 'c', 'd']}
-            maxZoom={19}
+            attribution={MAP_TILE_CONFIG.attribution}
+            url={MAP_TILE_CONFIG.url}
+            subdomains={MAP_TILE_CONFIG.subdomains}
+            maxZoom={MAP_TILE_CONFIG.maxZoom}
           />
           <MapPanController center={currentCenter} zoom={targetZoom} />
           <MapClickHandler onClick={handleMapClick} />

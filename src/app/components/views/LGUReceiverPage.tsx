@@ -25,6 +25,7 @@ import { backendApi, type TruckLiveLocation } from '../../services/backendApi';
 import { findPanayLgu, normalizeLguName } from '../../data/panayLguDirectory';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
+import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 
 interface LGUReceiverPageProps {
   profile: UserProfile;
@@ -775,10 +776,10 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
               className="h-full w-full"
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                subdomains={['a', 'b', 'c', 'd']}
-                maxZoom={19}
+                attribution={MAP_TILE_CONFIG.attribution}
+                url={MAP_TILE_CONFIG.url}
+                subdomains={MAP_TILE_CONFIG.subdomains}
+                maxZoom={MAP_TILE_CONFIG.maxZoom}
               />
 
               <MapController

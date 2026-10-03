@@ -7,6 +7,7 @@ import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord } from '../../services/backendApi';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { findPanayLgu } from '../../data/panayLguDirectory';
+import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';
 
@@ -484,10 +485,10 @@ function RouteMap({
     <div className="relative w-full">
       <MapContainer key={selectedRoute ? selectedRoute.id : 'all-trucks'} center={center} zoom={13} scrollWheelZoom className={`${heightClass} w-full`}>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          subdomains={['a', 'b', 'c', 'd']}
-          maxZoom={19}
+          attribution={MAP_TILE_CONFIG.attribution}
+          url={MAP_TILE_CONFIG.url}
+          subdomains={MAP_TILE_CONFIG.subdomains}
+          maxZoom={MAP_TILE_CONFIG.maxZoom}
         />
         <MapRefCapture mapRef={mapRef} />
         <MapCameraController selectedRoute={selectedRoute} />
