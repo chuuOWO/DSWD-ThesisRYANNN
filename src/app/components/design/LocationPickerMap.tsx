@@ -63,11 +63,23 @@ const pinIcon = L.divIcon({
   popupAnchor: [0, -38]
 });
 
-function MapPanController({ center }: { center: [number, number] }) {
+interface SearchResultItem {
+  label: string;
+  lat: number;
+  lng: number;
+  building?: string;
+  street?: string;
+  barangay?: string;
+  district?: string;
+  muni?: string;
+  prov?: string;
+}
+
+function MapPanController({ center, zoom = 14 }: { center: [number, number]; zoom?: number }) {
   const map = useMap();
   useEffect(() => {
-    map.flyTo(center, Math.max(map.getZoom(), 14), { duration: 1.2 });
-  }, [center, map]);
+    map.flyTo(center, zoom, { duration: 1.2 });
+  }, [center, map, zoom]);
   return null;
 }
 
@@ -102,7 +114,8 @@ export function LocationPickerMap({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
+  const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
+  const [targetZoom, setTargetZoom] = useState<number>(14);
   const [showResults, setShowResults] = useState(false);
   const markerRef = useRef<L.Marker | null>(null);
 
@@ -194,7 +207,7 @@ export function LocationPickerMap({
     updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, lat, lng);
   };
 
-  // Landmark search using OpenStreetMap Nominatim with local Panay directory fallback
+  // Universal building-level search using Photon + Nominatim with Panay directory fallback
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const query = searchQuery.trim();
@@ -204,43 +217,123 @@ export function LocationPickerMap({
     setShowResults(true);
 
     try {
-      // 1. Check local Panay directory first
-      const localMatches = PANAY_LGUS.filter((lgu) =>
+      const results: SearchResultItem[] = [];
+
+      // 1. Check local Panay directory matches
+      const localMatches: SearchResultItem[] = PANAY_LGUS.filter((lgu) =>
         lgu.municipality.toLowerCase().includes(query.toLowerCase()) ||
-        lgu.defaultFacility.toLowerCase().includes(query.toLowerCase())
+        lgu.defaultFacility.toLowerCase().includes(query.toLowerCase()) ||
+        lgu.province.toLowerCase().includes(query.toLowerCase())
       ).map((lgu) => ({
-        label: `${lgu.defaultFacility} (${lgu.municipality}, ${lgu.province})`,
+        label: `${lgu.defaultFacility}, ${lgu.municipality}, ${lgu.province}`,
         lat: lgu.lat,
         lng: lgu.lng,
+        building: lgu.defaultFacility,
+        street: '',
+        barangay: '',
+        district: 'NA',
         muni: lgu.municipality,
         prov: lgu.province
       }));
 
-      // 2. Query Nominatim API for exact landmark in Panay
-      const fullSearchTerm = `${query}, ${selectedMunicipality || ''} ${selectedProvince || 'Panay'}, Philippines`;
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullSearchTerm)}&limit=4`,
-        { headers: { 'Accept-Language': 'en' } }
-      );
-      const data = await response.json();
+      // 2. Query Photon Geocoding API (biased to Panay Island coords: lat 10.7, lon 122.5)
+      try {
+        const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&lat=10.7&lon=122.5&limit=8`;
+        const photonRes = await fetch(photonUrl);
+        if (photonRes.ok) {
+          const photonJson = await photonRes.json();
+          if (photonJson.features && Array.isArray(photonJson.features)) {
+            for (const feat of photonJson.features) {
+              const coords = feat.geometry?.coordinates;
+              const props = feat.properties || {};
+              if (Array.isArray(coords) && coords.length >= 2) {
+                const lng = coords[0];
+                const lat = coords[1];
+                const name = props.name || props.street || '';
+                const muni = props.city || props.town || props.municipality || '';
+                const prov = props.state || '';
+                const streetName = props.street || '';
+                const districtName = props.district || props.suburb || 'NA';
+                const labelParts = [name, streetName, muni, prov].filter(Boolean);
+                const label = labelParts.length > 0 ? labelParts.join(', ') : `${name} (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
 
-      const onlineMatches = (data as Array<{ display_name: string; lat: string; lon: string }>).map((item) => ({
-        label: item.display_name.split(',').slice(0, 3).join(', '),
-        lat: parseFloat(item.lat),
-        lng: parseFloat(item.lon),
-        muni: selectedMunicipality,
-        prov: selectedProvince
-      }));
+                if (name) {
+                  results.push({
+                    label,
+                    lat,
+                    lng,
+                    building: name,
+                    street: streetName,
+                    barangay: props.district || '',
+                    district: districtName,
+                    muni,
+                    prov
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Photon failed or was blocked; continue to Nominatim
+      }
 
-      const combined = [...localMatches, ...onlineMatches];
-      setSearchResults(combined.slice(0, 5));
+      // 3. Complement/Fallback with OpenStreetMap Nominatim
+      if (results.length < 5) {
+        try {
+          const nominatimQuery = `${query}, Panay, Philippines`;
+          const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(nominatimQuery)}&limit=5`;
+          const nomRes = await fetch(nomUrl, { headers: { 'Accept-Language': 'en' } });
+          if (nomRes.ok) {
+            const nomJson = await nomRes.json();
+            if (Array.isArray(nomJson)) {
+              for (const item of nomJson) {
+                const addr = item.address || {};
+                const buildingName = addr.amenity || addr.building || addr.office || addr.school || addr.leisure || item.display_name.split(',')[0].trim();
+                const road = addr.road || '';
+                const brgy = addr.quarter || addr.suburb || addr.village || addr.neighbourhood || '';
+                const muni = addr.city || addr.town || addr.municipality || '';
+                const prov = addr.state || addr.province || '';
+                results.push({
+                  label: item.display_name.split(',').slice(0, 4).join(', '),
+                  lat: parseFloat(item.lat),
+                  lng: parseFloat(item.lon),
+                  building: buildingName,
+                  street: road,
+                  barangay: brgy,
+                  district: addr.city_district || 'NA',
+                  muni,
+                  prov
+                });
+              }
+            }
+          }
+        } catch {
+          // Nominatim failed; fall back
+        }
+      }
+
+      // Deduplicate results by rounded lat/lng coordinates
+      const seen = new Set<string>();
+      const combined = [...results, ...localMatches].filter((r) => {
+        const key = `${r.lat.toFixed(3)},${r.lng.toFixed(3)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      setSearchResults(combined.slice(0, 8));
     } catch {
-      const localMatches = PANAY_LGUS.filter((lgu) =>
+      const localMatches: SearchResultItem[] = PANAY_LGUS.filter((lgu) =>
         lgu.municipality.toLowerCase().includes(query.toLowerCase())
       ).map((lgu) => ({
         label: `${lgu.defaultFacility} (${lgu.municipality}, ${lgu.province})`,
         lat: lgu.lat,
         lng: lgu.lng,
+        building: lgu.defaultFacility,
+        street: '',
+        barangay: '',
+        district: 'NA',
         muni: lgu.municipality,
         prov: lgu.province
       }));
@@ -250,21 +343,47 @@ export function LocationPickerMap({
     }
   };
 
-  const selectSearchResult = (item: { label: string; lat: number; lng: number; muni?: string; prov?: string }) => {
-    if (item.prov && PANAY_PROVINCES.includes(item.prov as any)) {
-      setSelectedProvince(item.prov);
+  const selectSearchResult = (item: SearchResultItem) => {
+    let matchedProv = selectedProvince;
+    if (item.prov) {
+      const foundProv = PANAY_PROVINCES.find((p) => item.prov?.toLowerCase().includes(p.toLowerCase()));
+      if (foundProv) matchedProv = foundProv;
     }
+    setSelectedProvince(matchedProv);
+
+    let matchedMuni = selectedMunicipality;
     if (item.muni) {
-      setSelectedMunicipality(item.muni);
+      const muniList = PANAY_MUNICIPALITIES_BY_PROVINCE[matchedProv] || [];
+      const foundMuni = muniList.find(
+        (m) => item.muni?.toLowerCase().includes(m.toLowerCase()) || m.toLowerCase().includes(item.muni!.toLowerCase())
+      );
+      if (foundMuni) {
+        matchedMuni = foundMuni;
+      } else {
+        matchedMuni = item.muni;
+      }
     }
-    setBuilding(item.label.split(',')[0] || building);
+    setSelectedMunicipality(matchedMuni);
+
+    const nextBuilding = item.building || item.label.split(',')[0].trim();
+    const nextStreet = item.street || street;
+    const nextBarangay = item.barangay || barangay;
+    const nextDistrict = item.district || district;
+
+    setBuilding(nextBuilding);
+    if (item.street) setStreet(item.street);
+    if (item.barangay) setBarangay(item.barangay);
+    if (item.district) setDistrict(item.district);
+
+    setTargetZoom(17);
+
     updateAddressFields(
-      item.label.split(',')[0] || building,
-      street,
-      barangay,
-      district,
-      item.muni || selectedMunicipality,
-      item.prov || selectedProvince,
+      nextBuilding,
+      nextStreet,
+      nextBarangay,
+      nextDistrict,
+      matchedMuni,
+      matchedProv,
       item.lat,
       item.lng
     );
@@ -273,6 +392,7 @@ export function LocationPickerMap({
   };
 
   const resetToMunicipalityCenter = () => {
+    setTargetZoom(14);
     const lgu = findPanayLgu(selectedMunicipality || 'Oton', selectedProvince);
     if (lgu) {
       updateAddressFields(
@@ -487,11 +607,12 @@ export function LocationPickerMap({
           className="h-full w-full"
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+            subdomains={['a', 'b', 'c', 'd']}
             maxZoom={19}
           />
-          <MapPanController center={currentCenter} />
+          <MapPanController center={currentCenter} zoom={targetZoom} />
           <MapClickHandler onClick={handleMapClick} />
           <Marker
             ref={markerRef}

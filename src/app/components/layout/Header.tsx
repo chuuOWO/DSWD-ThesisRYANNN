@@ -11,7 +11,6 @@ interface HeaderProps {
   walletAddress: string | null;
   walletMessage?: string | null;
   onConnectWallet: () => void;
-  onOpenProfileSettings?: () => void;
 }
 
 const roleDescriptions: Record<UserRole, string> = {
@@ -31,8 +30,7 @@ export function Header({
   currentRole,
   walletAddress,
   walletMessage,
-  onConnectWallet,
-  onOpenProfileSettings
+  onConnectWallet
 }: HeaderProps) {
   const isWalletLinked = Boolean(profile?.walletAddress);
 
@@ -60,16 +58,13 @@ export function Header({
           {walletAddress ? `${currentRole}: ${shortenWallet(walletAddress)}` : 'Connect MetaMask'}
         </button>
 
-        {/* Profile Avatar & Warning Indicator */}
+        {/* Profile Avatar Display */}
         <div className="relative group">
-          <button
-            type="button"
-            onClick={onOpenProfileSettings}
-            title={!isWalletLinked ? "You need to open profile and link it to MetaMask." : "Click to view profile settings"}
-            className={`relative w-9 h-9 rounded-full flex items-center justify-center transition-all cursor-pointer ${
+          <div
+            className={`relative w-9 h-9 rounded-full flex items-center justify-center select-none ${
               !isWalletLinked
                 ? 'border-2 border-red-500 ring-2 ring-red-400/60 bg-red-950/20'
-                : 'ring-2 ring-blue-500/30 bg-blue-600 hover:ring-white/50'
+                : 'ring-2 ring-blue-500/30 bg-blue-600'
             }`}
           >
             {profile?.avatarUrl ? (
@@ -93,7 +88,7 @@ export function Header({
                 <AlertTriangle className="w-2.5 h-2.5" />
               </span>
             )}
-          </button>
+          </div>
 
           {!isWalletLinked && (
             <div className="absolute top-full mt-2.5 right-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-3 py-1.5 rounded-lg shadow-xl border border-red-700/60">
@@ -103,12 +98,8 @@ export function Header({
           )}
         </div>
 
-        <div
-          onClick={onOpenProfileSettings}
-          className="text-right cursor-pointer group/user"
-          title={!isWalletLinked ? "You need to open profile and link it to MetaMask." : "Click to view profile settings"}
-        >
-          <p className="text-white text-sm font-medium group-hover/user:underline">{profile?.fullName || email}</p>
+        <div className="text-right select-none">
+          <p className="text-white text-sm font-medium">{profile?.fullName || email}</p>
           <p className={`text-xs ${!isWalletLinked ? 'text-red-300 font-semibold' : 'text-blue-100'}`}>
             {!isWalletLinked ? 'MetaMask Unlinked' : roleLabel}
           </p>

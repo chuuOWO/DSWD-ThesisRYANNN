@@ -1,5 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, LogOut, Users, User, AlertTriangle } from 'lucide-react';
+'use client';
+
+import { useState } from 'react';
+import { 
+  LayoutDashboard, 
+  PackagePlus, 
+  PackageMinus, 
+  Package, 
+  MapPin, 
+  Settings, 
+  Truck, 
+  Users, 
+  Database,
+  AlertTriangle 
+} from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 
@@ -7,28 +20,12 @@ interface SidebarProps {
   currentView: string;
   onNavigate: (view: string) => void;
   onSignOut?: () => void;
+  onOpenSettings?: () => void;
 }
 
-export function Sidebar({ currentView, onNavigate, onSignOut }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: SidebarProps) {
   const { profile } = useAuth();
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
-        setIsSettingsOpen(false);
-      }
-    };
-
-    if (isSettingsOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isSettingsOpen]);
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,28 +34,22 @@ export function Sidebar({ currentView, onNavigate, onSignOut }: SidebarProps) {
     { id: 'inventory', label: 'Inventory', icon: Package },
     { id: 'lgu-monitoring', label: 'LGU Monitor', icon: MapPin },
     { id: 'truck-tracking', label: 'Trucking', icon: Truck },
-    { id: 'accounts', label: 'Accounts', icon: Users }
+    { id: 'accounts', label: 'Accounts', icon: Users },
+    { id: 'master-data', label: 'Master Data', icon: Database }
   ];
 
-  return (
-    <div className="w-64 bg-white h-full flex flex-col border-r border-gray-200 shadow-sm">
-      {/* Logo/Header */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <img 
-            src="https://upload.wikimedia.org/wikipedia/commons/7/76/Seal_of_the_Department_of_Social_Welfare_and_Development.svg" 
-            alt="DSWD Seal" 
-            className="h-12 w-auto" 
-          />
-          <div>
-            <h1 className="text-sm font-bold text-gray-900">DSWD FNFI</h1>
-            <p className="text-xs text-gray-600">Warehouse System</p>
-          </div>
-        </div>
-      </div>
+  const handleOpenSettings = () => {
+    if (onOpenSettings) {
+      onOpenSettings();
+    } else {
+      setIsProfileModalOpen(true);
+    }
+  };
 
-      {/* Navigation */}
-      <div className="flex-1 p-4">
+  return (
+    <div className="w-64 bg-white h-full flex flex-col border-r border-gray-200 shadow-sm select-none">
+      {/* Navigation Links */}
+      <div className="flex-1 p-4 overflow-y-auto">
         <nav className="space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
@@ -67,11 +58,12 @@ export function Sidebar({ currentView, onNavigate, onSignOut }: SidebarProps) {
             return (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => onNavigate(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all cursor-pointer ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                 }`}
               >
                 <Icon className="w-5 h-5 flex-shrink-0" />
@@ -82,66 +74,28 @@ export function Sidebar({ currentView, onNavigate, onSignOut }: SidebarProps) {
         </nav>
       </div>
 
-      {/* Footer / Settings */}
-      <div ref={settingsRef} className="p-4 border-t border-gray-200 relative">
-        {/* Settings Text Bubble */}
-        {isSettingsOpen && (
-          <div className="absolute bottom-full left-4 mb-3 w-56 bg-white rounded-xl shadow-2xl border border-gray-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-            {/* Bubble arrow pointing down */}
-            <div className="absolute -bottom-1.5 left-7 w-3 h-3 bg-white border-b border-r border-gray-200 rotate-45" />
-
-            <div className="space-y-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSettingsOpen(false);
-                  setIsProfileModalOpen(true);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-left transition"
-              >
-                <User className="w-4 h-4 text-blue-600" />
-                <span>Profile Settings</span>
-              </button>
-
-              <div className="my-1.5 border-t border-gray-100" />
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSettingsOpen(false);
-                  onSignOut?.();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg text-left transition"
-              >
-                <LogOut className="w-4 h-4 text-red-600" />
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* User Profile Card */}
+      {/* Footer / Profile Status & Settings Button */}
+      <div className="p-4 border-t border-gray-200 bg-white">
+        {/* User Profile Info Card (Display-Only) */}
         {profile && (
           <div
-            onClick={() => setIsProfileModalOpen(true)}
-            className={`mb-2 p-2 rounded-xl cursor-pointer transition flex items-center gap-2.5 group relative ${
+            className={`mb-3 p-2.5 rounded-xl border flex items-center gap-2.5 ${
               !profile.walletAddress
-                ? 'bg-red-50/80 hover:bg-red-100/80 border-2 border-red-500 ring-2 ring-red-400/40 shadow-sm'
-                : 'bg-gray-50 hover:bg-gray-100 border border-gray-200/80'
+                ? 'bg-red-50/80 border-red-300 shadow-xs'
+                : 'bg-gray-50 border-gray-200'
             }`}
-            title={!profile.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to edit profile"}
           >
             <div className="relative flex-shrink-0">
               {profile.avatarUrl ? (
                 <img
                   src={profile.avatarUrl}
                   alt={profile.fullName || 'Admin avatar'}
-                  className={`h-8 w-8 rounded-full object-cover flex-shrink-0 ${
+                  className={`h-9 w-9 rounded-full object-cover flex-shrink-0 ${
                     !profile.walletAddress ? 'border-2 border-red-500' : 'border border-blue-500/40'
                   }`}
                 />
               ) : (
-                <div className={`h-8 w-8 rounded-full text-white flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                <div className={`h-9 w-9 rounded-full text-white flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                   !profile.walletAddress ? 'bg-red-600' : 'bg-blue-700'
                 }`}>
                   {(profile.fullName || 'AD').slice(0, 2).toUpperCase()}
@@ -155,44 +109,37 @@ export function Sidebar({ currentView, onNavigate, onSignOut }: SidebarProps) {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1">
-                <p className="text-xs font-bold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
+                <p className="text-xs font-bold text-gray-900 truncate">
                   {profile.fullName || 'DSWD Officer'}
                 </p>
                 {!profile.walletAddress && (
                   <AlertTriangle className="w-3 h-3 text-red-600 flex-shrink-0" />
                 )}
               </div>
-              <p className={`text-[10px] truncate ${!profile.walletAddress ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                {!profile.walletAddress ? 'MetaMask Unlinked' : (profile.role === 'dswd_admin' ? 'DSWD Admin' : 'Officer')}
+              <p className={`text-[10.5px] truncate font-medium ${!profile.walletAddress ? 'text-red-600 font-bold' : 'text-gray-500'}`}>
+                {!profile.walletAddress ? 'MetaMask Unlinked' : (profile.role === 'dswd_admin' ? 'DSWD Administrator' : 'Field Officer')}
               </p>
             </div>
-
-            {!profile.walletAddress && (
-              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                You need to open profile and link it to MetaMask.
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-red-900" />
-              </div>
-            )}
           </div>
         )}
 
+        {/* Sole Exclusive Settings Button */}
         <button
           type="button"
-          onClick={() => setIsSettingsOpen((prev) => !prev)}
-          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
-            isSettingsOpen ? 'bg-gray-200 text-gray-900' : 'text-gray-700 hover:bg-gray-100'
-          }`}
+          onClick={handleOpenSettings}
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-bold text-gray-700 hover:bg-gray-100 hover:text-gray-900 border border-gray-200 transition cursor-pointer"
         >
-          <Settings className="w-5 h-5" />
+          <Settings className="w-4 h-4 text-gray-600" />
           <span>Settings</span>
         </button>
 
-        {/* Profile Settings Modal */}
-        {profile && (
+        {/* Fallback settings modal if not controlled by parent */}
+        {!onOpenSettings && profile && (
           <ProfileSettingsModal
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             profile={profile}
+            onSignOut={onSignOut}
           />
         )}
       </div>

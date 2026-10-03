@@ -20,6 +20,7 @@ const TruckTracking = lazy(() => import('./components/views/TruckTracking').then
 const ReceiverPage = lazy(() => import('./components/views/ReceiverPage').then(m => ({ default: m.ReceiverPage })));
 const LGUReceiverPage = lazy(() => import('./components/views/LGUReceiverPage').then(m => ({ default: m.LGUReceiverPage })));
 const AccountManagement = lazy(() => import('./components/views/AccountManagement').then(m => ({ default: m.AccountManagement })));
+const MasterDataView = lazy(() => import('./components/views/MasterDataView').then(m => ({ default: m.MasterDataView })));
 
 function ViewLoading() {
   return (
@@ -207,6 +208,8 @@ export default function App() {
         return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
       case 'accounts':
         return <AccountManagement currentAdminEmail={activeProfile.email} />;
+      case 'master-data':
+        return <MasterDataView />;
       case 'dashboard':
       default:
         return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} />;
@@ -245,11 +248,15 @@ export default function App() {
         currentRole={currentRole}
         walletAddress={walletAddress}
         onConnectWallet={handleConnectWallet}
-        onOpenProfileSettings={() => setIsProfileModalOpen(true)}
       />
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar currentView={currentView} onNavigate={setCurrentView} onSignOut={requestSignOut} />
+        <Sidebar 
+          currentView={currentView} 
+          onNavigate={setCurrentView} 
+          onSignOut={requestSignOut}
+          onOpenSettings={() => setIsProfileModalOpen(true)}
+        />
 
         <main className="flex-1 overflow-auto p-8">
           <Suspense fallback={<ViewLoading />}>
