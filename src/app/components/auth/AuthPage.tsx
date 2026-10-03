@@ -163,6 +163,14 @@ export function AuthPage() {
       setErrorMessage('Please enter your contact phone number.');
       return;
     }
+    if (!email.trim()) {
+      setErrorMessage('Please enter your official email address.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setErrorMessage('Please enter a password with at least 6 characters.');
+      return;
+    }
     if (!workIdUrl) {
       setErrorMessage('Please upload a photo of your official DSWD Work ID or Government ID.');
       return;
@@ -506,7 +514,6 @@ export function AuthPage() {
                           accept="image/*"
                           onChange={handleWorkIdFileChange}
                           className="hidden"
-                          required
                         />
                       </label>
                     )}
@@ -551,6 +558,12 @@ export function AuthPage() {
                       </button>
                     )}
                   </div>
+
+                  {errorMessage && (
+                    <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium animate-in fade-in duration-200">
+                      {errorMessage}
+                    </div>
+                  )}
 
                   {/* Submit Register Button */}
                   <div className="pt-2">
@@ -1081,7 +1094,6 @@ export function AuthPage() {
                         accept="image/*"
                         onChange={handleWorkIdFileChange}
                         className="hidden"
-                        required
                       />
                     </label>
                   )}
@@ -1126,6 +1138,12 @@ export function AuthPage() {
                     </button>
                   )}
                 </div>
+
+                {errorMessage && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium animate-in fade-in duration-200">
+                    {errorMessage}
+                  </div>
+                )}
 
                 {/* Submit Register Button */}
                 <div className="pt-2">
