@@ -179,7 +179,11 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       const pending = lguReleases.filter((r) => ['Allocating', 'Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length;
       const lastDate = lguReleases[0]?.dateAllocated || (report ? report.reportedAt?.slice(0, 10) : 'N/A');
 
-      const stock: NonNullable<LGUDelivery['currentStock']> = { ...EMPTY_STOCK };
+      const matchedMaster = masterLgus.find(m => m.id === lgu.id);
+      const stock: NonNullable<LGUDelivery['currentStock']> = {
+        ...EMPTY_STOCK,
+        ...(matchedMaster?.currentStock || {})
+      };
       // Accumulate accepted relief packages
       lguReleases.forEach((r) => {
         if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory in stock) {

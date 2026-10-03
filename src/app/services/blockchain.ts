@@ -180,6 +180,10 @@ const getWalletConnectProvider = async () => {
       chains: [targetChainId],
       optionalChains: [targetChainId],
       showQrModal: !isMobile,
+      qrModalOptions: {
+        explorerRecommendedWalletIds: ['c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96'],
+        explorerExcludedWalletIds: 'ALL'
+      },
       methods: [
         'eth_requestAccounts',
         'eth_sendTransaction',

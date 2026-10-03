@@ -38,6 +38,7 @@ export interface LguRecord {
   longitude: number;
   remarks?: string;
   isActive?: boolean;
+  currentStock?: Record<string, number>;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -150,7 +151,7 @@ export interface TruckLiveLocation {
   updated_at?: string | null;
 }
 
-export interface TruckerReleaseRecord {
+export interface ReceiverReleaseRecord {
   dr_number: string;
   date_allocated?: string | null;
   lgu_name?: string | null;
@@ -171,6 +172,8 @@ export interface TruckerReleaseRecord {
   receiver_gps?: string | null;
   destination_address?: string | null;
 }
+
+export type TruckerReleaseRecord = ReceiverReleaseRecord;
 
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
@@ -251,6 +254,15 @@ export const backendApi = {
         longitude: Number(row.longitude ?? 122.3892),
         remarks: String(row.remarks ?? ''),
         isActive: Boolean(row.is_active ?? true),
+        currentStock: {
+          'Food Pack': Number(row.food_packs ?? 0),
+          'Hygiene Kit': Number(row.hygiene_kits ?? 0),
+          'Sleeping Kit': Number(row.sleeping_kits ?? 0),
+          'Kitchen Kit': Number(row.kitchen_kits ?? 0),
+          'Family Kit': Number(row.family_kits ?? 0),
+          'Laminated Sack': Number(row.laminated_sacks ?? 0),
+          'RTEF': Number(row.rtef ?? 0)
+        },
         createdAt: row.created_at,
         updatedAt: row.updated_at
       }));
@@ -282,6 +294,14 @@ export const backendApi = {
         latitude: payload.latitude ?? 10.7870,
         longitude: payload.longitude ?? 122.3892,
         remarks: payload.remarks?.trim() || '',
+        food_packs: payload.initialStock?.['Food Pack'] || 0,
+        hygiene_kits: payload.initialStock?.['Hygiene Kit'] || 0,
+        sleeping_kits: payload.initialStock?.['Sleeping Kit'] || 0,
+        kitchen_kits: payload.initialStock?.['Kitchen Kit'] || 0,
+        family_kits: payload.initialStock?.['Family Kit'] || 0,
+        laminated_sacks: payload.initialStock?.['Laminated Sack'] || 0,
+        rtef: payload.initialStock?.['RTEF'] || 0,
+        last_reported_at: new Date().toISOString(),
         is_active: true
       })
       .select('id')
@@ -323,6 +343,17 @@ export const backendApi = {
     if (payload.latitude !== undefined) updates.latitude = payload.latitude;
     if (payload.longitude !== undefined) updates.longitude = payload.longitude;
     if (payload.remarks !== undefined) updates.remarks = payload.remarks.trim();
+
+    if (payload.initialStock) {
+      if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
+      if (payload.initialStock['Hygiene Kit'] !== undefined) updates.hygiene_kits = payload.initialStock['Hygiene Kit'];
+      if (payload.initialStock['Sleeping Kit'] !== undefined) updates.sleeping_kits = payload.initialStock['Sleeping Kit'];
+      if (payload.initialStock['Kitchen Kit'] !== undefined) updates.kitchen_kits = payload.initialStock['Kitchen Kit'];
+      if (payload.initialStock['Family Kit'] !== undefined) updates.family_kits = payload.initialStock['Family Kit'];
+      if (payload.initialStock['Laminated Sack'] !== undefined) updates.laminated_sacks = payload.initialStock['Laminated Sack'];
+      if (payload.initialStock['RTEF'] !== undefined) updates.rtef = payload.initialStock['RTEF'];
+      updates.last_reported_at = new Date().toISOString();
+    }
 
     const { error } = await supabase
       .from('lgus')
@@ -655,14 +686,27 @@ export const backendApi = {
         recommendation: `Received ${params.quantity} ${params.category} via ${params.drNumber}. Live stock updated.`,
         reported_at: new Date().toISOString()
       });
+
+      // Also update public.lgus directly
+      const lguStockUpdate: Record<string, unknown> = {
+        last_reported_at: new Date().toISOString()
+      };
+      if (isFood) lguStockUpdate.food_packs = foodPacks;
+      if (isHygiene) lguStockUpdate.hygiene_kits = hygieneKits;
+      if (isFamily) lguStockUpdate.family_kits = familyKits;
+
+      await supabase
+        .from('lgus')
+        .update(lguStockUpdate)
+        .ilike('municipality', muni);
     } catch (invErr) {
-      console.warn('Failed to update LGU inventory report:', invErr);
+      console.warn('Failed to update LGU inventory report and lgus table:', invErr);
     }
 
     return { ok: true };
   },
 
-  async getTruckerReleases(truckId?: string | null) {
+  async getReceiverReleases(receiverId?: string | null) {
     let query = supabase
       .from('outgoing_requests')
       .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,tx_hash,wallet_address,receiver_gps,destination_address')
@@ -670,13 +714,17 @@ export const backendApi = {
       .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
       .order('created_at', { ascending: false });
 
-    if (truckId) {
-      query = query.or(`assigned_truck_id.eq.${truckId},assigned_truck_id.is.null`);
+    if (receiverId) {
+      query = query.or(`assigned_truck_id.eq.${receiverId},assigned_truck_id.is.null`);
     }
 
     const { data, error } = await query;
-    throwIfError(error, 'Failed to fetch trucker releases');
-    return (data ?? []) as TruckerReleaseRecord[];
+    throwIfError(error, 'Failed to fetch receiver releases');
+    return (data ?? []) as ReceiverReleaseRecord[];
+  },
+
+  async getTruckerReleases(truckId?: string | null) {
+    return this.getReceiverReleases(truckId);
   },
 
   async assignTruckToRelease(drNumber: string, truckId: string | null, deliveryStatus: string = 'In Transit') {

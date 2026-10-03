@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { backendApi } from '../services/backendApi';
+import { backendApi, type LguRecord } from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
 import { findPanayLgu } from '../data/panayLguDirectory';
 
@@ -444,6 +444,7 @@ export function useInventoryState(enabled = true) {
   const [lguPriorityReports, setLguPriorityReports] = useState<LGUPriorityReport[]>([]);
 
   const [discrepancyReports, setDiscrepancyReports] = useState<DiscrepancyReport[]>([]);
+  const [lgusList, setLgusList] = useState<LguRecord[]>([]);
 
   useEffect(() => {
     setInventory(calculateAvailableInventory(incomingGoodsList, outgoingReleasesList));
@@ -965,15 +966,21 @@ export function useInventoryState(enabled = true) {
   useEffect(() => {
     if (!enabled) return undefined;
 
-    const loadDashboard = () => backendApi.getDashboard()
-      .then(({ incoming, outgoing, lguReports, discrepancyReports: discrepancyRows }) => {
-        setIncomingGoodsList(incoming.map(mapIncomingManifest));
-        setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
-        setLguPriorityReports(deduplicateLguPriorityReports(lguReports.map(mapLGUInventoryReport)));
-        setDiscrepancyReports((discrepancyRows ?? []).map(mapDiscrepancyReport));
-        setIntegrationMode('backend');
-      })
-      .catch(() => setIntegrationMode('mock'));
+    const loadDashboard = () => {
+      backendApi.getDashboard()
+        .then(({ incoming, outgoing, lguReports, discrepancyReports: discrepancyRows }) => {
+          setIncomingGoodsList(incoming.map(mapIncomingManifest));
+          setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
+          setLguPriorityReports(deduplicateLguPriorityReports(lguReports.map(mapLGUInventoryReport)));
+          setDiscrepancyReports((discrepancyRows ?? []).map(mapDiscrepancyReport));
+          setIntegrationMode('backend');
+        })
+        .catch(() => setIntegrationMode('mock'));
+
+      backendApi.getLgus()
+        .then(lgus => setLgusList(lgus))
+        .catch(err => console.warn('Failed to load lgus:', err));
+    };
 
     loadDashboard();
     const unsubscribe = backendApi.subscribeDashboard(loadDashboard);
@@ -984,6 +991,15 @@ export function useInventoryState(enabled = true) {
       clearInterval(pollTimer);
     };
   }, [enabled]);
+
+  const refreshLgus = async () => {
+    try {
+      const list = await backendApi.getLgus();
+      setLgusList(list);
+    } catch (err) {
+      console.warn('Failed to refresh lgus:', err);
+    }
+  };
 
   const requestOutgoingCorrection = (drNumber: string, note: string) => {
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
@@ -1009,6 +1025,8 @@ export function useInventoryState(enabled = true) {
     outgoingReleasesList,
     lguPriorityReports,
     discrepancyReports,
+    lgusList,
+    refreshLgus,
     addStock,
     deductStock,
     getAvailableStock,

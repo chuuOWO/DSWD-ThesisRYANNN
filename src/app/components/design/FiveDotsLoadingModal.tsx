@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Radio } from 'lucide-react';
+import { Radio, X } from 'lucide-react';
 
 export interface FiveDotsLoadingModalProps {
   isOpen: boolean;
   title?: string;
   subtitle?: string;
   onComplete?: () => void;
+  onRetry?: () => void;
+  onClose?: () => void;
   speedMs?: number;
 }
 
@@ -16,6 +18,8 @@ export function FiveDotsLoadingModal({
   title = 'Loading...',
   subtitle = 'Please wait while we update your live status...',
   onComplete,
+  onRetry,
+  onClose,
   speedMs = 280
 }: FiveDotsLoadingModalProps) {
   const [filledCount, setFilledCount] = useState(0);
@@ -30,7 +34,7 @@ export function FiveDotsLoadingModal({
       setFilledCount((prev) => {
         if (prev >= 5) {
           if (onComplete) onComplete();
-          return 5;
+          return 1; // loop back so it keeps pulsing while waiting for MetaMask
         }
         return prev + 1;
       });
@@ -41,14 +45,22 @@ export function FiveDotsLoadingModal({
 
   if (!isOpen) return null;
 
-  // As requested: strictly say "Loading..." while filling in, and "Done!" on completion
-  const statusText = filledCount < 5 ? 'Loading...' : 'Done!';
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-4 transition-all">
-      <div className="w-full max-w-[290px] rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-[290px] rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cancel"
+            className="absolute top-4 right-4 p-1.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        )}
+
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#2500ba] to-indigo-600 text-white shadow-lg shadow-indigo-500/25">
-          <Radio size={26} className={filledCount < 5 ? 'animate-pulse' : ''} />
+          <Radio size={26} className="animate-pulse" />
         </div>
         <div>
           <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">{title}</h3>
@@ -72,9 +84,19 @@ export function FiveDotsLoadingModal({
           })}
         </div>
 
-        <p className={`text-xs font-bold transition-all min-h-[18px] ${filledCount === 5 ? 'text-green-600' : 'text-[#2500ba]'}`}>
-          {statusText}
-        </p>
+        {/* Click to try again option */}
+        {onRetry && (
+          <div className="pt-2 border-t border-slate-100 space-y-1">
+            <button
+              type="button"
+              onClick={onRetry}
+              className="text-xs font-bold text-[#2500ba] hover:underline cursor-pointer block mx-auto py-1"
+            >
+              Click to try again
+            </button>
+            <p className="text-[10px] text-slate-400">If MetaMask is still not showing up</p>
+          </div>
+        )}
       </div>
     </div>
   );

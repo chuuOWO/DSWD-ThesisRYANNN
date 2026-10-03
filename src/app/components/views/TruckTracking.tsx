@@ -4,7 +4,7 @@ import 'leaflet-routing-machine';
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import { CheckCircle, Clock, Navigation, Route, Truck } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
-import { backendApi, type TruckLiveLocation, type TruckerReleaseRecord } from '../../services/backendApi';
+import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord } from '../../services/backendApi';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { findPanayLgu } from '../../data/panayLguDirectory';
 
@@ -139,7 +139,7 @@ const stabilizeLiveLocation = (
 };
 
 const releaseByDrNumber = (
-  releases: TruckerReleaseRecord[],
+  releases: ReceiverReleaseRecord[],
   outgoingReleasesList: OutgoingRelease[],
   drNumber?: string | null
 ) => {
@@ -148,9 +148,9 @@ const releaseByDrNumber = (
     ?? outgoingReleasesList.find((release) => release.drNumber === drNumber);
 };
 
-const getReleaseValue = (release: TruckerReleaseRecord | OutgoingRelease | undefined, snakeKey: keyof TruckerReleaseRecord, camelKey: keyof OutgoingRelease) => {
+const getReleaseValue = (release: ReceiverReleaseRecord | OutgoingRelease | undefined, snakeKey: keyof ReceiverReleaseRecord, camelKey: keyof OutgoingRelease) => {
   if (!release) return undefined;
-  return (release as TruckerReleaseRecord)[snakeKey] ?? (release as OutgoingRelease)[camelKey];
+  return (release as ReceiverReleaseRecord)[snakeKey] ?? (release as OutgoingRelease)[camelKey];
 };
 
 const getProgress = (location: TruckLiveLocation, destination: [number, number] | null) => {
@@ -164,11 +164,11 @@ const getProgress = (location: TruckLiveLocation, destination: [number, number] 
 
 const toTruckRoute = (
   location: TruckLiveLocation,
-  releases: TruckerReleaseRecord[],
+  releases: ReceiverReleaseRecord[],
   outgoingReleasesList: OutgoingRelease[]
 ): TruckRoute => {
-  const uniqueMap = new Map<string, TruckerReleaseRecord>();
-  // 1. Fresh releases from getTruckerReleases (direct query from outgoing_requests)
+  const uniqueMap = new Map<string, ReceiverReleaseRecord>();
+  // 1. Fresh releases from getReceiverReleases (direct query from outgoing_requests)
   for (const rel of releases) {
     if (rel.dr_number) {
       uniqueMap.set(rel.dr_number, rel);
@@ -178,7 +178,7 @@ const toTruckRoute = (
   // 2. Supplement and merge with outgoingReleasesList
   for (const r of outgoingReleasesList) {
     const existing = uniqueMap.get(r.drNumber);
-    const mapped: TruckerReleaseRecord = {
+    const mapped: ReceiverReleaseRecord = {
       dr_number: r.drNumber,
       lgu_name: r.lguName,
       municipality: r.municipality,
@@ -598,7 +598,7 @@ function EmptyTracker() {
 
 export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesList?: OutgoingRelease[] }) {
   const [liveLocations, setLiveLocations] = useState<Record<string, TruckLiveLocation>>({});
-  const [releases, setReleases] = useState<TruckerReleaseRecord[]>([]);
+  const [releases, setReleases] = useState<ReceiverReleaseRecord[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [selectedTruckId, setSelectedTruckId] = useState('');
   const [routeMetrics, setRouteMetrics] = useState<RouteMetrics | null>(null);

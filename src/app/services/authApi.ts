@@ -5,6 +5,7 @@ export type AccountStatus = 'pending' | 'verified' | 'rejected';
 
 export interface UserProfile {
   id: string;
+  officialId?: string | null;
   email: string;
   fullName: string;
   firstName?: string | null;
@@ -25,6 +26,7 @@ export interface SignUpPayload {
   email: string;
   password: string;
   fullName?: string;
+  officialId?: string;
   firstName: string;
   lastName: string;
   phoneNumber?: string;
@@ -58,6 +60,7 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
 
   return {
     id: String(row.id),
+    officialId: row.official_id ? String(row.official_id) : null,
     email: String(row.email ?? ''),
     fullName: String(row.full_name || computedFullName || ''),
     firstName: fName,
@@ -77,6 +80,12 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
 
 export const authApi = {
   roleLabels,
+
+  async changePassword(newPassword: string) {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw new Error(error.message);
+    return data;
+  },
 
   async getProfile(userId: string): Promise<UserProfile | null> {
     try {
@@ -109,6 +118,7 @@ export const authApi = {
 
       return {
         id: user.id,
+        officialId: user.user_metadata?.official_id || null,
         email: user.email ?? '',
         fullName: user.user_metadata?.full_name || computedName || user.email?.split('@')[0] || 'DSWD Officer',
         firstName: fName,

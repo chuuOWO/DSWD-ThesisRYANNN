@@ -37,6 +37,14 @@ alter table public.lgus add column if not exists latitude double precision defau
 alter table public.lgus add column if not exists longitude double precision default 122.3892;
 alter table public.lgus add column if not exists remarks text default '';
 alter table public.lgus add column if not exists is_active boolean default true;
+alter table public.lgus add column if not exists food_packs integer not null default 0;
+alter table public.lgus add column if not exists hygiene_kits integer not null default 0;
+alter table public.lgus add column if not exists sleeping_kits integer not null default 0;
+alter table public.lgus add column if not exists kitchen_kits integer not null default 0;
+alter table public.lgus add column if not exists family_kits integer not null default 0;
+alter table public.lgus add column if not exists laminated_sacks integer not null default 0;
+alter table public.lgus add column if not exists rtef integer not null default 0;
+alter table public.lgus add column if not exists last_reported_at timestamptz default now();
 alter table public.lgus add column if not exists created_at timestamptz default now();
 alter table public.lgus add column if not exists updated_at timestamptz default now();
 
@@ -150,6 +158,27 @@ on conflict (municipality, province) do update set
   lgu_name = excluded.lgu_name,
   latitude = excluded.latitude,
   longitude = excluded.longitude;
+
+-- Backfill lgus stock from latest lgu_inventory_reports
+with latest_reports as (
+  select distinct on (coalesce(lgu_id, l.id))
+    coalesce(rpt.lgu_id, l.id) as target_lgu_id,
+    rpt.food_packs,
+    rpt.hygiene_kits,
+    rpt.family_kits,
+    rpt.reported_at
+  from public.lgu_inventory_reports rpt
+  left join public.lgus l on lower(trim(rpt.municipality)) = lower(trim(l.municipality))
+  order by coalesce(lgu_id, l.id), rpt.reported_at desc
+)
+update public.lgus l
+set
+  food_packs = lr.food_packs,
+  hygiene_kits = lr.hygiene_kits,
+  family_kits = lr.family_kits,
+  last_reported_at = lr.reported_at
+from latest_reports lr
+where l.id = lr.target_lgu_id;
 
 -- ==============================================================================
 -- 3. TABLE: incoming_manifests (Warehouse Inbound Cargo & Batch Minting)
@@ -589,6 +618,7 @@ create table if not exists public.profiles (
 );
 
 alter table public.profiles add column if not exists lgu_id uuid;
+alter table public.profiles add column if not exists official_id text;
 alter table public.profiles add column if not exists email text;
 alter table public.profiles add column if not exists full_name text default '';
 alter table public.profiles add column if not exists first_name text default '';
@@ -603,6 +633,40 @@ alter table public.profiles add column if not exists wallet_address text;
 alter table public.profiles add column if not exists avatar_url text;
 alter table public.profiles add column if not exists status text default 'pending';
 alter table public.profiles add column if not exists created_at timestamptz default now();
+
+-- Official ID Sequence for DSWD personnel (Format: ROLE-YYYY-NNNNNNNNN)
+create sequence if not exists public.official_id_seq start with 1 increment by 1;
+
+create or replace function public.generate_official_id(user_role text, is_lgu boolean)
+returns text
+language plpgsql
+as $$
+declare
+  prefix text;
+  seq_num bigint;
+  current_yr text;
+begin
+  if user_role = 'dswd_admin' then
+    prefix := 'ADMN';
+  elsif is_lgu then
+    prefix := 'LGUR';
+  else
+    prefix := 'RCVR';
+  end if;
+
+  current_yr := to_char(now(), 'YYYY');
+  seq_num := nextval('public.official_id_seq');
+
+  return prefix || '-' || current_yr || '-' || lpad(seq_num::text, 9, '0');
+end;
+$$;
+
+-- Backfill official_id for existing profiles
+update public.profiles
+set official_id = public.generate_official_id(role, (lgu_name is not null and lgu_name != ''))
+where official_id is null;
+
+create unique index if not exists profiles_official_id_key on public.profiles (official_id);
 
 -- Backfill profiles lgu_id from lgu_name
 update public.profiles as p
@@ -646,9 +710,19 @@ returns trigger
 language plpgsql
 security definer set search_path = public
 as $$
+declare
+  resolved_role text;
+  is_lgu_rec boolean;
 begin
+  resolved_role := case
+    when lower(coalesce(new.raw_user_meta_data->>'role', '')) in ('admin', 'dswd_admin') then 'dswd_admin'
+    else 'receiver'
+  end;
+  is_lgu_rec := (new.raw_user_meta_data->>'lgu_name' is not null and trim(new.raw_user_meta_data->>'lgu_name') != '');
+
   insert into public.profiles (
     id,
+    official_id,
     email,
     full_name,
     first_name,
@@ -665,6 +739,10 @@ begin
   )
   values (
     new.id,
+    coalesce(
+      new.raw_user_meta_data->>'official_id',
+      public.generate_official_id(resolved_role, is_lgu_rec)
+    ),
     coalesce(new.email, ''),
     coalesce(new.raw_user_meta_data->>'full_name', ''),
     coalesce(new.raw_user_meta_data->>'first_name', ''),
@@ -672,10 +750,7 @@ begin
     coalesce(new.raw_user_meta_data->>'phone_number', ''),
     coalesce(new.raw_user_meta_data->>'job_position', ''),
     new.raw_user_meta_data->>'work_id_url',
-    case
-      when new.raw_user_meta_data->>'role' = 'dswd_admin' then 'dswd_admin'
-      else 'receiver'
-    end,
+    resolved_role,
     new.raw_user_meta_data->>'truck_id',
     new.raw_user_meta_data->>'lgu_name',
     new.raw_user_meta_data->>'wallet_address',
@@ -683,6 +758,7 @@ begin
     coalesce(new.raw_user_meta_data->>'status', 'pending')
   )
   on conflict (id) do update set
+    official_id = coalesce(public.profiles.official_id, excluded.official_id),
     email = excluded.email,
     full_name = excluded.full_name,
     first_name = coalesce(excluded.first_name, public.profiles.first_name),

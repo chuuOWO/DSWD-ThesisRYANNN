@@ -29,7 +29,7 @@ import L from 'leaflet';
 import 'leaflet-routing-machine';
 
 import type { UserProfile } from '../../services/authApi';
-import { backendApi, type TruckerReleaseRecord } from '../../services/backendApi';
+import { backendApi, type ReceiverReleaseRecord } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
 import { findPanayLgu } from '../../data/panayLguDirectory';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
@@ -285,7 +285,7 @@ const getBrowserLocation = () =>
     );
   });
 
-const releaseToPayload = (release: TruckerReleaseRecord): QrPayload => {
+const releaseToPayload = (release: ReceiverReleaseRecord): QrPayload => {
   const allocatedBatches = release.allocated_batches ?? [];
   let destinationCoords: [number, number] | undefined = undefined;
   if (release.receiver_gps) {
@@ -735,15 +735,15 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
     return null;
   });
 
-  const [release, setRelease] = useState<TruckerReleaseRecord | null>(null);
-  const [allReleases, setAllReleases] = useState<TruckerReleaseRecord[]>([]);
+  const [release, setRelease] = useState<ReceiverReleaseRecord | null>(null);
+  const [allReleases, setAllReleases] = useState<ReceiverReleaseRecord[]>([]);
   const [isSigning, setIsSigning] = useState(false);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
 
   const [pendingCustody, setPendingCustody] = useState<{
     payload: QrPayload;
     location: PhoneLocation;
-    matchingRelease?: TruckerReleaseRecord;
+    matchingRelease?: ReceiverReleaseRecord;
   } | null>(null);
   const [isMetaMaskSigning, setIsMetaMaskSigning] = useState(false);
   const [metaMaskSignError, setMetaMaskSignError] = useState<string | null>(null);
@@ -1014,7 +1014,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
 
     const checkCustodyStatus = async () => {
       try {
-        const releases = await backendApi.getTruckerReleases();
+        const releases = await backendApi.getReceiverReleases();
 
         if (!isSubscribed) return;
         setAllReleases(releases);
@@ -1076,7 +1076,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
           }
         }
       } catch (error) {
-        console.warn('Failed to verify trucker custody status:', error);
+        console.warn('Failed to verify receiver custody status:', error);
       }
     };
 
@@ -1118,7 +1118,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
       let matchingDbRelease = allReleases.find((r) => r.dr_number === payload.drNumber);
       if (!matchingDbRelease) {
         try {
-          const freshReleases = await backendApi.getTruckerReleases();
+          const freshReleases = await backendApi.getReceiverReleases();
           matchingDbRelease = freshReleases.find((r) => r.dr_number === payload.drNumber);
         } catch {}
       }
@@ -1196,7 +1196,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
   const handleExecuteCustodySign = async (custodyOverride?: {
     payload: QrPayload;
     location: PhoneLocation;
-    matchingRelease?: TruckerReleaseRecord;
+    matchingRelease?: ReceiverReleaseRecord;
   }) => {
     const custody = custodyOverride || pendingCustody;
     if (!custody) return;
@@ -1822,112 +1822,22 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
             />
           )}
 
-          {step === 'sign_custody' && pendingCustody && (
-            <Modal
-              title="Accept Delivery Custody"
-              icon={<Truck size={28} className="text-[#2500ba]" />}
+          {step === 'sign_custody' && (
+            <FiveDotsLoadingModal
+              isOpen={step === 'sign_custody'}
+              title="Opening MetaMask..."
+              subtitle={
+                metaMaskSignError
+                  ? metaMaskSignError
+                  : 'Please approve the proof of custody in your MetaMask wallet...'
+              }
+              onRetry={() => void handleExecuteCustodySign()}
               onClose={() => {
+                setIsMetaMaskSigning(false);
                 setPendingCustody(null);
                 nav('pickup');
               }}
-            >
-              <div className="text-center mt-1">
-                <span className="inline-block rounded-full bg-blue-100 text-[#2500ba] px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide">
-                  Manifest Verified
-                </span>
-                <p className="text-sm font-extrabold text-gray-900 mt-1">
-                  {pendingCustody.payload.drNumber}
-                </p>
-                <p className="text-xs text-gray-600 font-semibold mt-0.5">
-                  {pendingCustody.payload.quantity} {pendingCustody.payload.category}
-                </p>
-              </div>
-
-              <div className="mt-3 space-y-2 text-left">
-                <div className="rounded-lg bg-gray-50 border border-gray-200 p-2.5 space-y-1 text-[10.5px]">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 font-medium">Destination:</span>
-                    <span className="font-bold text-gray-800 text-right truncate max-w-[170px]">
-                      {pendingCustody.payload.to}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 font-medium">Origin:</span>
-                    <span className="font-semibold text-gray-700 text-right truncate max-w-[170px]">
-                      {pendingCustody.payload.from}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-2 flex items-center justify-between text-[10px] text-emerald-900">
-                  <div className="flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="font-bold">Satellite GNSS Locked:</span>
-                  </div>
-                  <span className="font-mono text-[9px] text-emerald-800">
-                    {pendingCustody.location.latitude.toFixed(4)}, {pendingCustody.location.longitude.toFixed(4)}
-                  </span>
-                </div>
-
-                {metaMaskSignError && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-[10.5px] text-red-700 leading-tight">
-                    <p className="font-bold">MetaMask Signature Required</p>
-                    <p className="mt-0.5">{metaMaskSignError}</p>
-                    <p className="mt-1 text-[9.5px] text-red-600 font-semibold">
-                      Cryptographic signature on Sepolia is required to accept delivery custody. Tap below to retry.
-                    </p>
-                  </div>
-                )}
-
-                {isMetaMaskSigning && (
-                  <div className="rounded-lg bg-indigo-50 border border-indigo-200 p-2.5 text-center text-[10.5px] text-indigo-900">
-                    <Loader2 size={16} className="animate-spin mx-auto text-[#2500ba] mb-1" />
-                    <p className="font-bold">Opening MetaMask App...</p>
-                    <p className="text-[9.5px] text-indigo-700 mt-0.5">
-                      Please switch to MetaMask to approve cryptographic proof of custody.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 space-y-2">
-                <button
-                  type="button"
-                  onClick={() => handleExecuteCustodySign()}
-                  disabled={isMetaMaskSigning}
-                  className="w-full rounded-xl bg-[#2500ba] py-3 text-xs font-bold text-white shadow-md hover:bg-blue-800 active:scale-[0.99] disabled:opacity-50 transition flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  {isMetaMaskSigning ? (
-                    <>
-                      <Loader2 size={15} className="animate-spin" />
-                      <span>Opening MetaMask...</span>
-                    </>
-                  ) : metaMaskSignError ? (
-                    <>
-                      <ShieldCheck size={16} />
-                      <span>Retry MetaMask Signature</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck size={16} />
-                      <span>Sign Custody with MetaMask</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingCustody(null);
-                    nav('pickup');
-                  }}
-                  disabled={isMetaMaskSigning}
-                  className="w-full rounded-xl border border-gray-300 bg-white py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 active:scale-[0.99] disabled:opacity-50 transition text-center cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            </Modal>
+            />
           )}
 
           {step === 'verify' && (
@@ -2194,5 +2104,5 @@ function ScanModal({
 
 export type { Inventory };
 export { initialInventory };
-export { ReceiverPage as TruckerLocationPage };
+export { ReceiverPage as ReceiverLocationPage, ReceiverPage as TruckerLocationPage };
 

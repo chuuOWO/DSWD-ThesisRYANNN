@@ -432,6 +432,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
   const [isScanning, setIsScanning] = useState(false);
   const [cameraMessage, setCameraMessage] = useState('Align camera with shipment QR code');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [lastScannedPayload, setLastScannedPayload] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -497,6 +498,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
 
   const handleScannedPayload = async (rawPayload: string) => {
     stopCamera();
+    setLastScannedPayload(rawPayload);
     setIsProcessing(true);
 
     try {
@@ -620,6 +622,8 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
         isOpen={isProcessing}
         title="Processing Delivery Receipt"
         subtitle={`Updating ${effectiveLguName || 'LGU'} warehouse inventory in Supabase...`}
+        onRetry={lastScannedPayload ? () => void handleScannedPayload(lastScannedPayload) : undefined}
+        onClose={() => setIsProcessing(false)}
       />
 
       <section className="mx-auto flex h-screen w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
