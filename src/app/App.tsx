@@ -37,6 +37,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [currentRole, setCurrentRole] = useState<UserRole>('Unregistered');
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [walletMessage, setWalletMessage] = useState<string | null>(null);
   const [walletMismatch, setWalletMismatch] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
@@ -59,6 +60,7 @@ export default function App() {
     } else {
       setCurrentRole('Unregistered');
       setWalletMismatch(false);
+      setWalletMessage(null);
     }
   };
 
@@ -67,6 +69,7 @@ export default function App() {
       setWalletAddress(null);
       setCurrentRole('Unregistered');
       setWalletMismatch(false);
+      setWalletMessage(null);
     });
 
     return blockchain.onAccountsChanged(() => {
@@ -74,6 +77,7 @@ export default function App() {
         setWalletAddress(null);
         setCurrentRole('Unregistered');
         setWalletMismatch(false);
+        setWalletMessage(null);
       });
     });
   }, [profile?.walletAddress]);
@@ -247,6 +251,7 @@ export default function App() {
         onSignOut={requestSignOut}
         currentRole={currentRole}
         walletAddress={walletAddress}
+        walletMessage={walletMessage}
         onConnectWallet={handleConnectWallet}
       />
 
