@@ -5,11 +5,13 @@ import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { blockchain } from '../../services/blockchain';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
+import type { LguRecord } from '../../services/backendApi';
 
 interface InventoryState {
   inventory: InventoryItem[];
   outgoingReleasesList: OutgoingRelease[];
   discrepancyReports: DiscrepancyReport[];
+  lgusList?: LguRecord[];
   addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => Promise<{ ok: boolean; message: string }>;
@@ -55,6 +57,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     inventory,
     outgoingReleasesList,
     discrepancyReports,
+    lgusList,
     addOutgoingRelease,
     updateOutgoingRelease,
     approveAllocation,
@@ -83,6 +86,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       deliveryStatus: newRelease.deliveryStatus,
       receiverGps: newRelease.receiverGps || undefined,
       destinationAddress: newRelease.destinationAddress || undefined,
+      lguId: newRelease.lguId || undefined,
       handoverContractId: undefined,
       senderSignature: undefined,
       receiverSignature: undefined,
@@ -483,6 +487,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           onClose={() => setShowReleaseModal(false)}
           onSubmit={handleAddRelease}
           availableStock={inventory}
+          lgusList={lgusList}
           mode="add"
         />
       )}
@@ -492,9 +497,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           onClose={() => setEditingRelease(null)}
           onSubmit={handleEditRelease}
           availableStock={inventory}
+          lgusList={lgusList}
           mode="edit"
           initialData={{
             dateAllocated: editingRelease.dateAllocated,
+            lguId: editingRelease.lguId,
             lguName: editingRelease.lguName,
             province: editingRelease.province,
             municipality: editingRelease.municipality,

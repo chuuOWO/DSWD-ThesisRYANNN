@@ -1,32 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, MapPin, AlertCircle, Edit } from 'lucide-react';
 import { sanitizeTextOnly, sanitizeNumbersOnly, sanitizePhone } from '../../lib/inputValidation';
-
-export interface LGUDelivery {
-  id: string;
-  lguName: string;
-  municipality: string;
-  province: string;
-  totalItemsReleased: number;
-  deliveryCount: number;
-  completedDeliveries: number;
-  pendingDeliveries: number;
-  lastDeliveryDate: string;
-  contactPerson?: string;
-  contactNumber?: string;
-  remarks?: string;
-  latitude?: number;
-  longitude?: number;
-  currentStock?: {
-    'Hygiene Kit': number;
-    'Food Pack': number;
-    'Sleeping Kit': number;
-    'Kitchen Kit': number;
-    'Family Kit': number;
-    'Laminated Sack': number;
-    'RTEF': number;
-  };
-}
+import type { LGUDelivery } from '../views/LGUMonitoring';
 
 interface EditLGUModalProps {
   lgu: LGUDelivery;

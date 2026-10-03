@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock } from 'lucide-react';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit } from 'lucide-react';
 import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
 import { PANAY_LGUS } from '../../data/panayLguDirectory';
+import { AddLGUModal, type LGUForm } from '../modals/AddLGUModal';
+import { EditLGUModal } from '../modals/EditLGUModal';
+import type { LguRecord, LguInput } from '../../services/backendApi';
 
 export interface LGUDelivery {
   id: string;
@@ -16,6 +19,8 @@ export interface LGUDelivery {
   contactPerson?: string;
   contactNumber?: string;
   remarks?: string;
+  latitude?: number;
+  longitude?: number;
   currentStock?: {
     'Hygiene Kit': number;
     'Food Pack': number;
@@ -62,6 +67,9 @@ interface LGUMonitoringProps {
     inventory?: { category: string; warehouseA: number; warehouseB: number }[];
     outgoingReleasesList?: OutgoingRelease[];
     lguPriorityReports: LGUPriorityReport[];
+    lgusList?: LguRecord[];
+    addLgu?: (input: LguInput) => Promise<{ ok: boolean; message: string }>;
+    editLgu?: (id: string, updates: Partial<LguInput>) => Promise<{ ok: boolean; message: string }>;
   };
   currentRole?: UserRole;
 }
@@ -70,6 +78,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
 
   // Dynamically compute live LGU list from outgoing releases, reports, and Panay directory (Zero static mock data)
   const baseLguList = useMemo<LGUDelivery[]>(() => {
@@ -119,15 +130,45 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       }
     ];
 
-    // Compute Panay LGUs that have releases or reports
+    // Compute Panay LGUs from master Supabase list, falling back to PANAY_LGUS directory
+    const masterLgus = inventoryState?.lgusList ?? [];
+    const candidateLgus: { id: string; municipality: string; province: string; lguName: string; contactPerson?: string; contactNumber?: string; remarks?: string; lat?: number; lng?: number }[] = [];
+
+    if (masterLgus.length > 0) {
+      masterLgus.forEach(l => {
+        candidateLgus.push({
+          id: l.id,
+          municipality: l.municipality,
+          province: l.province,
+          lguName: l.lguName,
+          contactPerson: l.contactPerson,
+          contactNumber: l.contactNumber,
+          remarks: l.remarks,
+          lat: l.latitude,
+          lng: l.longitude
+        });
+      });
+    } else {
+      PANAY_LGUS.forEach(l => {
+        candidateLgus.push({
+          id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
+          municipality: l.municipality,
+          province: l.province,
+          lguName: l.defaultFacility,
+          lat: l.lat,
+          lng: l.lng
+        });
+      });
+    }
+
     const lguEntriesMap = new Map<string, LGUDelivery>();
 
-    PANAY_LGUS.forEach((lgu) => {
+    candidateLgus.forEach((lgu) => {
       const muni = lgu.municipality;
       const lguReleases = releases.filter((r) => {
         const target = (r.lguName || '').toLowerCase();
         const m = (r.municipality || '').toLowerCase();
-        return target.includes(muni.toLowerCase()) || m === muni.toLowerCase();
+        return (r.lguId && r.lguId === lgu.id) || target.includes(muni.toLowerCase()) || m === muni.toLowerCase();
       });
 
       const report = reports.find((rpt) => rpt.municipality.toLowerCase() === muni.toLowerCase());
@@ -152,46 +193,75 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         stock['Family Kit'] = Math.max(stock['Family Kit'], report.familyKits || 0);
       }
 
-      if (deliveryCount > 0 || report) {
-        lguEntriesMap.set(muni, {
-          id: `LGU-${muni.toUpperCase().replace(/\s+/g, '-')}`,
-          lguName: lgu.defaultFacility || `${muni} Municipal Office`,
-          municipality: muni,
-          province: lgu.province,
-          totalItemsReleased: totalReleased,
-          deliveryCount,
-          completedDeliveries: completed,
-          pendingDeliveries: pending,
-          lastDeliveryDate: lastDate,
-          currentStock: stock
-        });
-      }
+      lguEntriesMap.set(lgu.id, {
+        id: lgu.id,
+        lguName: lgu.lguName || `${muni} Municipal Office`,
+        municipality: muni,
+        province: lgu.province,
+        totalItemsReleased: totalReleased,
+        deliveryCount,
+        completedDeliveries: completed,
+        pendingDeliveries: pending,
+        lastDeliveryDate: lastDate,
+        contactPerson: lgu.contactPerson,
+        contactNumber: lgu.contactNumber,
+        remarks: lgu.remarks,
+        latitude: lgu.lat,
+        longitude: lgu.lng,
+        currentStock: stock
+      });
     });
 
-    // Provide default Panay LGUs so directory is rich even before first release
-    if (lguEntriesMap.size < 6) {
-      PANAY_LGUS.slice(0, 10).forEach((lgu) => {
-        if (!lguEntriesMap.has(lgu.municipality)) {
-          lguEntriesMap.set(lgu.municipality, {
-            id: `LGU-${lgu.municipality.toUpperCase().replace(/\s+/g, '-')}`,
-            lguName: lgu.defaultFacility,
-            municipality: lgu.municipality,
-            province: lgu.province,
-            totalItemsReleased: 0,
-            deliveryCount: 0,
-            completedDeliveries: 0,
-            pendingDeliveries: 0,
-            lastDeliveryDate: 'N/A',
-            currentStock: { ...EMPTY_STOCK }
-          });
-        }
-      });
-    }
-
     return [...mainWarehouses, ...Array.from(lguEntriesMap.values())];
-  }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.inventory]);
+  }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.inventory, inventoryState?.lgusList]);
 
   const displayLGUList = baseLguList;
+
+  const handleAddLGU = async (newLGU: LGUForm) => {
+    if (inventoryState?.addLgu) {
+      const res = await inventoryState.addLgu({
+        municipality: newLGU.municipality,
+        province: newLGU.province,
+        lguName: newLGU.lguName,
+        contactPerson: newLGU.contactPerson,
+        contactNumber: newLGU.contactNumber,
+        remarks: newLGU.remarks,
+        latitude: newLGU.latitude,
+        longitude: newLGU.longitude,
+        initialStock: newLGU.currentStock
+      });
+      if (!res.ok) {
+        throw new Error(res.message);
+      }
+    }
+    setShowAddModal(false);
+  };
+
+  const handleEditLGU = async (updatedLGU: LGUDelivery) => {
+    if (inventoryState?.editLgu) {
+      const res = await inventoryState.editLgu(updatedLGU.id, {
+        municipality: updatedLGU.municipality,
+        province: updatedLGU.province,
+        lguName: updatedLGU.lguName,
+        contactPerson: updatedLGU.contactPerson,
+        contactNumber: updatedLGU.contactNumber,
+        remarks: updatedLGU.remarks,
+        latitude: updatedLGU.latitude,
+        longitude: updatedLGU.longitude,
+        initialStock: updatedLGU.currentStock
+      });
+      if (!res.ok) {
+        throw new Error(res.message);
+      }
+    }
+    setShowEditModal(false);
+    setSelectedLGU(null);
+  };
+
+  const openEditModal = (lgu: LGUDelivery) => {
+    setSelectedLGU(lgu);
+    setShowEditModal(true);
+  };
 
   // Recent activity dynamically populated from live outgoing releases
   const recentActivity = useMemo<RecentActivity[]>(() => {
@@ -272,6 +342,13 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-sm"
+        >
+          <Plus className="w-5 h-5" />
+          Add New LGU
+        </button>
       </div>
 
       {/* Summary Cards */}
@@ -440,8 +517,22 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 </span>
               </div>
 
-              <div className="pt-2 border-t border-gray-100">
-                <span className="text-xs text-gray-500">Last delivery: {lgu.lastDeliveryDate || 'N/A'}</span>
+              <div className="pt-2 border-t border-gray-100 space-y-1">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Last delivery:</span>
+                  <span className="font-medium text-gray-700">{lgu.lastDeliveryDate || 'N/A'}</span>
+                </div>
+                {(lgu.contactPerson || lgu.contactNumber) && (
+                  <div className="flex justify-between text-[11px] text-gray-500">
+                    <span className="truncate max-w-[140px]">Contact: {lgu.contactPerson || 'Office'}</span>
+                    <span className="font-mono">{lgu.contactNumber || ''}</span>
+                  </div>
+                )}
+                {lgu.remarks && (
+                  <div className="text-[11px] text-gray-400 italic truncate" title={lgu.remarks}>
+                    {lgu.remarks}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -546,6 +637,26 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           </table>
         </div>
       </div>
+
+      {/* Add LGU Modal */}
+      {showAddModal && (
+        <AddLGUModal
+          onClose={() => setShowAddModal(false)}
+          onSubmit={handleAddLGU}
+        />
+      )}
+
+      {/* Edit LGU Modal */}
+      {showEditModal && selectedLGU && (
+        <EditLGUModal
+          lgu={selectedLGU}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedLGU(null);
+          }}
+          onSubmit={handleEditLGU}
+        />
+      )}
     </div>
   );
 }

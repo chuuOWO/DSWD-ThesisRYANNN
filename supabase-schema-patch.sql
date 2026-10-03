@@ -271,6 +271,20 @@ alter table public.outgoing_requests add column if not exists created_at timesta
 create unique index if not exists outgoing_requests_dr_number_key
   on public.outgoing_requests (dr_number);
 
+-- Backfill lgu_id in outgoing_requests from municipality & province
+update public.outgoing_requests as req
+set lgu_id = l.id
+from public.lgus as l
+where req.lgu_id is null
+  and lower(trim(req.municipality)) = lower(trim(l.municipality))
+  and (req.province is null or lower(trim(req.province)) = lower(trim(l.province)));
+
+-- Clean up any invalid lgu_id before adding foreign key
+update public.outgoing_requests
+set lgu_id = null
+where lgu_id is not null
+  and lgu_id not in (select id from public.lgus);
+
 -- Foreign key: outgoing_requests -> lgus
 do $$
 begin
@@ -280,14 +294,6 @@ begin
       foreign key (lgu_id) references public.lgus (id) on delete set null;
   end if;
 end $$;
-
--- Backfill lgu_id in outgoing_requests from municipality & province
-update public.outgoing_requests as req
-set lgu_id = l.id
-from public.lgus as l
-where req.lgu_id is null
-  and lower(trim(req.municipality)) = lower(trim(l.municipality))
-  and (req.province is null or lower(trim(req.province)) = lower(trim(l.province)));
 
 create index if not exists outgoing_requests_lgu_id_idx on public.outgoing_requests (lgu_id);
 create index if not exists outgoing_requests_assigned_truck_id_idx on public.outgoing_requests (assigned_truck_id);
@@ -330,23 +336,29 @@ alter table public.lgu_inventory_reports add column if not exists priority_color
 alter table public.lgu_inventory_reports add column if not exists recommendation text default 'Sufficient stock; continue monitoring.';
 alter table public.lgu_inventory_reports add column if not exists created_at timestamptz default now();
 
--- Foreign key: lgu_inventory_reports -> lgus
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'fk_lgu_reports_lgu') then
-    alter table public.lgu_inventory_reports
-      add constraint fk_lgu_reports_lgu
-      foreign key (lgu_id) references public.lgus (id) on delete cascade;
-  end if;
-end $$;
-
--- Backfill lgu_id in lgu_inventory_reports
+-- Backfill lgu_id in lgu_inventory_reports from municipality & province
 update public.lgu_inventory_reports as rpt
 set lgu_id = l.id
 from public.lgus as l
 where rpt.lgu_id is null
   and lower(trim(rpt.municipality)) = lower(trim(l.municipality))
   and (rpt.province is null or lower(trim(rpt.province)) = lower(trim(l.province)));
+
+-- Clean up any invalid lgu_id before adding foreign key
+update public.lgu_inventory_reports
+set lgu_id = null
+where lgu_id is not null
+  and lgu_id not in (select id from public.lgus);
+
+-- Foreign key: lgu_inventory_reports -> lgus
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_lgu_reports_lgu') then
+    alter table public.lgu_inventory_reports
+      add constraint fk_lgu_reports_lgu
+      foreign key (lgu_id) references public.lgus (id) on delete set null;
+  end if;
+end $$;
 
 create index if not exists lgu_inventory_reports_lgu_id_idx on public.lgu_inventory_reports (lgu_id);
 create index if not exists lgu_inventory_reports_priority_idx on public.lgu_inventory_reports (priority_color, urgency_score desc, reported_at desc);
@@ -462,6 +474,17 @@ alter table public.truck_live_locations add column if not exists wallet_address 
 alter table public.truck_live_locations add column if not exists updated_at timestamptz default now();
 
 -- Foreign keys for truck_live_locations
+-- Clean up invalid current_dr_number and destination_lgu_id before adding foreign keys
+update public.truck_live_locations
+set current_dr_number = null
+where current_dr_number is not null
+  and current_dr_number not in (select dr_number from public.outgoing_requests where dr_number is not null);
+
+update public.truck_live_locations
+set destination_lgu_id = null
+where destination_lgu_id is not null
+  and destination_lgu_id not in (select id from public.lgus);
+
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'fk_truck_current_dr') then
@@ -509,6 +532,12 @@ alter table public.discrepancy_reports add column if not exists reported_at time
 alter table public.discrepancy_reports add column if not exists created_at timestamptz default now();
 
 -- Foreign keys for discrepancy_reports
+-- Clean up any invalid manifest_number before adding foreign key
+update public.discrepancy_reports
+set manifest_number = null
+where manifest_number is not null
+  and manifest_number not in (select manifest_number from public.incoming_manifests where manifest_number is not null);
+
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'fk_discrepancy_manifest') then
@@ -517,6 +546,12 @@ begin
       foreign key (manifest_number) references public.incoming_manifests (manifest_number) on delete set null;
   end if;
 end $$;
+
+-- Clean up any invalid dr_number before adding foreign key (e.g. orphan DR-2026-005)
+update public.discrepancy_reports
+set dr_number = null
+where dr_number is not null
+  and dr_number not in (select dr_number from public.outgoing_requests where dr_number is not null);
 
 do $$
 begin
@@ -569,16 +604,6 @@ alter table public.profiles add column if not exists avatar_url text;
 alter table public.profiles add column if not exists status text default 'pending';
 alter table public.profiles add column if not exists created_at timestamptz default now();
 
--- Foreign key: profiles -> lgus
-do $$
-begin
-  if not exists (select 1 from pg_constraint where conname = 'fk_profiles_lgu') then
-    alter table public.profiles
-      add constraint fk_profiles_lgu
-      foreign key (lgu_id) references public.lgus (id) on delete set null;
-  end if;
-end $$;
-
 -- Backfill profiles lgu_id from lgu_name
 update public.profiles as p
 set lgu_id = l.id
@@ -590,6 +615,22 @@ where p.lgu_id is null
     lower(trim(p.lgu_name)) = lower(trim(l.lgu_name)) or
     lower(p.lgu_name) like '%' || lower(l.municipality) || '%'
   );
+
+-- Clean up any invalid lgu_id before adding foreign key
+update public.profiles
+set lgu_id = null
+where lgu_id is not null
+  and lgu_id not in (select id from public.lgus);
+
+-- Foreign key: profiles -> lgus
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_profiles_lgu') then
+    alter table public.profiles
+      add constraint fk_profiles_lgu
+      foreign key (lgu_id) references public.lgus (id) on delete set null;
+  end if;
+end $$;
 
 alter table public.profiles drop constraint if exists profiles_role_check;
 update public.profiles set role = 'receiver' where role in ('trucker', 'lgu');

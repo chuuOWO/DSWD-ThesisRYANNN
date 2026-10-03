@@ -54,6 +54,7 @@ export interface BatchAllocation {
 export interface OutgoingRelease {
   drNumber: string;
   dateAllocated: string;
+  lguId?: string;
   lguName: string;
   province: string;
   municipality: string;
@@ -202,6 +203,7 @@ type OutgoingRequestRow = {
   id: string;
   dr_number?: string | null;
   date_allocated?: string | null;
+  lgu_id?: string | null;
   lgu_name?: string | null;
   province?: string | null;
   municipality?: string | null;
@@ -325,6 +327,7 @@ export const deduplicateLguPriorityReports = (reports: LGUPriorityReport[]): LGU
 const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   drNumber: row.dr_number ?? row.id,
   dateAllocated: row.date_allocated ?? '',
+  lguId: row.lgu_id ?? undefined,
   lguName: row.lgu_name ?? '',
   province: row.province ?? '',
   municipality: row.municipality ?? '',
@@ -668,8 +671,16 @@ export function useInventoryState(enabled = true) {
     const newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
     const isDirect = newRelease.deliveryMode === 'Direct Delivery';
     const status: OutgoingStatus = isDirect ? 'Approved' : (newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus);
+    const matchedLgu = lgusList.find(l =>
+      (newRelease.lguId && l.id === newRelease.lguId) ||
+      (newRelease.municipality && l.municipality.toLowerCase() === newRelease.municipality.toLowerCase()) ||
+      (newRelease.lguName && l.lguName.toLowerCase() === newRelease.lguName.toLowerCase())
+    );
+    const resolvedLguId = newRelease.lguId || (matchedLgu ? matchedLgu.id : undefined);
+
     const releaseWithDR: OutgoingRelease = {
       ...newRelease,
+      lguId: resolvedLguId,
       deliveryStatus: status,
       drNumber: newDR,
       amountApproved: isDirect ? (newRelease.amountRequested || newRelease.amountApproved) : (status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved),
@@ -679,6 +690,7 @@ export function useInventoryState(enabled = true) {
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
     backendApi.createOutgoing({
       ...newRelease,
+      lguId: resolvedLguId,
       drNumber: newDR,
       amountApproved: isDirect ? (newRelease.amountRequested || newRelease.amountApproved) : newRelease.amountApproved,
       deliveryStatus: status,
