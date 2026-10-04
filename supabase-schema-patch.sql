@@ -74,6 +74,7 @@ alter table public.warehouses add column if not exists kitchen_kits integer not 
 alter table public.warehouses add column if not exists family_kits integer not null default 0;
 alter table public.warehouses add column if not exists laminated_sacks integer not null default 0;
 alter table public.warehouses add column if not exists rtef integer not null default 0;
+alter table public.warehouses add column if not exists current_stock jsonb default '{}'::jsonb;
 alter table public.warehouses add column if not exists is_active boolean default true;
 alter table public.warehouses add column if not exists created_at timestamptz default now();
 alter table public.warehouses add column if not exists updated_at timestamptz default now();
@@ -84,6 +85,18 @@ insert into public.warehouses (name, province, municipality, capacity_packs, lat
   ('Oton Main Warehouse', 'Iloilo', 'Oton', 150000, 10.6975, 122.4764, 34500, 12400, 8900, 6200, 7100, 4500, 15000),
   ('Pototan Main Warehouse', 'Iloilo', 'Pototan', 80000, 10.9492, 122.6289, 21200, 8100, 5400, 4100, 4800, 3200, 9500)
 on conflict (name) do nothing;
+
+update public.warehouses
+set current_stock = jsonb_build_object(
+  'Food Pack', coalesce(food_packs, 0),
+  'Hygiene Kit', coalesce(hygiene_kits, 0),
+  'Sleeping Kit', coalesce(sleeping_kits, 0),
+  'Kitchen Kit', coalesce(kitchen_kits, 0),
+  'Family Kit', coalesce(family_kits, 0),
+  'Laminated Sack', coalesce(laminated_sacks, 0),
+  'RTEF', coalesce(rtef, 0)
+)
+where current_stock is null or current_stock = '{}'::jsonb;
 
 -- 2.3 TABLE: supply_sources (National Resource Centers & Distribution Hubs)
 create table if not exists public.supply_sources (
@@ -182,6 +195,7 @@ alter table public.lgus add column if not exists kitchen_kits integer not null d
 alter table public.lgus add column if not exists family_kits integer not null default 0;
 alter table public.lgus add column if not exists laminated_sacks integer not null default 0;
 alter table public.lgus add column if not exists rtef integer not null default 0;
+alter table public.lgus add column if not exists current_stock jsonb default '{}'::jsonb;
 alter table public.lgus add column if not exists urgency_score integer default 0;
 alter table public.lgus add column if not exists priority_color text default 'green';
 alter table public.lgus add column if not exists recommendation text default '';
@@ -320,6 +334,18 @@ set
   last_reported_at = lr.reported_at
 from latest_reports lr
 where l.id = lr.target_lgu_id;
+
+update public.lgus
+set current_stock = jsonb_build_object(
+  'Food Pack', coalesce(food_packs, 0),
+  'Hygiene Kit', coalesce(hygiene_kits, 0),
+  'Sleeping Kit', coalesce(sleeping_kits, 0),
+  'Kitchen Kit', coalesce(kitchen_kits, 0),
+  'Family Kit', coalesce(family_kits, 0),
+  'Laminated Sack', coalesce(laminated_sacks, 0),
+  'RTEF', coalesce(rtef, 0)
+)
+where current_stock is null or current_stock = '{}'::jsonb;
 
 -- ==============================================================================
 -- 3. TABLE: incoming_manifests (Warehouse Inbound Cargo & Batch Minting)

@@ -42,21 +42,21 @@ export function extractCleanMunicipality(rawName?: string | null): string {
 
   // 1. Exact match with a Panay municipality
   const exact = PANAY_LGUS.find(
-    (l) => l.municipality.toLowerCase() === trimmed.toLowerCase()
+    (l) => (l.municipality || '').toLowerCase() === trimmed.toLowerCase()
   );
   if (exact) return exact.municipality;
 
   // 2. Sort by length descending to match longer municipality names first (e.g. "San Jose de Buenavista")
   const sorted = [...PANAY_LGUS].sort(
-    (a, b) => b.municipality.length - a.municipality.length
+    (a, b) => (b.municipality || '').length - (a.municipality || '').length
   );
   const starts = sorted.find((l) =>
-    trimmed.toLowerCase().startsWith(l.municipality.toLowerCase())
+    trimmed.toLowerCase().startsWith((l.municipality || '').toLowerCase())
   );
   if (starts) return starts.municipality;
 
   const includes = sorted.find((l) =>
-    trimmed.toLowerCase().includes(l.municipality.toLowerCase())
+    trimmed.toLowerCase().includes((l.municipality || '').toLowerCase())
   );
   if (includes) return includes.municipality;
 
@@ -105,7 +105,7 @@ function MunicipalitySearchPicker({
     if (!value) return null;
     return (
       PANAY_LGUS.find(
-        (l) => l.municipality.toLowerCase() === value.toLowerCase()
+        (l) => (l.municipality || '').toLowerCase() === (value || '').toLowerCase()
       ) ?? null
     );
   }, [value]);
@@ -113,18 +113,18 @@ function MunicipalitySearchPicker({
   const filteredLgus = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) {
-      return [...PANAY_LGUS].sort((a, b) => a.municipality.localeCompare(b.municipality));
+      return [...PANAY_LGUS].sort((a, b) => (a.municipality || '').localeCompare(b.municipality || ''));
     }
     return PANAY_LGUS.filter(
       (l) =>
-        l.municipality.toLowerCase().includes(q) ||
-        l.province.toLowerCase().includes(q)
+        (l.municipality || '').toLowerCase().includes(q) ||
+        (l.province || '').toLowerCase().includes(q)
     ).sort((a, b) => {
-      const aStarts = a.municipality.toLowerCase().startsWith(q);
-      const bStarts = b.municipality.toLowerCase().startsWith(q);
+      const aStarts = (a.municipality || '').toLowerCase().startsWith(q);
+      const bStarts = (b.municipality || '').toLowerCase().startsWith(q);
       if (aStarts && !bStarts) return -1;
       if (!aStarts && bStarts) return 1;
-      return a.municipality.localeCompare(b.municipality);
+      return (a.municipality || '').localeCompare(b.municipality || '');
     });
   }, [query]);
 
@@ -501,9 +501,9 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
       const query = searchQuery.trim().toLowerCase();
       const matchSearch =
         !query ||
-        p.email.toLowerCase().includes(query) ||
-        p.fullName.toLowerCase().includes(query) ||
-        p.id.toLowerCase().includes(query) ||
+        (p.email || '').toLowerCase().includes(query) ||
+        (p.fullName || '').toLowerCase().includes(query) ||
+        (p.id || '').toLowerCase().includes(query) ||
         (p.jobPosition && p.jobPosition.toLowerCase().includes(query)) ||
         (p.phoneNumber && p.phoneNumber.toLowerCase().includes(query)) ||
         (p.truckId && p.truckId.toLowerCase().includes(query)) ||
@@ -809,14 +809,14 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                   <th className="px-6 py-3">Personnel Identity & ID</th>
                   <th className="px-6 py-3">Designation & Role</th>
                   <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs">
                 {filteredProfiles.map((profile) => {
                   const isCurrentAdmin =
-                    currentAdminEmail &&
-                    profile.email.toLowerCase() === currentAdminEmail.toLowerCase();
+                    Boolean(currentAdminEmail &&
+                    profile.email &&
+                    profile.email.toLowerCase() === currentAdminEmail.toLowerCase());
                   const cleanLgu = extractCleanMunicipality(profile.lguName);
                   const isLgu = profile.role === 'receiver' && Boolean(cleanLgu.trim());
                   const isPending = profile.status === 'pending';
@@ -942,21 +942,6 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                             )}
                           </div>
                         )}
-                      </td>
-
-                      {/* 4. Action */}
-                      <td className="px-6 py-3.5 text-right">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedProfile(profile);
-                            setIsWalletRevealed(false);
-                          }}
-                          className="px-3 py-1.5 rounded-xl border border-gray-200 hover:border-[#10069f] text-[#10069f] hover:bg-blue-50 font-bold text-xs transition cursor-pointer shadow-2xs active:scale-95"
-                        >
-                          Review Details
-                        </button>
                       </td>
                     </tr>
                   );

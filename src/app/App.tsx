@@ -9,6 +9,7 @@ import { useInventoryState, type UserRole } from './hooks/useInventoryState';
 import { useAuth } from './contexts/AuthContext';
 import { type UserProfile } from './services/authApi';
 import { blockchain } from './services/blockchain';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Lazy-loaded operational views for bundle splitting and faster initial load
 const DashboardView = lazy(() => import('./components/views/DashboardView').then(m => ({ default: m.DashboardView })));
@@ -264,9 +265,11 @@ export default function App() {
         />
 
         <main className="flex-1 overflow-auto p-8">
-          <Suspense fallback={<ViewLoading />}>
-            {renderView()}
-          </Suspense>
+          <ErrorBoundary key={currentView}>
+            <Suspense fallback={<ViewLoading />}>
+              {renderView()}
+            </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
 

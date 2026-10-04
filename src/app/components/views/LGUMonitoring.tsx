@@ -96,14 +96,15 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     const lguEntriesMap = new Map<string, LGUDelivery>();
 
     masterLgus.forEach((lgu) => {
-      const muni = lgu.municipality;
+      const muni = lgu.municipality || '';
+      const muniLower = muni.toLowerCase();
       const lguReleases = releases.filter((r) => {
-        const target = (r.lguName || '').toLowerCase();
-        const m = (r.municipality || '').toLowerCase();
-        return (r.lguId && r.lguId === lgu.id) || target.includes(muni.toLowerCase()) || m === muni.toLowerCase();
+        const target = (r?.lguName || '').toLowerCase();
+        const m = (r?.municipality || '').toLowerCase();
+        return (r?.lguId && r.lguId === lgu.id) || (muniLower && target.includes(muniLower)) || (muniLower && m === muniLower);
       });
 
-      const report = reports.find((rpt) => rpt.municipality.toLowerCase() === muni.toLowerCase());
+      const report = reports.find((rpt) => (rpt?.municipality || '').toLowerCase() === muniLower);
 
       const totalReleased = lguReleases.reduce((sum, r) => sum + (r.amountApproved || r.amountRequested || 0), 0);
       const deliveryCount = lguReleases.length;
@@ -235,14 +236,15 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
   const filteredLGUs = useMemo(() => {
     return baseLguList.filter(lgu => {
-      const matchesSearch = lgu.lguName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            lgu.municipality.toLowerCase().includes(searchTerm.toLowerCase());
+      const q = (searchTerm || '').toLowerCase();
+      const matchesSearch = (lgu?.lguName || '').toLowerCase().includes(q) ||
+                            (lgu?.municipality || '').toLowerCase().includes(q);
 
       const matchesProvince = selectedProvinceTab === 'All' ||
-                             lgu.province.toLowerCase() === selectedProvinceTab.toLowerCase();
+                             (lgu?.province || '').toLowerCase() === (selectedProvinceTab || '').toLowerCase();
 
       const matchesCategory = selectedCategory === 'All' ||
-                             (lgu.currentStock && (lgu.currentStock[selectedCategory as keyof typeof lgu.currentStock] || 0) > 0);
+                             (lgu?.currentStock && (lgu.currentStock[selectedCategory as keyof typeof lgu.currentStock] || 0) > 0);
 
       return matchesSearch && matchesProvince && matchesCategory;
     });
@@ -418,7 +420,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         </button>
 
         {provinceOptions.map(prov => {
-          const count = baseLguList.filter(l => l.province.toLowerCase() === prov.toLowerCase()).length;
+          const provLower = (prov || '').toLowerCase();
+          const isSelected = (selectedProvinceTab || '').toLowerCase() === provLower;
+          const count = baseLguList.filter(l => (l?.province || '').toLowerCase() === provLower).length;
           return (
             <button
               key={prov}
@@ -428,14 +432,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 setCurrentPage(1);
               }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
-                selectedProvinceTab.toLowerCase() === prov.toLowerCase()
+                isSelected
                   ? 'bg-[#2500ba] text-white shadow-sm'
                   : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
               }`}
             >
               {prov}
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                selectedProvinceTab.toLowerCase() === prov.toLowerCase() ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
+                isSelected ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
               }`}>
                 {count}
               </span>

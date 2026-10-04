@@ -63,15 +63,7 @@ export interface WarehouseInput {
   capacityPacks: number;
   latitude: number;
   longitude: number;
-  initialStock?: {
-    'Food Pack'?: number;
-    'Hygiene Kit'?: number;
-    'Family Kit'?: number;
-    'Sleeping Kit'?: number;
-    'Kitchen Kit'?: number;
-    'Laminated Sack'?: number;
-    'RTEF'?: number;
-  };
+  initialStock?: Record<string, number>;
 }
 
 export interface SupplySourceRecord {
@@ -150,15 +142,7 @@ export interface LguInput {
   latitude?: number;
   longitude?: number;
   remarks?: string;
-  initialStock?: {
-    'Food Pack'?: number;
-    'Hygiene Kit'?: number;
-    'Family Kit'?: number;
-    'Sleeping Kit'?: number;
-    'Kitchen Kit'?: number;
-    'Laminated Sack'?: number;
-    'RTEF'?: number;
-  };
+  initialStock?: Record<string, number>;
 }
 
 export interface OutgoingPayload {
@@ -399,6 +383,18 @@ export const backendApi = {
       const laminatedSacks = Number(row.laminated_sacks ?? 0);
       const rtef = Number(row.rtef ?? 0);
 
+      const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
+      const stockMerged: Record<string, number> = {
+        'Food Pack': foodPacks,
+        'Hygiene Kit': hygieneKits,
+        'Sleeping Kit': sleepingKits,
+        'Kitchen Kit': kitchenKits,
+        'Family Kit': familyKits,
+        'Laminated Sack': laminatedSacks,
+        'RTEF': rtef,
+        ...rawStock
+      };
+
       return {
         id: String(row.id),
         name: String(row.name),
@@ -415,15 +411,7 @@ export const backendApi = {
         laminatedSacks,
         rtef,
         isActive: Boolean(row.is_active ?? true),
-        currentStock: {
-          'Food Pack': foodPacks,
-          'Hygiene Kit': hygieneKits,
-          'Sleeping Kit': sleepingKits,
-          'Kitchen Kit': kitchenKits,
-          'Family Kit': familyKits,
-          'Laminated Sack': laminatedSacks,
-          'RTEF': rtef
-        },
+        currentStock: stockMerged,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       };
@@ -447,6 +435,7 @@ export const backendApi = {
         family_kits: payload.initialStock?.['Family Kit'] || 0,
         laminated_sacks: payload.initialStock?.['Laminated Sack'] || 0,
         rtef: payload.initialStock?.['RTEF'] || 0,
+        current_stock: payload.initialStock || {},
         is_active: true
       })
       .select('id')
@@ -465,6 +454,7 @@ export const backendApi = {
     if (payload.longitude !== undefined) updates.longitude = payload.longitude;
 
     if (payload.initialStock) {
+      updates.current_stock = payload.initialStock;
       if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
       if (payload.initialStock['Hygiene Kit'] !== undefined) updates.hygiene_kits = payload.initialStock['Hygiene Kit'];
       if (payload.initialStock['Sleeping Kit'] !== undefined) updates.sleeping_kits = payload.initialStock['Sleeping Kit'];
@@ -635,6 +625,18 @@ export const backendApi = {
         const urgencyScore = Number(row.urgency_score ?? (foodPacks < 100 ? 85 : foodPacks < 300 ? 50 : 20));
         const priorityColor: 'Red' | 'Yellow' | 'Green' = (row.priority_color as 'Red' | 'Yellow' | 'Green') || (foodPacks < 100 ? 'Red' : foodPacks < 300 ? 'Yellow' : 'Green');
 
+        const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
+        const stockMerged: Record<string, number> = {
+          'Food Pack': foodPacks,
+          'Hygiene Kit': hygieneKits,
+          'Sleeping Kit': sleepingKits,
+          'Kitchen Kit': kitchenKits,
+          'Family Kit': familyKits,
+          'Laminated Sack': laminatedSacks,
+          'RTEF': rtef,
+          ...rawStock
+        };
+
         return {
           id: String(row.id),
           municipality: String(row.municipality),
@@ -659,15 +661,7 @@ export const backendApi = {
           damageIndex: Number(row.damage_index ?? 0),
           recommendation: String(row.recommendation ?? (priorityColor === 'Red' ? 'Immediate replenishment requested.' : 'Sufficient stock on hand.')),
           lastReportedAt: row.last_reported_at || row.updated_at,
-          currentStock: {
-            'Food Pack': foodPacks,
-            'Hygiene Kit': hygieneKits,
-            'Sleeping Kit': sleepingKits,
-            'Kitchen Kit': kitchenKits,
-            'Family Kit': familyKits,
-            'Laminated Sack': laminatedSacks,
-            'RTEF': rtef
-          },
+          currentStock: stockMerged,
           createdAt: row.created_at,
           updatedAt: row.updated_at
         };
@@ -710,6 +704,7 @@ export const backendApi = {
         family_kits: payload.initialStock?.['Family Kit'] || 0,
         laminated_sacks: payload.initialStock?.['Laminated Sack'] || 0,
         rtef: payload.initialStock?.['RTEF'] || 0,
+        current_stock: payload.initialStock || {},
         last_reported_at: new Date().toISOString(),
         is_active: true
       })
@@ -754,6 +749,7 @@ export const backendApi = {
     if (payload.remarks !== undefined) updates.remarks = payload.remarks.trim();
 
     if (payload.initialStock) {
+      updates.current_stock = payload.initialStock;
       if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
       if (payload.initialStock['Hygiene Kit'] !== undefined) updates.hygiene_kits = payload.initialStock['Hygiene Kit'];
       if (payload.initialStock['Sleeping Kit'] !== undefined) updates.sleeping_kits = payload.initialStock['Sleeping Kit'];

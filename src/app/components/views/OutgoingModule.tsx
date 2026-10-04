@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { CheckCircle, Edit, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
+import { SuccessModal } from '../modals/SuccessModal';
 import { blockchain } from '../../services/blockchain';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
@@ -108,6 +109,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       correctionNote: undefined
     });
     setShowReleaseModal(false);
+    showResult(`Release allocation for ${newRelease.municipality} (${newRelease.amountRequested.toLocaleString()} ${newRelease.fnfiCategory}) created successfully.`);
   };
 
   const handleEditRelease = (updatedRelease: ReleaseForm) => {
@@ -128,6 +130,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       destinationAddress: updatedRelease.destinationAddress
     });
     setEditingRelease(null);
+    showResult(`Release request ${editingRelease.drNumber} updated successfully.`);
   };
 
   const openApprovalModal = (release: OutgoingRelease) => {
@@ -204,12 +207,12 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
   const filteredReleases = outgoingReleasesList.filter(release => {
     const matchesSearch =
-      release.lguName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.municipality.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.fnfiCategory.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.drNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.lguName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.municipality || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.fnfiCategory || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.drNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.handoverContractId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      release.allocatedBatches.map(batch => batch.batchTokenId).join(' ').toLowerCase().includes(searchTerm.toLowerCase());
+      (release.allocatedBatches || []).map(batch => batch?.batchTokenId || '').join(' ').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesWarehouse = selectedWarehouse === 'All' || release.warehouseSource === selectedWarehouse;
     const matchesStatus = selectedStatus === 'All' || release.deliveryStatus === selectedStatus;
@@ -615,7 +618,17 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         </div>
       )}
 
-      {actionModal && (
+      {actionModal?.type === 'message' && (
+        <SuccessModal
+          isOpen={true}
+          onClose={closeActionModal}
+          message={actionModal.message}
+          title="Successful!"
+          buttonText="Done"
+        />
+      )}
+
+      {actionModal && actionModal.type !== 'message' && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
@@ -625,62 +638,55 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   {actionModal.type === 'inTransit' && 'Mark as In Transit'}
                   {actionModal.type === 'receiverAccept' && 'Confirm LGU Receipt'}
                   {actionModal.type === 'correction' && 'File Correction Record'}
-                  {actionModal.type === 'message' && 'Action Notice'}
                 </h2>
                 {actionModal.release && <p className="text-sm text-gray-500 mt-1">{actionModal.release.drNumber} | {actionModal.release.lguName}</p>}
               </div>
-              <button onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100">
+              <button type="button" onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100">
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
-              {actionModal.type === 'message' ? (
-                <p className="text-sm text-gray-700">{actionModal.message}</p>
-              ) : (
-                <>
-                  {actionModal.type === 'senderSign' && (
-                    <p className="text-sm text-gray-700">Confirm that this warehouse release is ready for dispatch and record the sender signature?</p>
-                  )}
+              {actionModal.type === 'senderSign' && (
+                <p className="text-sm text-gray-700">Confirm that this warehouse release is ready for dispatch and record the sender signature?</p>
+              )}
 
-                  {actionModal.type === 'inTransit' && (
-                    <p className="text-sm text-gray-700">Update this release as in transit to the receiving LGU?</p>
-                  )}
+              {actionModal.type === 'inTransit' && (
+                <p className="text-sm text-gray-700">Update this release as in transit to the receiving LGU?</p>
+              )}
 
-                  {actionModal.type === 'receiverAccept' && (
-                    <p className="text-sm text-gray-700">Confirm LGU receipt and record the receiving location details?</p>
-                  )}
+              {actionModal.type === 'receiverAccept' && (
+                <p className="text-sm text-gray-700">Confirm LGU receipt and record the receiving location details?</p>
+              )}
 
-                  {actionModal.type === 'correction' && (
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details</label>
-                      <textarea
-                        value={actionModal.note || ''}
-                        onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-28"
-                        placeholder="Describe the quantity, location, or delivery issue."
-                      />
-                    </div>
-                  )}
-                </>
+              {actionModal.type === 'correction' && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details</label>
+                  <textarea
+                    value={actionModal.note || ''}
+                    onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-28"
+                    placeholder="Describe the quantity, location, or delivery issue."
+                  />
+                </div>
               )}
             </div>
 
             <div className="flex gap-3 px-6 pb-6">
               <button
+                type="button"
                 onClick={closeActionModal}
                 className="flex-1 px-5 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50"
               >
-                {actionModal.type === 'message' ? 'Close' : 'Cancel'}
+                Cancel
               </button>
-              {actionModal.type !== 'message' && (
-                <button
-                  onClick={handleConfirmReleaseAction}
-                  className="flex-1 px-5 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700"
-                >
-                  Confirm
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleConfirmReleaseAction}
+                className="flex-1 px-5 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700"
+              >
+                Confirm
+              </button>
             </div>
           </div>
         </div>

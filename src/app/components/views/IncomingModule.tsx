@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Calendar, CheckCircle, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
+import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
 import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
 
@@ -113,11 +114,13 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const handleAddGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
     addIncomingGoods(newGoods);
     setShowAddModal(false);
+    showResult(`Incoming shipment of ${newGoods.quantity.toLocaleString()} ${newGoods.unitType} of ${newGoods.fnfiCategory} has been recorded successfully.`);
   };
 
   const handleEditGoods = (updatedGoods: IncomingGoodsForm) => {
     if (!editingIncoming) return;
-    updateIncomingGoods(editingIncoming.id, {
+    const itemTarget = editingIncoming;
+    updateIncomingGoods(itemTarget.id, {
       dateReceived: updatedGoods.dateReceived,
       fnfiCategory: updatedGoods.fnfiCategory,
       quantity: updatedGoods.quantity,
@@ -129,6 +132,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       incidentCode: updatedGoods.incidentCode
     });
     setEditingIncoming(null);
+    showResult(`Incoming record ${itemTarget.id} updated successfully.`);
   };
 
   const openActionModal = (type: IncomingAction, item: IncomingGoods) => {
@@ -159,19 +163,20 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
     if (actionModal.type === 'submit') {
       submitIncomingForVerification(item.id);
-      closeActionModal();
+      showResult(`Incoming record ${item.id} has been submitted for warehouse checker review.`);
       return;
     }
 
     if (actionModal.type === 'verify') {
       verifyIncomingReceipt(item.id);
-      closeActionModal();
+      showResult(`Physical receipt for ${item.id} (${item.quantity.toLocaleString()} ${item.unitType} of ${item.fnfiCategory}) confirmed and added to warehouse stock.`);
       return;
     }
 
     if (actionModal.type === 'correction') {
       if (actionModal.note) requestIncomingCorrection(item.id, actionModal.note);
-      closeActionModal();
+      showResult(`Correction report filed for incoming record ${item.id}.`);
+      return;
     }
   };
 
@@ -185,13 +190,14 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   }, [incomingGoodsList]);
 
   const filteredGoods = incomingGoodsList.filter(item => {
+    const q = (searchTerm || '').toLowerCase();
     const matchesSearch =
-      item.fnfiCategory.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.source.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.destination.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.manifestHash.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (item.batchTokenId || '').toLowerCase().includes(searchTerm.toLowerCase());
+      (item.fnfiCategory || '').toLowerCase().includes(q) ||
+      (item.source || '').toLowerCase().includes(q) ||
+      (item.id || '').toLowerCase().includes(q) ||
+      (item.destination || '').toLowerCase().includes(q) ||
+      (item.manifestHash || '').toLowerCase().includes(q) ||
+      (item.batchTokenId || '').toLowerCase().includes(q);
 
     const matchesWarehouse = selectedWarehouse === 'All' || item.destination === selectedWarehouse;
     const matchesCategory = selectedCategory === 'All' || item.fnfiCategory === selectedCategory;
@@ -481,7 +487,17 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
         />
       )}
 
-      {actionModal && (
+      {actionModal?.type === 'message' && (
+        <SuccessModal
+          isOpen={true}
+          onClose={closeActionModal}
+          message={actionModal.message}
+          title="Successful!"
+          buttonText="Done"
+        />
+      )}
+
+      {actionModal && actionModal.type !== 'message' && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
@@ -490,58 +506,51 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                   {actionModal.type === 'submit' && 'Submit for Checking'}
                   {actionModal.type === 'verify' && 'Confirm Physical Receipt & Stock'}
                   {actionModal.type === 'correction' && 'File Correction Record'}
-                  {actionModal.type === 'message' && 'Action Notice'}
                 </h2>
                 {actionModal.item && <p className="text-sm text-gray-500 mt-1">{actionModal.item.id} | {actionModal.item.fnfiCategory}</p>}
               </div>
-              <button onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100">
+              <button type="button" onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100">
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
-              {actionModal.type === 'message' ? (
-                <p className="text-sm text-gray-700">{actionModal.message}</p>
-              ) : (
-                <>
-                  {actionModal.type === 'submit' && (
-                    <p className="text-sm text-gray-700">Send this incoming delivery to the warehouse checker for review?</p>
-                  )}
+              {actionModal.type === 'submit' && (
+                <p className="text-sm text-gray-700">Send this incoming delivery to the warehouse checker for review?</p>
+              )}
 
-                  {actionModal.type === 'verify' && (
-                    <p className="text-sm text-gray-700">Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into warehouse inventory.</p>
-                  )}
+              {actionModal.type === 'verify' && (
+                <p className="text-sm text-gray-700">Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into warehouse inventory.</p>
+              )}
 
-                  {actionModal.type === 'correction' && (
-                    <div>
-                      <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details</label>
-                      <textarea
-                        value={actionModal.note || ''}
-                        onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-28"
-                        placeholder="Describe the quantity, item, or receiving issue."
-                      />
-                    </div>
-                  )}
-                </>
+              {actionModal.type === 'correction' && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details</label>
+                  <textarea
+                    value={actionModal.note || ''}
+                    onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-28"
+                    placeholder="Describe the quantity, item, or receiving issue."
+                  />
+                </div>
               )}
             </div>
 
             <div className="flex gap-3 px-6 pb-6">
               <button
+                type="button"
                 onClick={closeActionModal}
                 className="flex-1 px-5 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50"
               >
-                {actionModal.type === 'message' ? 'Close' : 'Cancel'}
+                Cancel
               </button>
-              {actionModal.type !== 'message' && (
-                <button
-                  onClick={handleConfirmAction}
-                  className="flex-1 px-5 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700"
-                >
-                  Confirm
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleConfirmAction}
+                className="flex-1 px-5 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700"
+              >
+                Confirm
+              </button>
             </div>
           </div>
         </div>
