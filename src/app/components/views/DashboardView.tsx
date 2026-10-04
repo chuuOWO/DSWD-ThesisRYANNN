@@ -24,13 +24,6 @@ const priorityClasses = {
 export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps) {
   const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports, discrepancyReports } = inventoryState;
   const [showWarehouseOverview, setShowWarehouseOverview] = useState(false);
-  const [lguProvinceFilter, setLguProvinceFilter] = useState<'All' | 'Iloilo' | 'Aklan' | 'Capiz' | 'Antique'>('All');
-
-  const filteredPriorityReports = lguPriorityReports.filter(report => {
-    if (lguProvinceFilter === 'All') return true;
-    const prov = (report.province || '').toLowerCase();
-    return prov === lguProvinceFilter.toLowerCase();
-  });
 
   const totalInventory = inventory.reduce((sum, item) => sum + item.warehouseA + item.warehouseB, 0);
   const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
@@ -176,83 +169,41 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* LGU Priority List with Province Filter */}
-        <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm flex flex-col">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-            <h3 className="text-base font-bold text-gray-900">LGU Priority List</h3>
-            
-            <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              {(['All', 'Iloilo', 'Aklan', 'Capiz', 'Antique'] as const).map(p => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setLguProvinceFilter(p)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
-                    lguProvinceFilter === p
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="max-h-[380px] overflow-y-auto pr-1 space-y-3">
-            {filteredPriorityReports.map(report => (
-              <div key={report.id} className="flex items-center justify-between gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-gray-200 transition">
+        <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">LGU Priority List</h3>
+          <div className="space-y-3">
+            {lguPriorityReports.map(report => (
+              <div key={report.id} className="flex items-center justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-sm text-gray-900">{report.municipality}</p>
-                    <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                      {report.province}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-600 mt-0.5">Affected families: {report.affectedFamilies.toLocaleString()} | Food packs: {report.foodPacks}</p>
+                  <p className="font-bold text-sm text-gray-900">{report.municipality}</p>
+                  <p className="text-xs text-gray-600">Affected families: {report.affectedFamilies.toLocaleString()} | Food packs: {report.foodPacks}</p>
                   <p className="text-xs text-gray-500 mt-1">{report.recommendation}</p>
                 </div>
-                <div className="text-right flex-shrink-0">
+                <div className="text-right">
                   <span className={`inline-flex px-3 py-1 rounded-full border text-xs font-bold ${priorityClasses[report.priorityColor]}`}>{report.priorityColor}</span>
                   <p className="text-lg font-bold text-gray-900 mt-1">{report.urgencyScore}</p>
                 </div>
               </div>
             ))}
-            {filteredPriorityReports.length === 0 && (
-              <div className="py-8 text-center text-xs text-gray-500">
-                No priority reports recorded for {lguProvinceFilter}.
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Recent Release Activity (Scrollable Container) */}
-        <div className="bg-white rounded-xl p-6 border border-gray-200 shadow-sm flex flex-col">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-bold text-gray-900">Recent Release Activity</h3>
-            <span className="text-xs font-semibold text-gray-500">
-              {outgoingReleasesList.length} total releases
-            </span>
-          </div>
-          <div className="max-h-[380px] overflow-y-auto pr-1 space-y-3">
-            {outgoingReleasesList.map(release => (
-              <div key={release.drNumber} className="flex items-start gap-3 p-3 rounded-xl bg-gray-50/70 border border-gray-100 hover:bg-gray-50 transition">
-                <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  {release.receiverGps ? <MapPin className="w-4 h-4 text-green-600" /> : <TruckIcon className="w-4 h-4 text-blue-600" />}
+        <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Recent Release Activity</h3>
+          <div className="space-y-3">
+            {outgoingReleasesList.slice(0, 5).map(release => (
+              <div key={release.drNumber} className="flex items-start gap-3 pb-3 border-b border-gray-100 last:border-0">
+                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  {release.receiverGps ? <MapPin className="w-5 h-5 text-green-600" /> : <TruckIcon className="w-5 h-5 text-blue-600" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-xs text-gray-900">{release.drNumber}: {release.fnfiCategory}</p>
-                  <p className="text-[11px] text-gray-600 mt-0.5">{release.amountApproved || release.amountRequested} kits &bull; {release.municipality} &bull; <span className="font-semibold text-blue-700">{release.deliveryStatus}</span></p>
-                  <p className="text-[10px] text-gray-400 truncate mt-0.5">Ref: {release.handoverContractId || 'not signed'} | Tx: {release.blockchainTxHash ? `${release.blockchainTxHash.slice(0, 10)}...` : 'Pending'}</p>
+                  <p className="font-bold text-sm text-gray-900">{release.drNumber}: {release.fnfiCategory}</p>
+                  <p className="text-xs text-gray-600">{release.amountApproved || release.amountRequested} kits | {release.municipality} | {release.deliveryStatus}</p>
+                  <p className="text-xs text-gray-500 truncate">Release record: {release.handoverContractId || 'not signed yet'} | Receipt reference: {release.blockchainTxHash || '-'}</p>
                 </div>
-                {release.receiverGps && <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-1" />}
+                {release.receiverGps && <CheckCircle className="w-5 h-5 text-green-600" />}
               </div>
             ))}
-            {outgoingReleasesList.length === 0 && (
-              <div className="py-8 text-center text-xs text-gray-500">
-                No recent releases found.
-              </div>
-            )}
           </div>
         </div>
       </div>

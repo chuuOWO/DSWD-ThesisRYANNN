@@ -17,8 +17,8 @@
 }
 
 .leaflet-container .leaflet-tile-pane {
-  filter: grayscale(100%) contrast(88%) brightness(105%);
-  opacity: 0.88;
+  /* Natural vibrant colors for user clarity */
+  opacity: 1;
 }
 
 /* Seamless tile loading & prevent white square flashes */

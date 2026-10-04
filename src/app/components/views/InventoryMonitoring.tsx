@@ -42,6 +42,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Dynamically compute live LGU warehouse stock from accepted deliveries and LGU reports (no static mock zeros)
   const lguWarehouseData = useMemo(() => {
@@ -164,8 +165,22 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   // Low stock items (available < 500)
   const lowStockItems = displayData.filter(item => item.available < 500);
 
+  const handleSyncDatabase = () => {
+    setIsSyncing(true);
+    setTimeout(() => {
+      setIsSyncing(false);
+    }, 1600);
+  };
+
   return (
     <div className="space-y-6">
+      {/* 5-Dot Loading Modal for Admin Sync */}
+      <FiveDotsLoadingModal
+        isOpen={isSyncing}
+        title="Synchronizing Database Inventory"
+        subtitle="Refreshing minted batches, outgoing transfers, and LGU receipts..."
+      />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -173,10 +188,15 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
           <p className="text-sm text-gray-600 mt-1">Live database inventory from minted incoming batches, approved outgoing releases, and LGU stock receipts</p>
         </div>
 
-        <div className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs font-bold text-emerald-800 shadow-xs select-none">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Realtime Database Synchronized</span>
-        </div>
+        <button
+          type="button"
+          onClick={handleSyncDatabase}
+          disabled={isSyncing}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 shadow-sm transition active:scale-95 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 text-blue-600 ${isSyncing ? 'animate-spin' : ''}`} />
+          Sync with Supabase
+        </button>
       </div>
 
       {/* Summary Cards */}

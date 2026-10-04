@@ -207,19 +207,46 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     if (resolvedMuni) setSelectedMunicipality(resolvedMuni);
   };
 
-  // Get available stock for selected category and warehouse
+  const sourceLguRecord = useMemo(() => {
+    if (formData.sourceType !== 'LGU' || !selectedMunicipality) return null;
+    return availableLgus.find(
+      (l) => l.municipality.toLowerCase() === selectedMunicipality.toLowerCase() &&
+             (!selectedProvince || l.province.toLowerCase() === selectedProvince.toLowerCase())
+    );
+  }, [availableLgus, formData.sourceType, selectedMunicipality, selectedProvince]);
+
+  // Get available stock for selected category and source (Warehouse or LGU)
   const getAvailableStock = () => {
     if (!formData.fnfiCategory) return 0;
-    if (formData.sourceType !== 'Warehouse') return 0;
+    if (formData.deliveryMode === 'Direct Delivery') return Infinity;
 
-    const stockItem = availableStock.find(item => item.category === formData.fnfiCategory);
-    if (!stockItem) return 0;
+    if (formData.sourceType === 'Warehouse') {
+      const stockItem = availableStock.find(item => item.category === formData.fnfiCategory);
+      if (!stockItem) return 0;
 
-    // Main warehouses have stock in the inventory system
-    if (formData.warehouseSource === 'Oton Main Warehouse') {
-      return stockItem.warehouseA;
-    } else if (formData.warehouseSource === 'Pototan Main Warehouse') {
-      return stockItem.warehouseB;
+      // Main warehouses have stock in the inventory system
+      if (formData.warehouseSource === 'Oton Main Warehouse') {
+        return stockItem.warehouseA;
+      } else if (formData.warehouseSource === 'Pototan Main Warehouse') {
+        return stockItem.warehouseB;
+      }
+      return 0;
+    }
+
+    if (formData.sourceType === 'LGU') {
+      if (!sourceLguRecord) return 0;
+      const stock = sourceLguRecord.currentStock;
+      if (stock && formData.fnfiCategory in stock) {
+        return stock[formData.fnfiCategory] || 0;
+      }
+      if (formData.fnfiCategory === 'Food Pack') return sourceLguRecord.foodPacks ?? 0;
+      if (formData.fnfiCategory === 'Hygiene Kit') return sourceLguRecord.hygieneKits ?? 0;
+      if (formData.fnfiCategory === 'Family Kit') return sourceLguRecord.familyKits ?? 0;
+      if (formData.fnfiCategory === 'Sleeping Kit') return sourceLguRecord.sleepingKits ?? 0;
+      if (formData.fnfiCategory === 'Kitchen Kit') return sourceLguRecord.kitchenKits ?? 0;
+      if (formData.fnfiCategory === 'Laminated Sack') return sourceLguRecord.laminatedSacks ?? 0;
+      if (formData.fnfiCategory === 'RTEF') return sourceLguRecord.rtef ?? 0;
+      return 0;
     }
 
     return 0;
@@ -253,7 +280,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     }
 
     if (!formData.lguName.trim()) {
-      newErrors.lguName = 'LGU name is required';
+      newErrors.lguName = 'LGU destination is required';
     }
 
     if (!formData.province) {
@@ -279,9 +306,13 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     if (!formData.amountRequested || formData.amountRequested <= 0) {
       newErrors.amountRequested = 'Amount requested must be greater than 0';
     } else {
-      // Only validate stock for main warehouses when not Direct Delivery
-      if (formData.deliveryMode !== 'Direct Delivery' && formData.sourceType === 'Warehouse' && formData.amountRequested > availableQty) {
-        newErrors.amountRequested = 'Insufficient stock in the warehouse.';
+      // Validate stock when not Direct Delivery
+      if (formData.deliveryMode !== 'Direct Delivery') {
+        if (formData.sourceType === 'Warehouse' && formData.amountRequested > availableQty) {
+          newErrors.amountRequested = 'Insufficient stock in the warehouse.';
+        } else if (formData.sourceType === 'LGU' && formData.amountRequested > availableQty) {
+          newErrors.amountRequested = `Insufficient stock in source LGU (${availableQty} available).`;
+        }
       }
     }
 
@@ -300,7 +331,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[99999] p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
@@ -378,55 +409,21 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
             </div>
           </div>
 
-          {/* Quick Select Destination LGU */}
-          <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-3">
-            <label className="block text-xs font-bold text-blue-900 mb-1">
-              Quick Select Registered LGU (Auto-fills Destination, Facility, and GPS Pin)
-            </label>
-            <select
-              value={formData.lguId || ''}
-              onChange={(e) => handleSelectPredefinedLgu(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-blue-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select an LGU to populate location details...</option>
-              {availableLgus.map((lgu) => (
-                <option key={lgu.id} value={lgu.id}>
-                  {lgu.municipality} ({lgu.province}) &mdash; {lgu.lguName || 'Municipal Office'}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Shopee-style Destination Delivery Pin & Address Picker */}
-          <LocationPickerMap
-            latitude={pinLat}
-            longitude={pinLng}
-            destinationAddress={formData.destinationAddress}
-            province={formData.province || selectedProvince}
-            municipality={formData.municipality || selectedMunicipality}
-            onLocationChange={handleLocationChange}
-          />
-
-          {/* LGU Name */}
+          {/* Destination LGU Delivery Pin & Address Breakdown */}
           <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              LGU Name / Drop-Off Facility <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                value={formData.lguName}
-                onChange={(e) => handleChange('lguName', sanitizeTextOnly(e.target.value))}
-                placeholder="e.g., Leon Municipal Evacuation Gym"
-                className={`w-full pl-10 pr-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.lguName ? 'border-red-500' : 'border-gray-300'
-                }`}
-              />
-            </div>
+            <LocationPickerMap
+              latitude={pinLat}
+              longitude={pinLng}
+              destinationAddress={formData.destinationAddress}
+              province={formData.province || selectedProvince}
+              municipality={formData.municipality || selectedMunicipality}
+              lguDestination={formData.lguName}
+              onLguDestinationChange={(name) => handleChange('lguName', name)}
+              onLocationChange={handleLocationChange}
+            />
             {errors.lguName && (
-              <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
+              <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" />
                 {errors.lguName}
               </p>
             )}
@@ -626,23 +623,60 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
             )
           )}
 
-          {/* Available Stock Display - Hidden when Direct Delivery */}
-          {formData.deliveryMode !== 'Direct Delivery' && formData.fnfiCategory && formData.sourceType === 'Warehouse' && (
+          {/* Source LGU Live Stock Breakdown - Shown when Source Type is LGU */}
+          {formData.deliveryMode !== 'Direct Delivery' && formData.sourceType === 'LGU' && selectedMunicipality && sourceLguRecord && (
+            <div className="rounded-xl border border-purple-200 bg-purple-50/70 p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 text-purple-700" />
+                  <span className="text-xs font-bold text-purple-900">
+                    Source LGU Live Stock ({sourceLguRecord.municipality}, {sourceLguRecord.province})
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded border border-purple-200">
+                  LGU On-Hand Balances
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-xs">
+                  <p className="text-[10px] text-gray-500 font-semibold">Food Packs</p>
+                  <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.foodPacks ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-xs">
+                  <p className="text-[10px] text-gray-500 font-semibold">Hygiene Kits</p>
+                  <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.hygieneKits ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-xs">
+                  <p className="text-[10px] text-gray-500 font-semibold">Family Kits</p>
+                  <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.familyKits ?? 0).toLocaleString()}</p>
+                </div>
+                <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-xs">
+                  <p className="text-[10px] text-gray-500 font-semibold">Sleeping Kits</p>
+                  <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.sleepingKits ?? 0).toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Available Stock Display - Shown for Warehouse and LGU sources */}
+          {formData.deliveryMode !== 'Direct Delivery' && formData.fnfiCategory && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Package className="w-5 h-5 text-gray-600" />
                   <div>
                     <p className="text-sm font-bold text-gray-900">Available Stock</p>
-                    <p className="text-xs text-gray-600">{formData.fnfiCategory} in {formData.warehouseSource}</p>
+                    <p className="text-xs text-gray-600">
+                      {formData.fnfiCategory} in {formData.sourceType === 'Warehouse' ? formData.warehouseSource : `${selectedMunicipality || 'Source LGU'} (${selectedProvince})`}
+                    </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className={`text-2xl font-bold ${availableQty > 100 ? 'text-green-600' : availableQty > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
-                    {availableQty > 0 ? availableQty.toLocaleString() : '-'}
+                  <p className={`text-2xl font-bold ${availableQty > 100 ? 'text-green-600' : availableQty > 0 ? 'text-orange-600' : 'text-red-500'}`}>
+                    {availableQty > 0 ? availableQty.toLocaleString() : '0'}
                   </p>
                   <p className="text-xs text-gray-600">
-                    {availableQty > 0 ? 'kits available' : 'N/A'}
+                    {availableQty > 0 ? 'kits available' : 'no stock'}
                   </p>
                 </div>
               </div>

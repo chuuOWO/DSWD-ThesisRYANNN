@@ -38,6 +38,19 @@ export interface LguRecord {
   longitude: number;
   remarks?: string;
   isActive?: boolean;
+  foodPacks: number;
+  hygieneKits: number;
+  sleepingKits: number;
+  kitchenKits: number;
+  familyKits: number;
+  laminatedSacks: number;
+  rtef: number;
+  urgencyScore: number;
+  priorityColor: 'Red' | 'Yellow' | 'Green';
+  affectedFamilies: number;
+  damageIndex: number;
+  recommendation: string;
+  lastReportedAt?: string;
   currentStock?: Record<string, number>;
   createdAt?: string;
   updatedAt?: string;
@@ -171,6 +184,8 @@ export interface ReceiverReleaseRecord {
   wallet_address?: string | null;
   receiver_gps?: string | null;
   destination_address?: string | null;
+  delivery_priority?: number | null;
+  is_held?: boolean | null;
 }
 
 export type TruckerReleaseRecord = ReceiverReleaseRecord;
@@ -239,33 +254,71 @@ export const backendApi = {
           latitude: l.lat,
           longitude: l.lng,
           remarks: '',
-          isActive: true
+          isActive: true,
+          foodPacks: 0,
+          hygieneKits: 0,
+          sleepingKits: 0,
+          kitchenKits: 0,
+          familyKits: 0,
+          laminatedSacks: 0,
+          rtef: 0,
+          urgencyScore: 20,
+          priorityColor: 'Green' as const,
+          affectedFamilies: 0,
+          damageIndex: 0,
+          recommendation: 'Sufficient stock on hand.'
         }));
       }
 
-      return data.map((row: Record<string, any>) => ({
-        id: String(row.id),
-        municipality: String(row.municipality),
-        province: String(row.province),
-        lguName: String(row.lgu_name),
-        contactPerson: String(row.contact_person ?? ''),
-        contactNumber: String(row.contact_number ?? ''),
-        latitude: Number(row.latitude ?? 10.7870),
-        longitude: Number(row.longitude ?? 122.3892),
-        remarks: String(row.remarks ?? ''),
-        isActive: Boolean(row.is_active ?? true),
-        currentStock: {
-          'Food Pack': Number(row.food_packs ?? 0),
-          'Hygiene Kit': Number(row.hygiene_kits ?? 0),
-          'Sleeping Kit': Number(row.sleeping_kits ?? 0),
-          'Kitchen Kit': Number(row.kitchen_kits ?? 0),
-          'Family Kit': Number(row.family_kits ?? 0),
-          'Laminated Sack': Number(row.laminated_sacks ?? 0),
-          'RTEF': Number(row.rtef ?? 0)
-        },
-        createdAt: row.created_at,
-        updatedAt: row.updated_at
-      }));
+      return data.map((row: Record<string, any>) => {
+        const foodPacks = Number(row.food_packs ?? 0);
+        const hygieneKits = Number(row.hygiene_kits ?? 0);
+        const sleepingKits = Number(row.sleeping_kits ?? 0);
+        const kitchenKits = Number(row.kitchen_kits ?? 0);
+        const familyKits = Number(row.family_kits ?? 0);
+        const laminatedSacks = Number(row.laminated_sacks ?? 0);
+        const rtef = Number(row.rtef ?? 0);
+
+        const urgencyScore = Number(row.urgency_score ?? (foodPacks < 100 ? 85 : foodPacks < 300 ? 50 : 20));
+        const priorityColor: 'Red' | 'Yellow' | 'Green' = (row.priority_color as 'Red' | 'Yellow' | 'Green') || (foodPacks < 100 ? 'Red' : foodPacks < 300 ? 'Yellow' : 'Green');
+
+        return {
+          id: String(row.id),
+          municipality: String(row.municipality),
+          province: String(row.province),
+          lguName: String(row.lgu_name),
+          contactPerson: String(row.contact_person ?? ''),
+          contactNumber: String(row.contact_number ?? ''),
+          latitude: Number(row.latitude ?? 10.7870),
+          longitude: Number(row.longitude ?? 122.3892),
+          remarks: String(row.remarks ?? ''),
+          isActive: Boolean(row.is_active ?? true),
+          foodPacks,
+          hygieneKits,
+          sleepingKits,
+          kitchenKits,
+          familyKits,
+          laminatedSacks,
+          rtef,
+          urgencyScore,
+          priorityColor,
+          affectedFamilies: Number(row.affected_families ?? 0),
+          damageIndex: Number(row.damage_index ?? 0),
+          recommendation: String(row.recommendation ?? (priorityColor === 'Red' ? 'Immediate replenishment requested.' : 'Sufficient stock on hand.')),
+          lastReportedAt: row.last_reported_at || row.updated_at,
+          currentStock: {
+            'Food Pack': foodPacks,
+            'Hygiene Kit': hygieneKits,
+            'Sleeping Kit': sleepingKits,
+            'Kitchen Kit': kitchenKits,
+            'Family Kit': familyKits,
+            'Laminated Sack': laminatedSacks,
+            'RTEF': rtef
+          },
+          createdAt: row.created_at,
+          updatedAt: row.updated_at
+        };
+      });
     } catch {
       return PANAY_LGUS.map(l => ({
         id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
@@ -277,7 +330,19 @@ export const backendApi = {
         latitude: l.lat,
         longitude: l.lng,
         remarks: '',
-        isActive: true
+        isActive: true,
+        foodPacks: 0,
+        hygieneKits: 0,
+        sleepingKits: 0,
+        kitchenKits: 0,
+        familyKits: 0,
+        laminatedSacks: 0,
+        rtef: 0,
+        urgencyScore: 20,
+        priorityColor: 'Green' as const,
+        affectedFamilies: 0,
+        damageIndex: 0,
+        recommendation: 'Sufficient stock on hand.'
       }));
     }
   },
@@ -542,7 +607,46 @@ export const backendApi = {
       .single();
 
     throwIfError(error, 'Failed to create LGU inventory report');
+
+    // Materialize authoritative stock & priority metrics into public.lgus
+    try {
+      await supabase
+        .from('lgus')
+        .update({
+          food_packs: payload.foodPacks,
+          hygiene_kits: payload.hygieneKits,
+          family_kits: payload.familyKits,
+          affected_families: payload.affectedFamilies,
+          damage_index: payload.damageIndex,
+          urgency_score: payload.urgencyScore,
+          priority_color: payload.priorityColor,
+          recommendation: payload.recommendation,
+          last_reported_at: new Date().toISOString()
+        })
+        .ilike('municipality', payload.municipality.trim());
+    } catch (lguErr) {
+      console.warn('Failed to update public.lgus on inventory report:', lguErr);
+    }
+
     return data;
+  },
+
+  async updatePackagePriority(drNumber: string, priority: number, isHeld?: boolean) {
+    const updates: Record<string, unknown> = {
+      delivery_priority: priority
+    };
+    if (isHeld !== undefined) {
+      updates.is_held = isHeld;
+    }
+    const { error } = await supabase
+      .from('outgoing_requests')
+      .update(updates)
+      .ilike('dr_number', drNumber.trim());
+
+    if (error) {
+      console.warn('Failed to update package priority in database:', error.message);
+    }
+    return { ok: true };
   },
 
   async createDiscrepancyReport(payload: DiscrepancyReportPayload) {

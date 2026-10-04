@@ -2,7 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
-import { CheckCircle, Clock, Navigation, Route, Truck } from 'lucide-react';
+import {
+  CheckCircle,
+  Clock,
+  Navigation,
+  Route,
+  Truck,
+  ChevronUp,
+  ChevronDown,
+  Pause,
+  Play,
+  Package,
+  Layers,
+  ListOrdered
+} from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord } from '../../services/backendApi';
 import { authApi, type UserProfile } from '../../services/authApi';
@@ -17,6 +30,8 @@ interface TruckPackageInfo {
   quantity: number;
   category: string;
   coords: [number, number] | null;
+  priorityOrder?: number;
+  isHeld?: boolean;
 }
 
 interface TruckRoute {
@@ -166,7 +181,9 @@ const getProgress = (location: TruckLiveLocation, destination: [number, number] 
 const toTruckRoute = (
   location: TruckLiveLocation,
   releases: ReceiverReleaseRecord[],
-  outgoingReleasesList: OutgoingRelease[]
+  outgoingReleasesList: OutgoingRelease[],
+  priorityMap: Record<string, number> = {},
+  heldMap: Record<string, boolean> = {}
 ): TruckRoute => {
   const uniqueMap = new Map<string, ReceiverReleaseRecord>();
   // 1. Fresh releases from getReceiverReleases (direct query from outgoing_requests)
@@ -193,7 +210,9 @@ const toTruckRoute = (
       tx_hash: r.blockchainTxHash,
       wallet_address: undefined,
       receiver_gps: r.receiverGps,
-      destination_address: r.destinationAddress
+      destination_address: r.destinationAddress,
+      delivery_priority: undefined,
+      is_held: undefined
     };
 
     if (!existing) {
@@ -237,13 +256,27 @@ const toTruckRoute = (
         coords = [parts[0], parts[1]];
       }
     }
+
+    const isHeld = heldMap[pkg.dr_number] ?? Boolean(pkg.is_held);
+    const priorityOrder = priorityMap[pkg.dr_number] ?? (pkg.delivery_priority ?? 0);
+
     return {
       drNumber: pkg.dr_number,
       destination: destText || 'Assigned LGU',
       quantity: Number(pkg.amount_approved ?? pkg.amount_requested ?? 0),
       category: pkg.category || 'Relief goods',
-      coords
+      coords,
+      priorityOrder,
+      isHeld
     };
+  });
+
+  // Sort assigned packages: non-held first sorted by priorityOrder ascending, then held packages
+  assignedPackagesList.sort((a, b) => {
+    if (Boolean(a.isHeld) !== Boolean(b.isHeld)) {
+      return a.isHeld ? 1 : -1;
+    }
+    return (a.priorityOrder ?? 0) - (b.priorityOrder ?? 0);
   });
 
   if (activeAssigned.length > 0) {
@@ -276,9 +309,14 @@ const toTruckRoute = (
 
   const originPosition = findCoords(WAREHOUSE_COORDS, origin) ?? WAREHOUSE_COORDS['dswd oton warehouse'];
   
-  // Destination position is strictly from the primary active package's pinned coordinates
-  const primaryPackageWithCoords = assignedPackagesList.find((p) => p.coords !== null);
-  const destinationPosition = primaryPackageWithCoords?.coords ?? null;
+  // Destination position is strictly from the FIRST active, non-held package with pinned coordinates
+  const primaryPackageWithCoords = assignedPackagesList.find((p) => !p.isHeld && p.coords !== null);
+  const destinationPosition = primaryPackageWithCoords?.coords ?? assignedPackagesList[0]?.coords ?? null;
+  const activeDestinationName = primaryPackageWithCoords?.destination ?? assignedPackagesList[0]?.destination ?? destination;
+
+  if (primaryPackageWithCoords) {
+    destination = activeDestinationName;
+  }
 
   const progress = status === 'Delivered' ? 100 : (activeAssigned.length > 0 && destinationPosition ? getProgress(location, destinationPosition) : 0);
 
@@ -604,6 +642,8 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [selectedTruckId, setSelectedTruckId] = useState('');
   const [routeMetrics, setRouteMetrics] = useState<RouteMetrics | null>(null);
+  const [packagePriorities, setPackagePriorities] = useState<Record<string, number>>({});
+  const [heldPackages, setHeldPackages] = useState<Record<string, boolean>>({});
   const mapRef = useRef<L.Map | null>(null);
 
   useEffect(() => {
@@ -697,7 +737,8 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
     .filter(isActiveReceiverLocation)
     .filter((loc) => !isLguReceiverId(loc.truck_id))
     .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
-    .map((location) => toTruckRoute(location, releases, outgoingReleasesList)), [liveLocations, releases, outgoingReleasesList, isLguReceiverId]);
+    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages)),
+    [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages]);
 
   useEffect(() => {
     if (!liveTruckRoutes.length) {
@@ -715,6 +756,40 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
   const handleRouteDataChange = useCallback((data: RouteMetrics | null) => {
     setRouteMetrics(data ? { distanceKm: data.distanceKm, durationMinutes: data.durationMinutes } : null);
   }, []);
+
+  const handleMovePackage = (pkgIndex: number, direction: 'up' | 'down') => {
+    if (!selectedTruck || !selectedTruck.assignedPackagesList) return;
+    const currentPackages = selectedTruck.assignedPackagesList;
+    const targetIndex = direction === 'up' ? pkgIndex - 1 : pkgIndex + 1;
+    if (targetIndex < 0 || targetIndex >= currentPackages.length) return;
+
+    const currentPkg = currentPackages[pkgIndex];
+    const targetPkg = currentPackages[targetIndex];
+
+    const currentPriority = targetIndex;
+    const targetPriority = pkgIndex;
+
+    setPackagePriorities(prev => ({
+      ...prev,
+      [currentPkg.drNumber]: currentPriority,
+      [targetPkg.drNumber]: targetPriority
+    }));
+
+    backendApi.updatePackagePriority(currentPkg.drNumber, currentPriority);
+    backendApi.updatePackagePriority(targetPkg.drNumber, targetPriority);
+  };
+
+  const handleToggleHold = (drNumber: string) => {
+    const isCurrentlyHeld = heldPackages[drNumber] ?? false;
+    const nextHeld = !isCurrentlyHeld;
+
+    setHeldPackages(prev => ({
+      ...prev,
+      [drNumber]: nextHeld
+    }));
+
+    backendApi.updatePackagePriority(drNumber, packagePriorities[drNumber] ?? 0, nextHeld);
+  };
 
   const activeReleases = useMemo(() => {
     return outgoingReleasesList.filter((r) => ['Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus));
@@ -803,27 +878,6 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                 </span>
               </div>
 
-              {liveTruckRoutes.length > 1 && (
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase">Select Active Truck</label>
-                  <div className="mt-2 space-y-1.5">
-                    {liveTruckRoutes.map((route) => (
-                      <button
-                        key={route.id}
-                        type="button"
-                        onClick={() => setSelectedTruckId(route.id)}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition text-left border ${
-                          selectedTruckId === route.id ? 'border-blue-600 bg-blue-50 text-blue-900 font-bold' : 'border-gray-200 hover:bg-gray-50 text-gray-700'
-                        }`}
-                      >
-                        <span>{route.truckName} ({route.destination})</span>
-                        <span className="text-blue-700 font-mono">{route.progress}%</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div className="rounded-lg bg-blue-50 p-3.5 space-y-2 border border-blue-100">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-gray-500">Origin:</span>
@@ -839,26 +893,111 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                 </div>
               </div>
 
-              {selectedTruck.assignedPackagesList.length > 1 && (
-                <div className="rounded-lg border border-purple-200 bg-purple-50/60 p-3 space-y-2">
-                  <p className="text-[11px] font-bold text-purple-900 uppercase">
-                    Assigned Packages ({selectedTruck.assignedPackagesList.length})
+              {/* Delivery Priority Sequence & Route Controls */}
+              {selectedTruck.assignedPackagesList.length > 0 && (
+                <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <ListOrdered className="w-4 h-4 text-[#2500ba]" />
+                      <span className="text-xs font-bold text-gray-900 uppercase tracking-wide">
+                        Cargo Delivery Sequence ({selectedTruck.assignedPackagesList.length})
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-[#2500ba] bg-blue-100 px-2 py-0.5 rounded border border-blue-200">
+                      Admin Priority
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-gray-500 leading-tight">
+                    Change order or hold packages. Active map route and GPS destination immediately snap to #1.
                   </p>
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                    {selectedTruck.assignedPackagesList.map((pkg, idx) => (
-                      <div key={pkg.drNumber} className="bg-white rounded-md p-2 border border-purple-100 text-xs flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-[#2500ba]">DR #{pkg.drNumber}</span>
-                            {idx === 0 && <span className="text-[8px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-bold uppercase">Active Route</span>}
+
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {selectedTruck.assignedPackagesList.map((pkg, idx) => {
+                      const isActiveRoute = idx === 0 && !pkg.isHeld;
+                      return (
+                        <div
+                          key={pkg.drNumber}
+                          className={`rounded-lg p-2.5 border transition-all text-xs flex items-center justify-between gap-2 ${
+                            pkg.isHeld
+                              ? 'bg-amber-50/70 border-amber-200 opacity-80'
+                              : isActiveRoute
+                              ? 'bg-white border-[#2500ba] shadow-sm ring-1 ring-[#2500ba]/40'
+                              : 'bg-white border-gray-200'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded font-mono ${
+                                pkg.isHeld
+                                  ? 'bg-amber-200 text-amber-900'
+                                  : isActiveRoute
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {pkg.isHeld ? 'HELD' : `#${idx + 1}`}
+                              </span>
+                              <span className="font-bold text-[#2500ba]">DR #{pkg.drNumber}</span>
+                              {isActiveRoute && (
+                                <span className="text-[9px] bg-red-600 text-white px-1.5 py-0.2 rounded font-bold uppercase tracking-wider animate-pulse">
+                                  Active Route
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-gray-700 font-semibold truncate mt-0.5">
+                              {pkg.destination}
+                            </p>
+                            <p className="text-[10px] text-gray-500">
+                              {pkg.quantity} {pkg.category}
+                            </p>
                           </div>
-                          <p className="text-[10px] text-gray-500 truncate max-w-[180px]">To: {pkg.destination}</p>
+
+                          {/* Priority Action buttons */}
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              type="button"
+                              title="Move Up in Delivery Priority"
+                              disabled={idx === 0}
+                              onClick={() => handleMovePackage(idx, 'up')}
+                              className="p-1 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed text-gray-700 transition"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title="Move Down in Delivery Priority"
+                              disabled={idx === selectedTruck.assignedPackagesList.length - 1}
+                              onClick={() => handleMovePackage(idx, 'down')}
+                              className="p-1 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed text-gray-700 transition"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              title={pkg.isHeld ? 'Resume Package Delivery' : 'Hold Package Delivery'}
+                              onClick={() => handleToggleHold(pkg.drNumber)}
+                              className={`px-2 py-1 rounded text-[10px] font-bold transition flex items-center gap-1 ${
+                                pkg.isHeld
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  : 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
+                              }`}
+                            >
+                              {pkg.isHeld ? (
+                                <>
+                                  <Play className="w-2.5 h-2.5" />
+                                  <span>Resume</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Pause className="w-2.5 h-2.5" />
+                                  <span>Hold</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
-                        <span className="text-[10px] font-semibold text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded flex-shrink-0">
-                          {pkg.quantity} {pkg.category}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -897,27 +1036,56 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
               </div>
             </div>
 
-            {/* Checkpoints */}
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-gray-900 mb-3">Delivery Checkpoints</h3>
-              <div className="space-y-3">
-                {selectedTruck.checkpoints.map((checkpoint, index) => (
-                  <div key={`${selectedTruck.id}-${checkpoint.label}`} className="flex items-start gap-3 relative pb-2">
-                    {index < selectedTruck.checkpoints.length - 1 && (
-                      <div className="absolute left-[9px] top-6 bottom-0 w-0.5 bg-gray-200" />
-                    )}
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 z-10 ${
-                      checkpoint.completed ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'
-                    }`}>
-                      <CheckCircle className="w-3.5 h-3.5" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-gray-800">{checkpoint.label}</p>
-                      <p className="text-[11px] text-gray-500">{checkpoint.time}</p>
-                      <p className="text-[11px] text-gray-400 mt-0.5">{checkpoint.note}</p>
-                    </div>
-                  </div>
-                ))}
+            {/* Dispatched Fleet Directory (Replaces Delivery Checkpoints) */}
+            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-[#2500ba]" />
+                  Dispatched Fleet Directory ({liveTruckRoutes.length})
+                </h3>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  Live Stream
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                {liveTruckRoutes.map((route) => {
+                  const isSelected = selectedTruckId === route.id;
+                  return (
+                    <button
+                      key={route.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTruckId(route.id);
+                        mapRef.current?.setView([route.position[0], route.position[1]], 14, { animate: true });
+                      }}
+                      className={`w-full text-left p-3 rounded-xl border transition-all ${
+                        isSelected
+                          ? 'border-[#2500ba] bg-blue-50/80 shadow-sm ring-1 ring-[#2500ba]'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/70 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2.5 h-2.5 rounded-full ${isSelected ? 'bg-[#2500ba] animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
+                          <span className="text-xs font-bold text-gray-900">{route.truckName}</span>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                          route.status === 'In Transit' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
+                        }`}>
+                          {route.status}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-600">
+                        <span className="truncate max-w-[170px]">{route.driver || 'Active Receiver'}</span>
+                        <span className="font-bold text-[#2500ba] font-mono">{route.progress}%</span>
+                      </div>
+                      <p className="mt-1 text-[10px] text-gray-500 truncate">
+                        To: {route.destination} &bull; {route.assignedPackagesList.length} pkg(s)
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -932,39 +1100,11 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
               <span className="text-xs text-gray-500 font-mono">Updated: {selectedTruck.updatedAt}</span>
             </div>
 
-            {/* Horizontal Fleet Card Strip */}
-            {liveTruckRoutes.length > 0 && (
-              <div className="px-4 py-2.5 bg-gray-50/80 border-b border-gray-200 flex items-center gap-2 overflow-x-auto">
-                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider flex-shrink-0 mr-1">Fleet:</span>
-                {liveTruckRoutes.map((route) => (
-                  <button
-                    key={route.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedTruckId(route.id);
-                      mapRef.current?.setView([route.position[0], route.position[1]], 14, { animate: true });
-                    }}
-                    className={`flex-shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-all ${
-                      selectedTruckId === route.id
-                        ? 'bg-[#2500ba] text-white border-[#2500ba] shadow-sm font-bold'
-                        : 'bg-white text-gray-700 border-gray-200 hover:border-[#2500ba]/40 font-medium'
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full ${selectedTruckId === route.id ? 'bg-white animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
-                    <span>{route.truckName}</span>
-                    <span className={`text-[10px] ${selectedTruckId === route.id ? 'text-white/80' : 'text-gray-400'}`}>
-                      ({route.destination})
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="flex-1 min-h-[560px]">
+            <div className="flex-1 min-h-[640px]">
               <RouteMap
                 routes={liveTruckRoutes}
                 selectedRoute={selectedTruck}
-                heightClass="h-[560px]"
+                heightClass="h-[640px]"
                 onRouteDataChange={handleRouteDataChange}
                 mapRef={mapRef}
               />

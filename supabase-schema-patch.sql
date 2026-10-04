@@ -44,6 +44,9 @@ alter table public.lgus add column if not exists kitchen_kits integer not null d
 alter table public.lgus add column if not exists family_kits integer not null default 0;
 alter table public.lgus add column if not exists laminated_sacks integer not null default 0;
 alter table public.lgus add column if not exists rtef integer not null default 0;
+alter table public.lgus add column if not exists urgency_score integer default 0;
+alter table public.lgus add column if not exists priority_color text default 'green';
+alter table public.lgus add column if not exists recommendation text default '';
 alter table public.lgus add column if not exists last_reported_at timestamptz default now();
 alter table public.lgus add column if not exists created_at timestamptz default now();
 alter table public.lgus add column if not exists updated_at timestamptz default now();
@@ -269,6 +272,8 @@ create table if not exists public.outgoing_requests (
   receiver_signature text,
   tx_hash text,
   wallet_address text,
+  delivery_priority integer not null default 0,
+  is_held boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -295,6 +300,8 @@ alter table public.outgoing_requests add column if not exists sender_signature t
 alter table public.outgoing_requests add column if not exists receiver_signature text;
 alter table public.outgoing_requests add column if not exists tx_hash text;
 alter table public.outgoing_requests add column if not exists wallet_address text;
+alter table public.outgoing_requests add column if not exists delivery_priority integer not null default 0;
+alter table public.outgoing_requests add column if not exists is_held boolean not null default false;
 alter table public.outgoing_requests add column if not exists created_at timestamptz not null default now();
 
 create unique index if not exists outgoing_requests_dr_number_key

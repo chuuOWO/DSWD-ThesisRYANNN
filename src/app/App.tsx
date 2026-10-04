@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { AuthPage } from './components/auth/AuthPage';
-import { ProfileSettingsModal } from './components/modals/ProfileSettingsModal';
+import { SettingsModal } from './components/modals/SettingsModal';
 import { ConfirmLogoutModal } from './components/modals/ConfirmLogoutModal';
 import { MetaMaskMismatchModal } from './components/modals/MetaMaskMismatchModal';
 import { useInventoryState, type UserRole } from './hooks/useInventoryState';
@@ -270,12 +270,10 @@ export default function App() {
         </main>
       </div>
 
-      <ProfileSettingsModal
+      <SettingsModal
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         profile={activeProfile}
-        onProfileUpdated={refreshProfile}
-        onSignOut={requestSignOut}
       />
 
       <ConfirmLogoutModal

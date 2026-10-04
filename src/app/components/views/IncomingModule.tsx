@@ -55,6 +55,15 @@ const friendlyResult = (message: string) =>
     .replace(/token/gi, 'batch record')
     .replace(/manifest hash/gi, 'delivery reference');
 
+const friendlyAuditDetails = (details = '') =>
+  details
+    .replace(/No blockchain minting yet\./gi, 'Not yet posted to the official stock record.')
+    .replace(/Pre-tokenization record/gi, 'Draft receiving record')
+    .replace(/blockchain/gi, 'official')
+    .replace(/minted/gi, 'posted')
+    .replace(/token/gi, 'batch record')
+    .replace(/manifest hash/gi, 'delivery reference');
+
 type IncomingAction = 'submit' | 'verify' | 'correction' | 'message';
 
 interface IncomingActionModalState {

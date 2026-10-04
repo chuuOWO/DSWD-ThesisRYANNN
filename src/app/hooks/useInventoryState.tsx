@@ -968,17 +968,34 @@ export function useInventoryState(enabled = true) {
 
     const loadDashboard = () => {
       backendApi.getDashboard()
-        .then(({ incoming, outgoing, lguReports, discrepancyReports: discrepancyRows }) => {
+        .then(({ incoming, outgoing, discrepancyReports: discrepancyRows }) => {
           setIncomingGoodsList(incoming.map(mapIncomingManifest));
           setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
-          setLguPriorityReports(deduplicateLguPriorityReports(lguReports.map(mapLGUInventoryReport)));
           setDiscrepancyReports((discrepancyRows ?? []).map(mapDiscrepancyReport));
           setIntegrationMode('backend');
         })
         .catch(() => setIntegrationMode('mock'));
 
       backendApi.getLgus()
-        .then(lgus => setLgusList(lgus))
+        .then(lgus => {
+          setLgusList(lgus);
+          const reportsFromLgus: LGUPriorityReport[] = lgus.map(l => ({
+            id: l.id,
+            municipality: l.municipality,
+            province: l.province,
+            lguName: l.lguName || `${l.municipality} Municipal Office`,
+            foodPacks: l.foodPacks,
+            hygieneKits: l.hygieneKits,
+            familyKits: l.familyKits,
+            affectedFamilies: l.affectedFamilies,
+            damageIndex: l.damageIndex,
+            urgencyScore: l.urgencyScore,
+            priorityColor: l.priorityColor,
+            recommendation: l.recommendation,
+            reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
+          }));
+          setLguPriorityReports(reportsFromLgus);
+        })
         .catch(err => console.warn('Failed to load lgus:', err));
     };
 
@@ -996,6 +1013,22 @@ export function useInventoryState(enabled = true) {
     try {
       const list = await backendApi.getLgus();
       setLgusList(list);
+      const reportsFromLgus: LGUPriorityReport[] = list.map(l => ({
+        id: l.id,
+        municipality: l.municipality,
+        province: l.province,
+        lguName: l.lguName || `${l.municipality} Municipal Office`,
+        foodPacks: l.foodPacks,
+        hygieneKits: l.hygieneKits,
+        familyKits: l.familyKits,
+        affectedFamilies: l.affectedFamilies,
+        damageIndex: l.damageIndex,
+        urgencyScore: l.urgencyScore,
+        priorityColor: l.priorityColor,
+        recommendation: l.recommendation,
+        reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
+      }));
+      setLguPriorityReports(reportsFromLgus);
     } catch (err) {
       console.warn('Failed to refresh lgus:', err);
     }

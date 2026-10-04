@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
-import { Crosshair, MapPin, Search, Loader2, Info } from 'lucide-react';
+import { MapContainer, Marker, TileLayer, Polygon, useMap, useMapEvents } from 'react-leaflet';
+import { Crosshair, MapPin, Search, Loader2, Info, AlertTriangle } from 'lucide-react';
 import {
   findPanayLgu,
   PANAY_LGUS,
   PANAY_PROVINCES,
   PANAY_MUNICIPALITIES_BY_PROVINCE
 } from '../../data/panayLguDirectory';
+import {
+  isPointInProvince,
+  getInvertedMaskPositions,
+  PROVINCE_BOUNDS,
+  PanayProvince
+} from '../../data/panayProvinceBoundaries';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 
 export interface LocationAddressDetails {
@@ -31,6 +37,8 @@ interface LocationPickerMapProps {
   ) => void;
   province?: string;
   municipality?: string;
+  lguDestination?: string;
+  onLguDestinationChange?: (name: string) => void;
 }
 
 // Custom high-visibility delivery pin marker
@@ -79,8 +87,24 @@ interface SearchResultItem {
 function MapPanController({ center, zoom = 14 }: { center: [number, number]; zoom?: number }) {
   const map = useMap();
   useEffect(() => {
-    map.flyTo(center, zoom, { duration: 1.2 });
+    map.flyTo(center, zoom, { duration: 1.0 });
   }, [center, map, zoom]);
+  return null;
+}
+
+function MapProvinceBoundsController({ province }: { province: string }) {
+  const map = useMap();
+  const prevProv = useRef<string>(province);
+
+  useEffect(() => {
+    if (prevProv.current !== province) {
+      prevProv.current = province;
+      const norm = province.trim() as PanayProvince;
+      if (norm in PROVINCE_BOUNDS) {
+        map.fitBounds(PROVINCE_BOUNDS[norm], { padding: [30, 30], animate: true });
+      }
+    }
+  }, [map, province]);
   return null;
 }
 
@@ -99,10 +123,12 @@ export function LocationPickerMap({
   destinationAddress = '',
   onLocationChange,
   province = 'Iloilo',
-  municipality = ''
+  municipality = '',
+  lguDestination = '',
+  onLguDestinationChange
 }: LocationPickerMapProps) {
   // Structured Panay Island address components
-  const [building, setBuilding] = useState('');
+  const [building, setBuilding] = useState(lguDestination || '');
   const [street, setStreet] = useState('');
   const [barangay, setBarangay] = useState('');
   const [district, setDistrict] = useState('NA');
@@ -113,6 +139,7 @@ export function LocationPickerMap({
     municipality || 'Oton'
   );
 
+  const [boundaryWarning, setBoundaryWarning] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
@@ -123,6 +150,13 @@ export function LocationPickerMap({
   // Fallback initial position if 0 or invalid
   const validLat = typeof latitude === 'number' && !isNaN(latitude) && latitude !== 0 ? latitude : 10.6975;
   const validLng = typeof longitude === 'number' && !isNaN(longitude) && longitude !== 0 ? longitude : 122.4764;
+
+  // Sync lguDestination prop if changed externally
+  useEffect(() => {
+    if (lguDestination !== undefined && lguDestination !== building) {
+      setBuilding(lguDestination);
+    }
+  }, [lguDestination]);
 
   // Helper to compile structured address string
   const compileAddress = (
@@ -179,6 +213,7 @@ export function LocationPickerMap({
 
   const handleProvinceSelect = (newProv: string) => {
     setSelectedProvince(newProv);
+    setBoundaryWarning(null);
     const munList = PANAY_MUNICIPALITIES_BY_PROVINCE[newProv] || [];
     const newMun = munList[0] || '';
     setSelectedMunicipality(newMun);
@@ -190,6 +225,7 @@ export function LocationPickerMap({
 
   const handleMunicipalitySelect = (newMun: string) => {
     setSelectedMunicipality(newMun);
+    setBoundaryWarning(null);
     const lgu = findPanayLgu(newMun, selectedProvince);
     const newLat = lgu?.lat || validLat;
     const newLng = lgu?.lng || validLng;
@@ -200,20 +236,28 @@ export function LocationPickerMap({
     const marker = markerRef.current;
     if (marker) {
       const latLng = marker.getLatLng();
+      if (!isPointInProvince(latLng.lat, latLng.lng, selectedProvince)) {
+        setBoundaryWarning(`Pin must remain within ${selectedProvince}. Repositioning inside boundary.`);
+        marker.setLatLng([validLat, validLng]);
+        return;
+      }
+      setBoundaryWarning(null);
       updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, latLng.lat, latLng.lng);
     }
   };
 
   const handleMapClick = (lat: number, lng: number) => {
+    if (!isPointInProvince(lat, lng, selectedProvince)) {
+      setBoundaryWarning(`Coordinates are outside ${selectedProvince}. Please click inside ${selectedProvince}.`);
+      return;
+    }
+    setBoundaryWarning(null);
     updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, lat, lng);
   };
 
   // Universal building-level search using Photon + Nominatim with Panay directory fallback
-  const handleSearch = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const query = searchQuery.trim();
     if (!query) return;
 
@@ -375,11 +419,13 @@ export function LocationPickerMap({
     const nextDistrict = item.district || district;
 
     setBuilding(nextBuilding);
+    onLguDestinationChange?.(nextBuilding);
     if (item.street) setStreet(item.street);
     if (item.barangay) setBarangay(item.barangay);
     if (item.district) setDistrict(item.district);
 
     setTargetZoom(17);
+    setBoundaryWarning(null);
 
     updateAddressFields(
       nextBuilding,
@@ -397,6 +443,7 @@ export function LocationPickerMap({
 
   const resetToMunicipalityCenter = () => {
     setTargetZoom(14);
+    setBoundaryWarning(null);
     const lgu = findPanayLgu(selectedMunicipality || 'Oton', selectedProvince);
     if (lgu) {
       updateAddressFields(
@@ -414,16 +461,26 @@ export function LocationPickerMap({
 
   const currentCenter = useMemo<[number, number]>(() => [validLat, validLng], [validLat, validLng]);
 
+  // Inverted mask: World rectangle outer boundary with selected province as hole
+  const maskPositions = useMemo(() => {
+    return getInvertedMaskPositions(selectedProvince);
+  }, [selectedProvince]);
+
   return (
     <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-1.5 text-xs font-bold text-gray-800 uppercase tracking-wide">
           <MapPin className="h-4 w-4 text-[#2500ba]" />
-          Destination Delivery Location & Address (Panay Only)
+          Destination LGU
         </label>
-        <span className="text-[11px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-          {validLat.toFixed(5)}, {validLng.toFixed(5)}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
+            Spotlight: {selectedProvince}
+          </span>
+          <span className="text-[11px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+            {validLat.toFixed(5)}, {validLng.toFixed(5)}
+          </span>
+        </div>
       </div>
 
       {/* Structured Address Entry (Panay Island Only) */}
@@ -435,18 +492,20 @@ export function LocationPickerMap({
           </span>
         </div>
 
-        {/* Row 1: Building / Facility & Street */}
+        {/* Row 1: LGU Destination (Facility / Drop-Off) & Street */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">
-              Building / Facility Name <span className="text-red-500">*</span>
+            <label className="block text-[11px] font-bold text-gray-700 mb-1">
+              LGU Destination (Facility / Drop-Off) <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               value={building}
               onChange={(e) => {
-                setBuilding(e.target.value);
-                updateAddressFields(e.target.value, street, barangay, district, selectedMunicipality, selectedProvince);
+                const val = e.target.value;
+                setBuilding(val);
+                onLguDestinationChange?.(val);
+                updateAddressFields(val, street, barangay, district, selectedMunicipality, selectedProvince);
               }}
               placeholder="e.g. Municipal Evacuation Center / Gym"
               className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
@@ -544,37 +603,38 @@ export function LocationPickerMap({
         {/* Compiled Address Summary */}
         <div className="pt-1">
           <label className="block text-[10.5px] font-semibold text-gray-500 mb-0.5">
-            Compiled Full Destination Address:
+            Compiled Destination LGU Address:
           </label>
           <div className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 truncate select-all">
-            {destinationAddress || 'Building, Barangay, Municipality, Province'}
+            {destinationAddress || 'LGU Facility, Barangay, Municipality, Province'}
           </div>
         </div>
       </div>
 
+      {/* Boundary Warning Alert */}
+      {boundaryWarning && (
+        <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-300 p-2 text-xs text-amber-800 font-semibold animate-pulse">
+          <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0" />
+          <span>{boundaryWarning}</span>
+        </div>
+      )}
+
       {/* Mini-Map Search Bar */}
       <div className="relative">
-        <div className="flex gap-1.5">
+        <form onSubmit={handleSearch} className="flex gap-1.5">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleSearch(e);
-                }
-              }}
-              placeholder="Search Panay landmark, gym, or school..."
+              placeholder={`Search landmarks in ${selectedProvince}...`}
               className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
             />
           </div>
           <button
             type="button"
-            onClick={(e) => handleSearch(e)}
+            onClick={() => handleSearch()}
             disabled={isSearching}
             className="rounded-lg bg-[#2500ba] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
           >
@@ -589,7 +649,7 @@ export function LocationPickerMap({
             <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
             <span className="hidden sm:inline">Center</span>
           </button>
-        </div>
+        </form>
 
         {/* Search Results Dropdown */}
         {showResults && searchResults.length > 0 && (
@@ -610,7 +670,7 @@ export function LocationPickerMap({
       </div>
 
       {/* Interactive Mini-Map Container */}
-      <div className="relative h-56 w-full overflow-hidden rounded-lg border border-gray-300 shadow-inner">
+      <div className="relative h-60 w-full overflow-hidden rounded-lg border border-gray-300 shadow-inner">
         <MapContainer
           center={currentCenter}
           zoom={14}
@@ -623,6 +683,23 @@ export function LocationPickerMap({
             subdomains={MAP_TILE_CONFIG.subdomains}
             maxZoom={MAP_TILE_CONFIG.maxZoom}
           />
+
+          {/* Inverted Province Spotlight Mask: Darkens everything outside selectedProvince */}
+          {maskPositions.length > 0 && (
+            <Polygon
+              positions={maskPositions}
+              pathOptions={{
+                fillColor: '#0f172a',
+                fillOpacity: 0.58,
+                color: '#2500ba',
+                weight: 2,
+                opacity: 0.9,
+                fillRule: 'evenodd'
+              }}
+            />
+          )}
+
+          <MapProvinceBoundsController province={selectedProvince} />
           <MapPanController center={currentCenter} zoom={targetZoom} />
           <MapClickHandler onClick={handleMapClick} />
           <Marker
@@ -636,11 +713,12 @@ export function LocationPickerMap({
           />
         </MapContainer>
 
-        <div className="absolute bottom-2 left-2 z-[999] rounded bg-white/90 px-2 py-1 text-[10px] font-semibold text-gray-600 shadow backdrop-blur-sm flex items-center gap-1">
-          <Info size={12} className="text-[#2500ba] flex-shrink-0" />
-          <span>Drag pin or click map to pinpoint exact delivery facility</span>
+        <div className="absolute bottom-2 left-2 z-[999] rounded bg-white/95 px-2.5 py-1 text-[10px] font-semibold text-gray-700 shadow backdrop-blur-sm flex items-center gap-1.5 border border-gray-200">
+          <Info size={13} className="text-[#2500ba] flex-shrink-0" />
+          <span>Pin locked strictly to <strong>{selectedProvince}</strong>. Drag or click within highlighted boundary.</span>
         </div>
       </div>
     </div>
   );
 }
+
