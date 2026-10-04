@@ -50,15 +50,6 @@ export function Header({
           </p>
         </div>
       </div>
-
-      <div className="flex items-center gap-3">
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 border border-white/20 text-white text-xs">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-semibold">Live Operations</span>
-          <span className="text-blue-200">|</span>
-          <span className="text-blue-100 font-mono text-[11px]">Amoy Polygon</span>
-        </div>
-      </div>
     </div>
   );
 }
