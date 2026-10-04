@@ -68,16 +68,14 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
 
       {/* Footer / Profile Status & Settings Button */}
       <div className="p-4 border-t border-gray-200 bg-white">
-        {/* User Profile Card */}
+        {/* User Profile Card (Display Badge - Non-clickable) */}
         {profile && (
           <div
-            onClick={() => (onOpenSettings ? onOpenSettings() : setIsProfileModalOpen(true))}
-            className={`mb-2 p-2 rounded-xl cursor-pointer transition flex items-center gap-2.5 group relative ${
+            className={`mb-2 p-2.5 rounded-xl border flex items-center gap-2.5 select-none ${
               !profile.walletAddress
-                ? 'bg-red-50/80 hover:bg-red-100/80 border-2 border-red-500 ring-2 ring-red-400/40 shadow-sm'
-                : 'bg-gray-50 hover:bg-gray-100 border border-gray-200/80'
+                ? 'bg-red-50/80 border-red-300'
+                : 'bg-gray-50 border-gray-200'
             }`}
-            title={!profile.walletAddress ? "You need to open settings and link it to MetaMask." : "Click to open settings"}
           >
             <div className="relative flex-shrink-0">
               {profile.avatarUrl ? (
@@ -103,7 +101,7 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1">
-                <p className="text-xs font-bold text-gray-900 truncate group-hover:text-blue-700 transition-colors">
+                <p className="text-xs font-bold text-gray-900 truncate">
                   {profile.fullName || 'DSWD Officer'}
                 </p>
                 {!profile.walletAddress && (
@@ -114,13 +112,6 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
                 {!profile.walletAddress ? 'MetaMask Unlinked' : (profile.role === 'dswd_admin' ? 'DSWD Admin' : 'Officer')}
               </p>
             </div>
-
-            {!profile.walletAddress && (
-              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                You need to open settings and link it to MetaMask.
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-red-900" />
-              </div>
-            )}
           </div>
         )}
 

@@ -274,6 +274,7 @@ export default function App() {
         isOpen={isProfileModalOpen}
         onClose={() => setIsProfileModalOpen(false)}
         profile={activeProfile}
+        onSignOut={requestSignOut}
       />
 
       <ConfirmLogoutModal

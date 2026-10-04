@@ -32,6 +32,7 @@ interface SettingsModalProps {
   onClose: () => void;
   profile: UserProfile;
   initialTab?: 'profile' | 'metamask' | 'data';
+  onSignOut?: () => void;
 }
 
 type SettingsTab = 'profile' | 'metamask' | 'data';
@@ -92,7 +93,8 @@ export function SettingsModal({
   isOpen,
   onClose,
   profile,
-  initialTab = 'profile'
+  initialTab = 'profile',
+  onSignOut
 }: SettingsModalProps) {
   const { refreshProfile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
@@ -352,75 +354,141 @@ export function SettingsModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="relative w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/80 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-              <User className="w-4 h-4" />
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-150">
+      <div className="relative w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col md:flex-row h-[700px] max-h-[92vh]">
+        {/* =================================================================
+            LEFT COLUMN: SETTINGS SIDEBAR
+            ================================================================= */}
+        <aside className="w-full md:w-60 bg-gray-50/90 border-b md:border-b-0 md:border-r border-gray-200 flex flex-col justify-between p-4 flex-shrink-0 select-none">
+          <div className="space-y-4">
+            {/* Settings Brand / Heading */}
+            <div className="px-2 py-1">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#2500ba] text-white flex items-center justify-center shadow-xs">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-extrabold text-gray-900 tracking-tight leading-tight">Settings</h2>
+                  <p className="text-[10.5px] text-gray-500 font-medium">System & Account Control</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-bold text-gray-900 leading-tight">Settings</h2>
-              <p className="text-[11px] text-gray-500">System Preferences, Account Profile, and Master Data</p>
-            </div>
+
+            {/* Vertical Navigation Links */}
+            <nav className="space-y-1.5">
+              {/* Profile Tab */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('profile')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                  activeTab === 'profile'
+                    ? 'bg-[#2500ba] text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200/70 hover:text-gray-900'
+                }`}
+              >
+                <User className={`w-4 h-4 flex-shrink-0 ${activeTab === 'profile' ? 'text-white' : 'text-gray-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="leading-tight">Profile</div>
+                  <div className={`text-[10px] font-normal truncate ${activeTab === 'profile' ? 'text-blue-100' : 'text-gray-400'}`}>
+                    Personal details & photo
+                  </div>
+                </div>
+              </button>
+
+              {/* MetaMask Tab */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('metamask')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                  activeTab === 'metamask'
+                    ? 'bg-[#2500ba] text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200/70 hover:text-gray-900'
+                }`}
+              >
+                <Wallet className={`w-4 h-4 flex-shrink-0 ${activeTab === 'metamask' ? 'text-white' : 'text-gray-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="leading-tight">MetaMask</span>
+                    {!profile.walletAddress && (
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="Wallet unlinked" />
+                    )}
+                  </div>
+                  <div className={`text-[10px] font-normal truncate ${activeTab === 'metamask' ? 'text-blue-100' : 'text-gray-400'}`}>
+                    Web3 wallet & signing
+                  </div>
+                </div>
+              </button>
+
+              {/* Master Data Tab */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('data')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                  activeTab === 'data'
+                    ? 'bg-[#2500ba] text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200/70 hover:text-gray-900'
+                }`}
+              >
+                <Database className={`w-4 h-4 flex-shrink-0 ${activeTab === 'data' ? 'text-white' : 'text-gray-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="leading-tight">Master Data</div>
+                  <div className={`text-[10px] font-normal truncate ${activeTab === 'data' ? 'text-blue-100' : 'text-gray-400'}`}>
+                    Kits, hubs & warehouses
+                  </div>
+                </div>
+              </button>
+            </nav>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer"
-          >
-            <X size={18} />
-          </button>
-        </div>
 
-        {/* 3 Main Tabs Navigation */}
-        <div className="flex border-b border-gray-200 bg-white px-6 pt-2 flex-shrink-0 gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('profile')}
-            className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition cursor-pointer ${
-              activeTab === 'profile'
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>Profile</span>
-          </button>
+          {/* Settings Sidebar Footer: Sign Out Button */}
+          <div className="pt-3 border-t border-gray-200">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                if (onSignOut) {
+                  onSignOut();
+                } else {
+                  signOut();
+                }
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-red-600 hover:bg-red-50 hover:text-red-700 border border-transparent hover:border-red-200 transition cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 flex-shrink-0 text-red-600" />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </aside>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('metamask')}
-            className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition cursor-pointer ${
-              activeTab === 'metamask'
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            <Wallet className="w-4 h-4" />
-            <span>MetaMask</span>
-            {!profile.walletAddress && (
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            )}
-          </button>
+        {/* =================================================================
+            RIGHT COLUMN: TAB CONTENT WORKSPACE
+            ================================================================= */}
+        <div className="flex-1 flex flex-col min-w-0 bg-white overflow-hidden">
+          {/* Top Bar for Content Area */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0 bg-white">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 leading-tight">
+                {activeTab === 'profile' && 'Profile Settings'}
+                {activeTab === 'metamask' && 'MetaMask Wallet Connection'}
+                {activeTab === 'data' && 'Master Data Configuration'}
+              </h3>
+              <p className="text-[11px] text-gray-500">
+                {activeTab === 'profile' && 'Manage your officer credentials, avatar photo, and contact information.'}
+                {activeTab === 'metamask' && 'Link your MetaMask Ethereum address to sign relief operations on blockchain.'}
+                {activeTab === 'data' && 'View and configure relief items, distribution supply sources, and warehouses.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-xl text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('data')}
-            className={`flex items-center gap-2 pb-3 px-3 text-xs font-bold border-b-2 transition cursor-pointer ${
-              activeTab === 'data'
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            <Database className="w-4 h-4" />
-            <span>Data</span>
-          </button>
-        </div>
-
-        {/* Tab Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* Scrollable Content Body */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* =================================================================
               TAB 1: PROFILE
               ================================================================= */}
@@ -849,6 +917,7 @@ export function SettingsModal({
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 }
 
