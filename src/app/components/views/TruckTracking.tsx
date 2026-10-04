@@ -469,6 +469,21 @@ function MapCameraController({ selectedRoute }: { selectedRoute: TruckRoute | un
   return null;
 }
 
+function MapResizeWatcher() {
+  const map = useMap();
+  useEffect(() => {
+    map.invalidateSize();
+    const timer = setTimeout(() => map.invalidateSize(), 200);
+    const handleResize = () => map.invalidateSize();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [map]);
+  return null;
+}
+
 
 const createTruckIcon = (status: TruckStatus, isSelected: boolean) => L.divIcon({
   className: 'truck-marker-clean',
@@ -534,13 +549,13 @@ const createDestPinIcon = (isPrimary: boolean) => L.divIcon({
 function RouteMap({
   routes,
   selectedRoute,
-  heightClass,
+  heightClass = 'h-full min-h-[640px]',
   onRouteDataChange,
   mapRef: externalMapRef
 }: {
   routes: TruckRoute[];
   selectedRoute?: TruckRoute;
-  heightClass: string;
+  heightClass?: string;
   onRouteDataChange: (data: RouteMetrics | null) => void;
   mapRef?: React.MutableRefObject<L.Map | null>;
 }) {
@@ -549,8 +564,14 @@ function RouteMap({
   const center = selectedRoute?.position ?? routes[0]?.position ?? [10.72, 122.51];
 
   return (
-    <div className="relative w-full">
-      <MapContainer key={selectedRoute ? selectedRoute.id : 'all-trucks'} center={center} zoom={13} scrollWheelZoom className={`${heightClass} w-full`}>
+    <div className="relative w-full h-full min-h-[640px] flex-1 flex flex-col">
+      <MapContainer
+        key={selectedRoute ? selectedRoute.id : 'all-trucks'}
+        center={center}
+        zoom={13}
+        scrollWheelZoom
+        className={`w-full h-full min-h-[640px] flex-1 ${heightClass}`}
+      >
         <TileLayer
           attribution={MAP_TILE_CONFIG.attribution}
           url={MAP_TILE_CONFIG.url}
@@ -559,6 +580,7 @@ function RouteMap({
         />
         <MapRefCapture mapRef={mapRef} />
         <MapCameraController selectedRoute={selectedRoute} />
+        <MapResizeWatcher />
         {selectedRoute && selectedRoute.destinationPosition && <RoadSnappedRoute route={selectedRoute} onRouteDataChange={onRouteDataChange} />}
 
         {/* Destination pins for selected truck */}
@@ -1106,8 +1128,8 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
           </div>
 
           {/* Right Column: Full Interactive Road-Snapped Map */}
-          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm flex flex-col">
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm flex flex-col h-full min-h-[640px]">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-blue-600" />
                 <span className="text-sm font-bold text-gray-800">Map</span>
@@ -1115,11 +1137,11 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
               <span className="text-xs text-gray-500 font-mono">Updated: {selectedTruck.updatedAt}</span>
             </div>
 
-            <div className="flex-1 min-h-[640px]">
+            <div className="flex-1 w-full h-full min-h-[640px] flex flex-col relative">
               <RouteMap
                 routes={liveTruckRoutes}
                 selectedRoute={selectedTruck}
-                heightClass="h-[640px]"
+                heightClass="h-full flex-1"
                 onRouteDataChange={handleRouteDataChange}
                 mapRef={mapRef}
               />

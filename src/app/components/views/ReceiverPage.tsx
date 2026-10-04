@@ -1772,20 +1772,11 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
             </div>
 
             {location && (
-              <p className="mb-2 text-[9px] font-mono text-gray-400">
+              <p className="text-[9px] font-mono text-gray-400">
                 {formatCoordinate(location.latitude)}, {formatCoordinate(location.longitude)}
                 {location.accuracy ? ` (±${Math.round(location.accuracy)}m)` : ''}
               </p>
             )}
-
-            <button
-              type="button"
-              onClick={() => nav('scan')}
-              className="w-full rounded-full bg-[#2500ba] py-3 text-[11px] font-bold text-white shadow-md hover:bg-blue-800 active:scale-[0.99] transition flex items-center justify-center gap-2"
-            >
-              <ScanLine size={15} />
-              {isInTransit ? 'Scan Next Package / Pickup' : 'Pick up and Scan Package QR'}
-            </button>
           </div>
 
           {/* 5 Dots Smooth Loading Screens */}
@@ -2047,58 +2038,61 @@ function ScanModal({
     }
   }, []);
 
+  const handleCancel = () => {
+    closeCamera();
+    onClose();
+  };
+
   return (
-    <div className="absolute inset-0 z-30 flex flex-col justify-between overflow-hidden bg-[#15131f]/95 p-5 text-white">
-      <div>
-        <div className="flex items-center justify-between">
-          <button
-            onClick={onClose}
-            aria-label="Back"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition"
-          >
-            <ChevronLeft size={20} />
-          </button>
-          <div className="text-center">
-            <p className="text-xs font-bold">Scan Package QR Code</p>
-            <p className="text-[9.5px] text-white/60">Align camera with package QR</p>
+    <div className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden bg-black p-4 text-white animate-in fade-in duration-150">
+      <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-full bg-white/20 flex items-center justify-center">
+            <ScanLine size={16} />
           </div>
-          <div className="h-8 w-8" />
+          <div>
+            <p className="text-xs font-bold">QR Camera Scanner</p>
+            <p className="text-[10px] text-white/70">Point at package QR payload</p>
+          </div>
         </div>
-
-        <div className="relative mx-auto mt-6 aspect-square w-full max-w-[230px] overflow-hidden rounded-3xl border-4 border-[#2500ba] bg-black shadow-2xl">
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className={`h-full w-full object-cover ${cameraOpen ? 'opacity-100' : 'opacity-25'}`}
-          />
-          {!cameraOpen && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-              <ScanLine size={64} className="text-white/60 animate-pulse" />
-              <p className="text-[10px] text-white/50">Starting Camera...</p>
-            </div>
-          )}
-          {cameraOpen && (
-            <div className="absolute left-4 right-4 top-1/2 h-0.5 bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-pulse" />
-          )}
-        </div>
-
-        <p className="mt-3 text-center text-[11px] text-white/75 px-4 leading-relaxed">{message}</p>
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 text-white transition"
+        >
+          <X size={16} />
+        </button>
       </div>
 
-      <div className="space-y-3 pb-2">
+      {/* Viewfinder Reticle */}
+      <div className="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-2xl bg-black/60 border border-white/20">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className={`absolute inset-0 w-full h-full object-cover ${cameraOpen ? 'opacity-100' : 'opacity-25'}`}
+        />
+
+        <div className="relative z-10 w-56 h-56 border-2 border-white/80 rounded-2xl pointer-events-none flex items-center justify-center shadow-2xl">
+          <div className="w-48 h-48 border border-white/40 rounded-xl animate-pulse" />
+          <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-amber-400" />
+          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-amber-400" />
+          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-amber-400" />
+          <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-amber-400" />
+        </div>
+      </div>
+
+      <div className="space-y-3 pb-2 text-center">
+        <p className="text-xs font-medium text-white/80">{message}</p>
         <button
-          onClick={cameraOpen ? closeCamera : onStart}
+          type="button"
+          onClick={handleCancel}
           disabled={isSigning}
-          className="w-full rounded-2xl bg-white py-2.5 text-xs font-bold text-[#2500ba] shadow-lg disabled:opacity-50 hover:bg-gray-100 active:scale-[0.99] transition flex items-center justify-center gap-2"
+          className="w-full rounded-xl bg-white/15 py-2.5 text-xs font-bold text-white hover:bg-white/25 transition border border-white/20 disabled:opacity-50"
         >
-          <ScanLine size={15} />
-          {cameraOpen ? 'Pause Camera' : 'Start Camera Scanner'}
+          Cancel Scanner
         </button>
-        <p className="text-center text-[9.5px] text-white/40">
-          Direct camera QR code scanning only.
-        </p>
       </div>
     </div>
   );

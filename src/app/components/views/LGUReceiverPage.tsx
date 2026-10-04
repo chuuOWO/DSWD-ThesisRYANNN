@@ -34,7 +34,7 @@ import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 interface LGUReceiverPageProps {
   profile: UserProfile;
   releases: OutgoingRelease[];
-  onAccept: (drNumber: string) => Promise<{ ok: boolean; message: string }>;
+  onAccept: (drNumber: string, actorRole?: any, actorLguMunicipality?: string) => Promise<{ ok: boolean; message: string }>;
   onSignOut: () => void;
 }
 
@@ -662,7 +662,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
       });
 
       // Update parent inventory state
-      await onAccept(canonicalDrNumber);
+      await onAccept(canonicalDrNumber, 'LGUReceiver', finalMuni);
       await loadLguStock();
 
       // Smooth 5-dot modal completes into "Done!"

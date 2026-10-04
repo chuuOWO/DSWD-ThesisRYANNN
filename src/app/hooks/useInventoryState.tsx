@@ -968,12 +968,37 @@ export function useInventoryState(enabled = true) {
     });
   };
 
-  const receiverAcceptWithGps = async (drNumber: string, actorRole: UserRole = 'LGUReceiver') => {
+  const receiverAcceptWithGps = async (
+    drNumber: string,
+    actorRole: UserRole = 'LGUReceiver',
+    actorLguMunicipality?: string
+  ) => {
     if (actorRole !== 'LGUReceiver') return { ok: false, message: 'RBAC: only LGUReceiver can confirm receipt.' };
     const targetDrUpper = drNumber.trim().toUpperCase();
     const release = outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
     if (!release) return { ok: false, message: 'Release not found.' };
     const canonicalDr = release.drNumber;
+
+    // Strict Destination Validation:
+    if (actorLguMunicipality && actorLguMunicipality.trim()) {
+      const cleanActorMuni = actorLguMunicipality.trim().toLowerCase();
+      const releaseMuni = (release.municipality || '').trim().toLowerCase();
+      const releaseLgu = (release.lguName || '').trim().toLowerCase();
+      const releaseDest = (release.destinationAddress || '').trim().toLowerCase();
+
+      const matches = releaseMuni.includes(cleanActorMuni) ||
+                      cleanActorMuni.includes(releaseMuni) ||
+                      releaseLgu.includes(cleanActorMuni) ||
+                      cleanActorMuni.includes(releaseLgu) ||
+                      releaseDest.includes(cleanActorMuni);
+
+      if (!matches) {
+        return {
+          ok: false,
+          message: `Mismatched Destination: Shipment ${canonicalDr} is designated for "${release.municipality || release.lguName || 'another LGU'}", not ${actorLguMunicipality}. Receipt rejected.`
+        };
+      }
+    }
 
     // Strict Chain of Custody Validation:
     // LGU cannot receive shipments directly from Admin without Receiver transit

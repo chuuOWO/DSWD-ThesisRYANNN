@@ -27,9 +27,44 @@ import {
   X
 } from 'lucide-react';
 import { authApi, type UserProfile } from '../../services/authApi';
+import { backendApi } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
 import { PANAY_LGUS } from '../../data/panayLguDirectory';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
+import type { OutgoingRelease } from '../../hooks/useInventoryState';
+
+/**
+ * Resolves all releases currently in active custody/transit with a given receiver.
+ */
+export function getActiveCustodyPackages(profile: UserProfile, allReleases: OutgoingRelease[]): OutgoingRelease[] {
+  const receiverKeys = [
+    profile.truckId?.trim().toLowerCase(),
+    profile.fullName?.trim().replace(/\s+/g, '-').toLowerCase(),
+    profile.email?.split('@')[0].toLowerCase(),
+    profile.id.toLowerCase()
+  ].filter(Boolean) as string[];
+
+  return allReleases.filter((r) => {
+    const assignedTruck = (r.assignedTruckId || r.assigned_truck_id || '').trim().toLowerCase();
+    const isAssigned = receiverKeys.includes(assignedTruck);
+    const isActive = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus);
+    return isAssigned && isActive;
+  });
+}
+
+/**
+ * Resolves any pending incoming releases in transit to a given municipality.
+ */
+export function getPendingIncomingToLgu(lguMunicipality: string, allReleases: OutgoingRelease[]): OutgoingRelease[] {
+  if (!lguMunicipality) return [];
+  const cleanMuni = extractCleanMunicipality(lguMunicipality).toLowerCase();
+  return allReleases.filter((r) => {
+    const relMuni = (r.municipality || r.lguName || r.destinationAddress || '').toLowerCase();
+    const matches = relMuni.includes(cleanMuni);
+    const isInTransit = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus);
+    return matches && isInTransit;
+  });
+}
 
 /**
  * Extracts strictly the municipality name from any raw string,
@@ -259,11 +294,40 @@ function MunicipalitySearchPicker({
 
 interface AccountManagementProps {
   currentAdminEmail?: string;
+  releases?: OutgoingRelease[];
 }
 
-export function AccountManagement({ currentAdminEmail }: AccountManagementProps) {
+export function AccountManagement({ currentAdminEmail, releases: propsReleases }: AccountManagementProps) {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [dbReleases, setDbReleases] = useState<OutgoingRelease[]>([]);
+
+  useEffect(() => {
+    if (!propsReleases || propsReleases.length === 0) {
+      backendApi.getReceiverReleases().then((rows) => {
+        setDbReleases(rows.map(r => ({
+          drNumber: r.dr_number,
+          dateAllocated: r.created_at || '',
+          lguName: r.lgu_name || '',
+          province: r.province || '',
+          municipality: r.municipality || '',
+          fnfiCategory: r.category || '',
+          amountRequested: Number(r.amount_requested || 0),
+          amountApproved: Number(r.amount_approved || 0),
+          warehouseSource: r.warehouse_source || '',
+          deliveryMode: r.delivery_mode || 'Truck',
+          deliveryStatus: (r.delivery_status || 'Allocating') as any,
+          incidentCode: '',
+          allocatedBatches: [],
+          assignedTruckId: r.assigned_truck_id,
+          assigned_truck_id: r.assigned_truck_id,
+          auditTrail: []
+        })));
+      }).catch(() => {});
+    }
+  }, [propsReleases]);
+
+  const effectiveReleases = (propsReleases && propsReleases.length > 0) ? propsReleases : dbReleases;
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'dswd_admin' | 'receiver'>('all');
@@ -389,6 +453,30 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
 
   const handleSaveAssignment = async (profile: UserProfile) => {
     const targetMunicipality = assignments[profile.id] || null;
+
+    // 1. Guard against assigning LGU to a receiver holding packages
+    const activePackages = getActiveCustodyPackages(profile, effectiveReleases);
+    if (activePackages.length > 0) {
+      setToastMessage({
+        type: 'error',
+        text: `Locked: ${profile.fullName || profile.email} currently has ${activePackages.length} package(s) in active transit/custody (${activePackages.map(p => `#${p.drNumber}`).join(', ')}). Complete or transfer deliveries before altering designation.`
+      });
+      return;
+    }
+
+    // 2. Guard against reverting/changing an LGU receiver if incoming shipments are on the road
+    const currentCleanLgu = extractCleanMunicipality(profile.lguName);
+    if (currentCleanLgu && currentCleanLgu !== targetMunicipality) {
+      const pendingIncoming = getPendingIncomingToLgu(currentCleanLgu, effectiveReleases);
+      if (pendingIncoming.length > 0) {
+        setToastMessage({
+          type: 'error',
+          text: `Locked: ${currentCleanLgu} currently has ${pendingIncoming.length} shipment(s) in transit (${pendingIncoming.map(p => `#${p.drNumber}`).join(', ')}). Wait until packages are received before reassigning this LGU receiver.`
+        });
+        return;
+      }
+    }
+
     setSavingUserId(profile.id);
     setModalTitle(`Assigning ${profile.fullName || profile.email}`);
     setModalSubtitle(
@@ -456,6 +544,14 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
   };
 
   const handleDeclineUser = async (user: UserProfile) => {
+    const activePackages = getActiveCustodyPackages(user, effectiveReleases);
+    if (activePackages.length > 0) {
+      setToastMessage({
+        type: 'error',
+        text: `Cannot decline account: ${user.fullName || user.email} currently has ${activePackages.length} package(s) in active transit.`
+      });
+      return;
+    }
     if (!window.confirm(`Are you sure you want to decline registration for ${user.fullName || user.email}?`)) return;
     try {
       await authApi.rejectProfile(user.id);
@@ -885,32 +981,46 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                       {/* 2. Role & Designation */}
                       <td className="px-6 py-3.5">
                         <div className="space-y-1">
-                          <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                              profile.role === 'dswd_admin'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : isLgu
-                                ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                : 'bg-purple-100 text-purple-800 border border-purple-200'
-                            }`}
-                          >
-                            {profile.role === 'dswd_admin' ? (
-                              <>
-                                <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                                DSWD Admin
-                              </>
-                            ) : isLgu ? (
-                              <>
-                                <Building2 className="w-3 h-3 text-indigo-600" />
-                                LGU Receiver
-                              </>
-                            ) : (
-                              <>
-                                <Truck className="w-3 h-3 text-purple-600" />
-                                Receiver
-                              </>
-                            )}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                profile.role === 'dswd_admin'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : isLgu
+                                  ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                  : 'bg-purple-100 text-purple-800 border border-purple-200'
+                              }`}
+                            >
+                              {profile.role === 'dswd_admin' ? (
+                                <>
+                                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                  DSWD Admin
+                                </>
+                              ) : isLgu ? (
+                                <>
+                                  <Building2 className="w-3 h-3 text-indigo-600" />
+                                  LGU Receiver
+                                </>
+                              ) : (
+                                <>
+                                  <Truck className="w-3 h-3 text-purple-600" />
+                                  Receiver
+                                </>
+                              )}
+                            </span>
+
+                            {/* Active Custody Indicator */}
+                            {profile.role === 'receiver' && (() => {
+                              const activeCount = getActiveCustodyPackages(profile, effectiveReleases).length;
+                              if (activeCount === 0) return null;
+                              return (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wide bg-amber-100 text-amber-900 border border-amber-300">
+                                  <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                  In Transit ({activeCount})
+                                </span>
+                              );
+                            })()}
+                          </div>
                           <p className="text-[11px] text-gray-600 font-medium">
                             {profile.jobPosition === 'Trucker' ? 'Receiver' : (profile.jobPosition || (isLgu ? `${cleanLgu} Focal` : profile.truckId ? `Code: ${profile.truckId}` : 'Regional Staff'))}
                           </p>
@@ -1170,34 +1280,78 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
             </div>
 
             {/* LGU Municipality Assignment (for Receivers) */}
-            {selectedProfile.role === 'receiver' && (
-              <div className="space-y-2 p-4 rounded-2xl border border-indigo-100 bg-indigo-50/40">
-                <label className="block text-xs font-bold text-indigo-950">
-                  Assigned Panay LGU Municipality
-                </label>
-                <p className="text-[11px] text-indigo-700/80">
-                  Assign this account as the designated LGU receiver for a Panay municipality, or revert to Field Receiver mode.
-                </p>
+            {selectedProfile.role === 'receiver' && (() => {
+              const activeCustody = getActiveCustodyPackages(selectedProfile, effectiveReleases);
+              const currentCleanLgu = extractCleanMunicipality(selectedProfile.lguName);
+              const pendingIncoming = currentCleanLgu ? getPendingIncomingToLgu(currentCleanLgu, effectiveReleases) : [];
+              const isCustodyLocked = activeCustody.length > 0;
+              const isPendingLocked = pendingIncoming.length > 0;
+              const isAssignmentLocked = isCustodyLocked || isPendingLocked;
 
-                <div className="flex items-center gap-3 flex-wrap pt-1">
-                  <MunicipalitySearchPicker
-                    value={assignments[selectedProfile.id] ?? extractCleanMunicipality(selectedProfile.lguName)}
-                    onChange={(muni) => handleLguChange(selectedProfile.id, muni)}
-                    disabled={savingUserId === selectedProfile.id}
-                  />
+              return (
+                <div className="space-y-3 p-4 rounded-2xl border border-indigo-100 bg-indigo-50/40">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-indigo-950">
+                      Assigned Panay LGU Municipality
+                    </label>
+                    {isAssignmentLocked && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        <AlertTriangle className="w-3 h-3 text-amber-700" />
+                        Assignment Locked
+                      </span>
+                    )}
+                  </div>
 
-                  <button
-                    type="button"
-                    disabled={savingUserId === selectedProfile.id}
-                    onClick={() => handleSaveAssignment(selectedProfile)}
-                    className="px-4 py-2 rounded-xl bg-[#2500ba] text-white hover:bg-blue-800 text-xs font-bold transition shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    {savingUserId === selectedProfile.id ? 'Saving...' : 'Save Assignment'}
-                  </button>
+                  <p className="text-[11px] text-indigo-700/80">
+                    Assign this account as the designated LGU receiver for a Panay municipality, or revert to Field Receiver mode.
+                  </p>
+
+                  {/* Warning banner when locked due to active custody */}
+                  {isCustodyLocked && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                        <span>Active Custody Lockout</span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 leading-relaxed">
+                        This receiver is currently carrying <span className="font-bold">{activeCustody.length} active shipment(s)</span> ({activeCustody.map(p => `#${p.drNumber}`).join(', ')}). Role and municipality reassignment are disabled until delivery is completed or transferred to another receiver.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Warning banner when locked due to pending incoming shipments for this LGU */}
+                  {!isCustodyLocked && isPendingLocked && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                        <span>Pending Inbound Shipments Lockout</span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 leading-relaxed">
+                        <span className="font-bold">{currentCleanLgu}</span> currently has <span className="font-bold">{pendingIncoming.length} inbound shipment(s)</span> in transit ({pendingIncoming.map(p => `#${p.drNumber}`).join(', ')}). Reassigning this receiver is locked until those shipments are accepted.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3 flex-wrap pt-1">
+                    <MunicipalitySearchPicker
+                      value={assignments[selectedProfile.id] ?? extractCleanMunicipality(selectedProfile.lguName)}
+                      onChange={(muni) => handleLguChange(selectedProfile.id, muni)}
+                      disabled={savingUserId === selectedProfile.id || isAssignmentLocked}
+                    />
+
+                    <button
+                      type="button"
+                      disabled={savingUserId === selectedProfile.id || isAssignmentLocked}
+                      onClick={() => handleSaveAssignment(selectedProfile)}
+                      className="px-4 py-2 rounded-xl bg-[#2500ba] text-white hover:bg-blue-800 text-xs font-bold transition shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      {savingUserId === selectedProfile.id ? 'Saving...' : 'Save Assignment'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Verification / Approval Actions */}
             <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">

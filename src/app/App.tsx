@@ -212,7 +212,7 @@ export default function App() {
       case 'qr-generator':
         return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
       case 'accounts':
-        return <AccountManagement currentAdminEmail={activeProfile.email} />;
+        return <AccountManagement currentAdminEmail={activeProfile.email} releases={inventoryState.outgoingReleasesList} />;
       case 'master-data':
         return <MasterDataView />;
       case 'dashboard':

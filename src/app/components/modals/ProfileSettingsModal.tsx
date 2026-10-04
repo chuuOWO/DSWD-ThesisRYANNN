@@ -16,6 +16,7 @@ import {
   X 
 } from 'lucide-react';
 import { authApi, type UserProfile } from '../../services/authApi';
+import { backendApi } from '../../services/backendApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
 import { sanitizeTextOnly } from '../../lib/inputValidation';
@@ -49,11 +50,69 @@ export function ProfileSettingsModal({
   const [isSaving, setIsSaving] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLinkingWallet, setIsLinkingWallet] = useState(false);
+  const [activeShipmentsCount, setActiveShipmentsCount] = useState<number>(0);
+
+  // Check if this receiver is currently in custody of active shipments
+  useEffect(() => {
+    if (isOpen && profile.role === 'receiver') {
+      let isMounted = true;
+      const checkCustody = async () => {
+        try {
+          const releases = await backendApi.getReceiverReleases();
+          if (!isMounted) return;
+          const receiverKeys = [
+            profile.truckId?.trim().toLowerCase(),
+            profile.fullName?.trim().replace(/\s+/g, '-').toLowerCase(),
+            profile.email?.split('@')[0].toLowerCase(),
+            profile.id.toLowerCase()
+          ].filter(Boolean) as string[];
+
+          const activeCarrying = releases.filter((r) => {
+            const assigned = (r.assigned_truck_id || '').trim().toLowerCase();
+            const isActive = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(r.delivery_status ?? '');
+            return receiverKeys.includes(assigned) && isActive;
+          });
+          setActiveShipmentsCount(activeCarrying.length);
+        } catch {
+          // ignore
+        }
+      };
+      void checkCustody();
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      setActiveShipmentsCount(0);
+    }
+  }, [isOpen, profile]);
 
   const handleLinkWallet = async () => {
     setIsLinkingWallet(true);
     setFeedbackMessage(null);
     try {
+      // Guard against changing wallet while carrying shipments in active transit
+      if (profile.role === 'receiver') {
+        const releases = await backendApi.getReceiverReleases();
+        const receiverKeys = [
+          profile.truckId?.trim().toLowerCase(),
+          profile.fullName?.trim().replace(/\s+/g, '-').toLowerCase(),
+          profile.email?.split('@')[0].toLowerCase(),
+          profile.id.toLowerCase()
+        ].filter(Boolean) as string[];
+
+        const activeCarrying = releases.filter((r) => {
+          const assigned = (r.assigned_truck_id || '').trim().toLowerCase();
+          const isActive = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(r.delivery_status ?? '');
+          return receiverKeys.includes(assigned) && isActive;
+        });
+
+        if (activeCarrying.length > 0) {
+          throw new Error(
+            `Wallet change locked: You have ${activeCarrying.length} active shipment(s) in custody (${activeCarrying.map(c => `#${c.dr_number}`).join(', ')}). Complete or transfer deliveries before updating your wallet address.`
+          );
+        }
+      }
+
       const { walletAddress } = await blockchain.connectWallet();
       if (!walletAddress) throw new Error('No account returned from MetaMask.');
       const isLinked = await authApi.isWalletLinked(walletAddress, profile.id);
@@ -556,29 +615,43 @@ export function ProfileSettingsModal({
                   <button
                     type="button"
                     onClick={handleLinkWallet}
-                    disabled={isLinkingWallet}
+                    disabled={isLinkingWallet || activeShipmentsCount > 0}
                     className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-[#2500ba] text-white text-xs font-semibold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer"
                   >
                     {isLinkingWallet ? 'Connecting...' : 'Change Wallet'}
                   </button>
                 </div>
-                <p className="text-[10.5px] text-gray-500 leading-tight">
-                  You can connect a new MetaMask account if your wallet changed or access was lost.
-                </p>
+                {activeShipmentsCount > 0 ? (
+                  <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10.5px] text-amber-800 flex items-center gap-1.5 font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                    <span>Wallet updates are locked while carrying {activeShipmentsCount} active package(s).</span>
+                  </div>
+                ) : (
+                  <p className="text-[10.5px] text-gray-500 leading-tight">
+                    You can connect a new MetaMask account if your wallet changed or access was lost.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-1.5">
                 <button
                   type="button"
                   onClick={handleLinkWallet}
-                  disabled={isLinkingWallet}
+                  disabled={isLinkingWallet || activeShipmentsCount > 0}
                   className="w-full py-2.5 px-4 rounded-xl border-2 border-dashed border-[#2500ba]/40 text-xs font-bold text-[#2500ba] hover:bg-[#2500ba]/5 disabled:opacity-50 transition cursor-pointer"
                 >
                   {isLinkingWallet ? 'Connecting MetaMask...' : 'Link MetaMask Wallet'}
                 </button>
-                <p className="text-[10.5px] text-gray-500 leading-tight">
-                  Connect your MetaMask wallet for signing dispatch orders, delivery manifests, and blockchain audits.
-                </p>
+                {activeShipmentsCount > 0 ? (
+                  <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10.5px] text-amber-800 flex items-center gap-1.5 font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                    <span>Wallet linking is locked while carrying {activeShipmentsCount} active package(s).</span>
+                  </div>
+                ) : (
+                  <p className="text-[10.5px] text-gray-500 leading-tight">
+                    Connect your MetaMask wallet for signing dispatch orders, delivery manifests, and blockchain audits.
+                  </p>
+                )}
               </div>
             )}
           </div>
