@@ -20,7 +20,6 @@ import {
   Smartphone,
   Truck,
   UserRound,
-  Trash2,
   X,
   ExternalLink
 } from 'lucide-react';
@@ -759,22 +758,32 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
     activePackagesRef.current = activePackages;
   }, [activePackages]);
 
-  const [selectedDrNumber, setSelectedDrNumber] = useState<string | null>(null);
+  // Priority-sorted active packages based on Admin configuration in Supabase
+  const prioritizedActivePackages = useMemo(() => {
+    if (!activePackages.length) return [];
+    return [...activePackages].sort((a, b) => {
+      const relA = allReleases.find((r) => r.dr_number === a.drNumber);
+      const relB = allReleases.find((r) => r.dr_number === b.drNumber);
+      const heldA = Boolean(relA?.is_held);
+      const heldB = Boolean(relB?.is_held);
+      if (heldA !== heldB) {
+        return heldA ? 1 : -1;
+      }
+      const prioA = relA?.delivery_priority ?? 999;
+      const prioB = relB?.delivery_priority ?? 999;
+      return prioA - prioB;
+    });
+  }, [activePackages, allReleases]);
 
-  useEffect(() => {
-    if (activePackages.length === 0) {
-      setSelectedDrNumber(null);
-    } else if (!selectedDrNumber || !activePackages.some((p) => p.drNumber === selectedDrNumber)) {
-      setSelectedDrNumber(activePackages[0].drNumber);
-    }
-  }, [activePackages, selectedDrNumber]);
-
+  // The active route target is ALWAYS the top non-held priority package set by Admin
   const activePayload = useMemo(() => {
-    if (!activePackages.length) return null;
-    return (selectedDrNumber ? activePackages.find((p) => p.drNumber === selectedDrNumber) : null)
-      || activePackages[0]
-      || null;
-  }, [activePackages, selectedDrNumber]);
+    if (!prioritizedActivePackages.length) return null;
+    const firstNonHeld = prioritizedActivePackages.find((p) => {
+      const rel = allReleases.find((r) => r.dr_number === p.drNumber);
+      return !rel?.is_held;
+    });
+    return firstNonHeld || prioritizedActivePackages[0] || null;
+  }, [prioritizedActivePackages, allReleases]);
 
   const activeRelease = useMemo(() => {
     if (activePayload?.drNumber) {
@@ -903,30 +912,6 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
   
   const isInTransit = activePackages.length > 0;
   const totalQuantity = useMemo(() => activePackages.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0), [activePackages]);
-  const handleRemovePackage = (drNumber: string) => {
-    const updated = activePackages.filter((p) => p.drNumber !== drNumber);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(updated));
-    } catch {}
-    setActivePackages(updated);
-    if (updated.length === 0) {
-      setInventory(initialInventory);
-      setIsDropdownOpen(false);
-    }
-    void backendApi.assignTruckToRelease(drNumber, null, 'Released').catch(() => {});
-  };
-
-  const handleClearAllPackages = () => {
-    try {
-      localStorage.removeItem(storageKey);
-    } catch {}
-    for (const pkg of activePackages) {
-      void backendApi.assignTruckToRelease(pkg.drNumber, null, 'Released').catch(() => {});
-    }
-    setActivePackages([]);
-    setInventory(initialInventory);
-    setIsDropdownOpen(false);
-  };
 
   const saveLocationState = (nextLoc: PhoneLocation) => {
     lastProcessedLocRef.current = nextLoc;
@@ -1563,11 +1548,6 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                     <Marker
                       position={pkgDest.position}
                       icon={createDestinationPinIcon(isSelected ? 'LGU DESTINATION' : `DR #${pkgDest.drNumber}`, isSelected)}
-                      eventHandlers={{
-                        click: () => {
-                          setSelectedDrNumber(pkgDest.drNumber);
-                        }
-                      }}
                     >
                       <Popup>
                         <div className="text-center font-sans p-1">
@@ -1579,13 +1559,9 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                           <p className="text-[10px] text-gray-500 mt-1">{pkgDest.position[0].toFixed(6)}, {pkgDest.position[1].toFixed(6)}</p>
                           <p className="text-[9px] text-emerald-600 font-semibold mt-0.5">Verified Drop-off Facility</p>
                           {!isSelected && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedDrNumber(pkgDest.drNumber)}
-                              className="mt-2 w-full rounded-md bg-[#2500ba] px-2 py-1 text-[10px] font-bold text-white shadow hover:bg-[#1f009e]"
-                            >
-                              Switch Navigation to This
-                            </button>
+                            <p className="mt-2 text-[9px] font-bold text-slate-500 bg-slate-100 rounded py-1 px-1.5">
+                              Admin Priority Sequence
+                            </p>
                           )}
                         </div>
                       </Popup>
@@ -1697,60 +1673,41 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                 </div>
               </div>
 
-              {/* Quick Multi-Package Navigation Selector */}
-              {activePackages.length > 1 && (
-                <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none border-t border-gray-100 pt-2">
-                  <span className="text-[9px] font-bold text-gray-500 uppercase flex-shrink-0">Target:</span>
-                  {activePackages.map((pkg) => {
-                    const isSelected = pkg.drNumber === activePayload?.drNumber;
-                    const pkgDest = allPackageDestinations.find((d) => d.drNumber === pkg.drNumber);
-                    const hasCoords = Boolean(pkgDest?.position);
-                    return (
-                      <button
-                        key={pkg.drNumber}
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDrNumber(pkg.drNumber);
-                        }}
-                        className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-[9.5px] font-bold transition flex-shrink-0 border ${
-                          isSelected
-                            ? 'bg-[#2500ba] text-white border-[#2500ba] shadow-sm'
-                            : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200'
-                        }`}
-                      >
-                        <span>DR #{pkg.drNumber}</span>
-                        {isSelected && <span className="rounded bg-white/20 px-1 text-[8px] uppercase">Active</span>}
-                        {!hasCoords && <span className="rounded bg-red-500 text-white px-1 text-[8px]">No GPS</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
               {/* Collapsible Dropdown List */}
               {isDropdownOpen && (
                 <div className="mt-2.5 max-h-[180px] space-y-2 overflow-y-auto border-t border-gray-100 pt-2.5 pr-1">
-                  {activePackages.map((pkg, idx) => {
+                  {prioritizedActivePackages.map((pkg, idx) => {
                     const isSelected = pkg.drNumber === activePayload?.drNumber;
                     const pkgDest = allPackageDestinations.find((d) => d.drNumber === pkg.drNumber);
+                    const matchingRel = allReleases.find((r) => r.dr_number === pkg.drNumber);
+                    const isHeld = Boolean(matchingRel?.is_held);
                     const hasCoords = Boolean(pkgDest?.position);
+
                     return (
                       <div
                         key={pkg.drNumber || idx}
-                        onClick={() => setSelectedDrNumber(pkg.drNumber)}
-                        className={`rounded-xl border p-2.5 text-left text-xs transition cursor-pointer relative group ${
+                        className={`rounded-xl border p-2.5 text-left text-xs transition relative ${
                           isSelected
                             ? 'border-[#2500ba] bg-blue-50/90 shadow-sm'
-                            : 'border-gray-200 bg-gray-50/90 hover:bg-white'
+                            : isHeld
+                            ? 'border-amber-200 bg-amber-50/60'
+                            : 'border-gray-200 bg-gray-50/90'
                         }`}
                       >
-                        <div className="flex items-center justify-between pr-5">
-                          <div className="flex items-center gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-[#2500ba] text-[10.5px]">DR #{pkg.drNumber}</span>
-                            {isSelected && (
-                              <span className="rounded bg-[#2500ba] text-white px-1.5 py-0.2 text-[8px] font-extrabold uppercase">
-                                Navigating
+                            {isHeld ? (
+                              <span className="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[8px] font-extrabold uppercase">
+                                On Hold (Admin)
+                              </span>
+                            ) : isSelected ? (
+                              <span className="rounded bg-[#2500ba] text-white px-1.5 py-0.5 text-[8px] font-extrabold uppercase">
+                                Priority #{idx + 1} (Navigating)
+                              </span>
+                            ) : (
+                              <span className="rounded bg-slate-200 text-slate-700 px-1.5 py-0.5 text-[8px] font-bold">
+                                Priority #{idx + 1}
                               </span>
                             )}
                           </div>
@@ -1769,33 +1726,9 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
                             </span>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemovePackage(pkg.drNumber);
-                          }}
-                          className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-red-100 hover:text-red-600 transition"
-                          title="Remove package from active custody"
-                          aria-label="Remove package"
-                        >
-                          <X size={11} />
-                        </button>
                       </div>
                     );
                   })}
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClearAllPackages();
-                    }}
-                    className="w-full mt-2 rounded-lg border border-red-200 bg-red-50 py-1.5 text-[9.5px] font-bold text-red-600 hover:bg-red-100 transition flex items-center justify-center gap-1"
-                  >
-                    <Trash2 size={11} />
-                    Clear All Active Custody
-                  </button>
                 </div>
               )}
 

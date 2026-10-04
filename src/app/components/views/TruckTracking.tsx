@@ -226,6 +226,10 @@ const toTruckRoute = (
       uniqueMap.set(r.drNumber, {
         ...mapped,
         ...existing,
+        receiver_gps: existing.receiver_gps || mapped.receiver_gps,
+        destination_address: existing.destination_address || mapped.destination_address,
+        municipality: existing.municipality || mapped.municipality,
+        province: existing.province || mapped.province,
         assigned_truck_id: assignedId,
         delivery_status: status
       });
@@ -247,13 +251,20 @@ const toTruckRoute = (
   const assignedPackagesList: TruckPackageInfo[] = activeAssigned.map((pkg) => {
     let coords: [number, number] | null = null;
     const destText = pkg.destination_address || pkg.lgu_name || pkg.municipality || '';
-    const lguLookup = findPanayLgu(destText, pkg.province);
-    if (lguLookup) {
-      coords = [lguLookup.lat, lguLookup.lng];
-    } else if (pkg.receiver_gps) {
+
+    // 1. Exact pinned GPS from release takes highest priority
+    if (pkg.receiver_gps) {
       const parts = pkg.receiver_gps.split(',').map((s) => parseFloat(s.trim()));
       if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
         coords = [parts[0], parts[1]];
+      }
+    }
+
+    // 2. Directory lookup fallback if exact GPS is not pinned
+    if (!coords) {
+      const lguLookup = findPanayLgu(pkg.municipality || pkg.lgu_name || destText, pkg.province);
+      if (lguLookup) {
+        coords = [lguLookup.lat, lguLookup.lng];
       }
     }
 

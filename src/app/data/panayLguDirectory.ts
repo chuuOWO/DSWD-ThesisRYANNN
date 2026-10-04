@@ -191,7 +191,14 @@ export function findPanayLgu(query: string, provinceFilter?: string | null): Lgu
       const allQueryWordsInItem = queryWords.every((w) => itemWords.includes(w));
 
       if (allItemWordsInQuery) {
-        score = 80;
+        // If the item shares its name with the province (e.g. Iloilo City in province Iloilo),
+        // and the query contains other distinct words besides the province name,
+        // do not let the provincial capital falsely hijack a specific municipality address unless "city" was stated.
+        if (itemNorm === item.province.toLowerCase() && !rawLower.includes('city') && queryWords.length > 2) {
+          score = 55;
+        } else {
+          score = 80;
+        }
       } else if (allQueryWordsInItem) {
         score = 75;
       } else if (queryWords.some((w) => itemWords.includes(w) && w.length >= 4)) {
