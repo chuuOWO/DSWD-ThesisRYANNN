@@ -70,6 +70,7 @@ export interface OutgoingRelease {
   fnfiCategory: string;
   amountRequested: number;
   amountApproved: number;
+  sourceType?: 'Warehouse' | 'LGU';
   warehouseSource: string;
   deliveryMode: string;
   deliveryStatus: OutgoingStatus;
@@ -893,7 +894,7 @@ export function useInventoryState(enabled = true) {
         setInventory(calculateWarehouseInventory(updated, kitTypesList));
         return updated;
       });
-    } else if (release.sourceType === 'LGU' && release.warehouseSource) {
+    } else if (release.warehouseSource && (release.sourceType === 'LGU' || !isMainWarehouse(release.warehouseSource))) {
       backendApi.deductLguStock(release.warehouseSource, release.fnfiCategory, amountApproved)
         .catch(err => console.warn('Supabase deductLguStock error:', err));
     }

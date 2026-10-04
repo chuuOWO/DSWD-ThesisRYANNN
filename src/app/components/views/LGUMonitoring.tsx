@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
-import { AddLGUModal, type LGUForm } from '../modals/AddLGUModal';
 import { EditLGUModal } from '../modals/EditLGUModal';
 import type { LguRecord, LguInput, ProvinceRecord, KitTypeRecord } from '../../services/backendApi';
 
@@ -171,25 +170,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     return FNFI_CATEGORIES;
   }, [inventoryState?.kitTypesList]);
 
-  const handleAddLGU = async (newLGU: LGUForm) => {
-    if (inventoryState?.addLgu) {
-      const res = await inventoryState.addLgu({
-        municipality: newLGU.municipality,
-        province: newLGU.province,
-        lguName: newLGU.lguName,
-        contactPerson: newLGU.contactPerson,
-        contactNumber: newLGU.contactNumber,
-        remarks: newLGU.remarks,
-        latitude: newLGU.latitude,
-        longitude: newLGU.longitude,
-        initialStock: newLGU.currentStock
-      });
-      if (!res.ok) {
-        throw new Error(res.message);
-      }
-    }
-    setShowAddModal(false);
-  };
 
   const handleEditLGU = async (updatedLGU: LGUDelivery) => {
     if (inventoryState?.editLgu) {
