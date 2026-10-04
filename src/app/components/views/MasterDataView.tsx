@@ -13,100 +13,26 @@ import {
   Trash2,
   ExternalLink
 } from 'lucide-react';
-import { backendApi, type LguRecord } from '../../services/backendApi';
-import { PANAY_LGUS, PANAY_PROVINCES } from '../../data/panayLguDirectory';
+import {
+  backendApi,
+  type LguRecord,
+  type ProvinceRecord,
+  type WarehouseRecord,
+  type SupplySourceRecord,
+  type KitTypeRecord
+} from '../../services/backendApi';
 
 type MasterTab = 'kits' | 'sources' | 'lgus' | 'warehouses';
-
-interface KitTypeItem {
-  id: string;
-  name: string;
-  category: 'Food Item' | 'Non-Food Item';
-  unitType: string;
-  description: string;
-  isDefault?: boolean;
-}
-
-interface SupplySourceItem {
-  id: string;
-  name: string;
-  facilityType: 'National Resource Center' | 'Regional Logistics Hub' | 'Staging Warehouse' | 'External Partner';
-  region: string;
-  location: string;
-  isDefault?: boolean;
-}
-
-interface WarehouseFacilityItem {
-  id: string;
-  name: string;
-  province: string;
-  municipality: string;
-  capacityPacks: number;
-  latitude: number;
-  longitude: number;
-  isDefault?: boolean;
-}
-
-const DEFAULT_KIT_TYPES: KitTypeItem[] = [
-  { id: 'kit-1', name: 'Family Food Pack', category: 'Food Item', unitType: 'packs', description: 'Standard 6kg emergency nutritional food pack (rice, canned goods, coffee)', isDefault: true },
-  { id: 'kit-2', name: 'Hygiene Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Personal sanitation supplies, soap, toothpaste, toothbrush, sanitary napkins', isDefault: true },
-  { id: 'kit-3', name: 'Sleeping Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Blankets, sleeping mats, mosquito nets, and pillowcases', isDefault: true },
-  { id: 'kit-4', name: 'Kitchen Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Cooking pots, frying pan, plates, cups, spoons, forks, and cooking utensils', isDefault: true },
-  { id: 'kit-5', name: 'Family Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Clothing apparel, underwear, bath towels, and footwear for families', isDefault: true },
-  { id: 'kit-6', name: 'Laminated Sacks', category: 'Non-Food Item', unitType: 'sacks', description: 'Heavy-duty weatherproofing tarpaulins for temporary roof shelters', isDefault: true },
-  { id: 'kit-7', name: 'Ready-to-Eat Food (RTEF)', category: 'Food Item', unitType: 'packs', description: 'Pre-cooked retort pouch meals requiring zero preparation', isDefault: true }
-];
-
-const DEFAULT_SOURCES: SupplySourceItem[] = [
-  { id: 'src-1', name: 'Visayas Disaster Resource Center (VDRC)', facilityType: 'National Resource Center', region: 'Region VII (Central Visayas)', location: 'Tingub, Mandaue City, Cebu', isDefault: true },
-  { id: 'src-2', name: 'Luzon Disaster Resource Center (LDRC)', facilityType: 'National Resource Center', region: 'National Capital Region', location: 'Pasay City / Clark Special Zone', isDefault: true },
-  { id: 'src-3', name: 'Oton Regional Warehouse Hub', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: 'Brgy. Tagbac, Oton, Iloilo', isDefault: true },
-  { id: 'src-4', name: 'Pototan Secondary Depot', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: 'Pototan, Iloilo', isDefault: true }
-];
-
-const DEFAULT_WAREHOUSES: WarehouseFacilityItem[] = [
-  { id: 'wh-1', name: 'Oton Main Warehouse', province: 'Iloilo', municipality: 'Oton', capacityPacks: 150000, latitude: 10.6975, longitude: 122.4764, isDefault: true },
-  { id: 'wh-2', name: 'Pototan Main Warehouse', province: 'Iloilo', municipality: 'Pototan', capacityPacks: 80000, latitude: 10.9492, longitude: 122.6289, isDefault: true }
-];
 
 export function MasterDataView() {
   const [activeTab, setActiveTab] = useState<MasterTab>('kits');
   
-  // Custom user-defined entries stored locally and synced
-  const [kitTypes, setKitTypes] = useState<KitTypeItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_kit_types');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_KIT_TYPES;
-  });
-
-  const [sources, setSources] = useState<SupplySourceItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_sources');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_SOURCES;
-  });
-
-  const [warehouses, setWarehouses] = useState<WarehouseFacilityItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_warehouses');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_WAREHOUSES;
-  });
-
-  const [provinces, setProvinces] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_provinces');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [...PANAY_PROVINCES];
-  });
-
+  const [kitTypes, setKitTypes] = useState<KitTypeRecord[]>([]);
+  const [sources, setSources] = useState<SupplySourceRecord[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseRecord[]>([]);
+  const [provinces, setProvinces] = useState<ProvinceRecord[]>([]);
   const [dbLgus, setDbLgus] = useState<LguRecord[]>([]);
-  const [isLoadingLgus, setIsLoadingLgus] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [selectedProvinceFilter, setSelectedProvinceFilter] = useState('All');
 
   // Modals state
@@ -123,21 +49,21 @@ export function MasterDataView() {
   const [newKitDesc, setNewKitDesc] = useState('');
 
   const [newSourceName, setNewSourceName] = useState('');
-  const [newSourceType, setNewSourceType] = useState<SupplySourceItem['facilityType']>('Regional Logistics Hub');
+  const [newSourceType, setNewSourceType] = useState('Regional Logistics Hub');
   const [newSourceRegion, setNewSourceRegion] = useState('Region VI (Western Visayas)');
   const [newSourceLocation, setNewSourceLocation] = useState('');
 
   const [newProvinceName, setNewProvinceName] = useState('');
 
   const [newLguName, setNewLguName] = useState('');
-  const [newLguProvince, setNewLguProvince] = useState(provinces[0] || 'Iloilo');
+  const [newLguProvince, setNewLguProvince] = useState('');
   const [newLguLat, setNewLguLat] = useState('10.7000');
   const [newLguLng, setNewLguLng] = useState('122.5000');
   const [newLguOfficer, setNewLguOfficer] = useState('');
   const [newLguPhone, setNewLguPhone] = useState('');
 
   const [newWhName, setNewWhName] = useState('');
-  const [newWhProvince, setNewWhProvince] = useState('Iloilo');
+  const [newWhProvince, setNewWhProvince] = useState('');
   const [newWhMuni, setNewWhMuni] = useState('Oton');
   const [newWhCapacity, setNewWhCapacity] = useState('50000');
   const [newWhLat, setNewWhLat] = useState('10.7000');
@@ -150,103 +76,116 @@ export function MasterDataView() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Load LGUs from database
-  const loadDatabaseLgus = async () => {
-    setIsLoadingLgus(true);
+  const loadAllData = async () => {
+    setIsLoading(true);
     try {
-      const records = await backendApi.getLgus();
-      setDbLgus(records);
-    } catch {
-      // Fallback
+      const [kits, srcs, whs, provs, lgus] = await Promise.all([
+        backendApi.getKitTypes(),
+        backendApi.getSupplySources(),
+        backendApi.getWarehouses(),
+        backendApi.getProvinces(),
+        backendApi.getLgus()
+      ]);
+      setKitTypes(kits);
+      setSources(srcs);
+      setWarehouses(whs);
+      setProvinces(provs);
+      setDbLgus(lgus);
+      if (provs.length > 0) {
+        setNewLguProvince(prev => prev || provs[0].name);
+        setNewWhProvince(prev => prev || provs[0].name);
+      }
+    } catch (err) {
+      console.error('Failed to load master data:', err);
     } finally {
-      setIsLoadingLgus(false);
+      setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadDatabaseLgus();
+    void loadAllData();
   }, []);
 
-  const handleAddKit = (e: React.FormEvent) => {
+  const handleAddKit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKitName.trim()) return;
 
-    const newKit: KitTypeItem = {
-      id: `kit-${Date.now()}`,
-      name: newKitName.trim(),
-      category: newKitCategory,
-      unitType: newKitUnit.trim() || 'kits',
-      description: newKitDesc.trim() || 'Custom relief goods package'
-    };
-
-    const updated = [...kitTypes, newKit];
-    setKitTypes(updated);
     try {
-      localStorage.setItem('dswd_custom_kit_types', JSON.stringify(updated));
-    } catch {}
-
-    setNewKitName('');
-    setNewKitDesc('');
-    setIsAddKitOpen(false);
-    showToast(`Added new kit type: ${newKit.name}`);
+      await backendApi.createKitType({
+        name: newKitName.trim(),
+        category: newKitCategory,
+        unitType: newKitUnit.trim() || 'kits',
+        description: newKitDesc.trim() || 'Custom relief goods package'
+      });
+      const updated = await backendApi.getKitTypes();
+      setKitTypes(updated);
+      setNewKitName('');
+      setNewKitDesc('');
+      setIsAddKitOpen(false);
+      showToast(`Added new kit type: ${newKitName.trim()}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add kit type');
+    }
   };
 
-  const handleDeleteKit = (id: string) => {
-    const updated = kitTypes.filter(k => k.id !== id);
-    setKitTypes(updated);
+  const handleDeleteKit = async (id: string) => {
     try {
-      localStorage.setItem('dswd_custom_kit_types', JSON.stringify(updated));
-    } catch {}
-    showToast('Kit type removed');
+      await backendApi.deleteKitType(id);
+      setKitTypes(prev => prev.filter(k => k.id !== id));
+      showToast('Kit type removed');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete kit type');
+    }
   };
 
-  const handleAddSource = (e: React.FormEvent) => {
+  const handleAddSource = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSourceName.trim()) return;
 
-    const newSource: SupplySourceItem = {
-      id: `src-${Date.now()}`,
-      name: newSourceName.trim(),
-      facilityType: newSourceType,
-      region: newSourceRegion.trim(),
-      location: newSourceLocation.trim() || 'Panay Region'
-    };
-
-    const updated = [...sources, newSource];
-    setSources(updated);
     try {
-      localStorage.setItem('dswd_custom_sources', JSON.stringify(updated));
-    } catch {}
-
-    setNewSourceName('');
-    setNewSourceLocation('');
-    setIsAddSourceOpen(false);
-    showToast(`Added supply source: ${newSource.name}`);
+      await backendApi.createSupplySource({
+        name: newSourceName.trim(),
+        shortCode: newSourceName.trim().slice(0, 8).toUpperCase(),
+        facilityType: newSourceType,
+        region: newSourceRegion.trim(),
+        location: newSourceLocation.trim() || 'Panay Region'
+      });
+      const updated = await backendApi.getSupplySources();
+      setSources(updated);
+      setNewSourceName('');
+      setNewSourceLocation('');
+      setIsAddSourceOpen(false);
+      showToast(`Added supply source: ${newSourceName.trim()}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add supply source');
+    }
   };
 
-  const handleDeleteSource = (id: string) => {
-    const updated = sources.filter(s => s.id !== id);
-    setSources(updated);
+  const handleDeleteSource = async (id: string) => {
     try {
-      localStorage.setItem('dswd_custom_sources', JSON.stringify(updated));
-    } catch {}
-    showToast('Supply source removed');
+      await backendApi.deleteSupplySource(id);
+      setSources(prev => prev.filter(s => s.id !== id));
+      showToast('Supply source removed');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete supply source');
+    }
   };
 
-  const handleAddProvince = (e: React.FormEvent) => {
+  const handleAddProvince = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = newProvinceName.trim();
-    if (!clean || provinces.includes(clean)) return;
+    if (!clean) return;
 
-    const updated = [...provinces, clean];
-    setProvinces(updated);
     try {
-      localStorage.setItem('dswd_custom_provinces', JSON.stringify(updated));
-    } catch {}
-
-    setNewProvinceName('');
-    setIsAddProvinceOpen(false);
-    showToast(`Registered new province: ${clean}`);
+      await backendApi.createProvince(clean);
+      const updated = await backendApi.getProvinces();
+      setProvinces(updated);
+      setNewProvinceName('');
+      setIsAddProvinceOpen(false);
+      showToast(`Registered new province: ${clean}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add province');
+    }
   };
 
   const handleAddLgu = async (e: React.FormEvent) => {
@@ -259,7 +198,7 @@ export function MasterDataView() {
     try {
       await backendApi.createLgu({
         municipality: newLguName.trim(),
-        province: newLguProvince,
+        province: newLguProvince || provinces[0]?.name || 'Iloilo',
         lguName: `${newLguName.trim()} Municipal Hall`,
         contactPerson: newLguOfficer.trim() || undefined,
         contactNumber: newLguPhone.trim() || undefined,
@@ -267,7 +206,8 @@ export function MasterDataView() {
         longitude: lng
       });
 
-      await loadDatabaseLgus();
+      const updated = await backendApi.getLgus();
+      setDbLgus(updated);
       setNewLguName('');
       setNewLguOfficer('');
       setNewLguPhone('');
@@ -278,34 +218,33 @@ export function MasterDataView() {
     }
   };
 
-  const handleAddWarehouse = (e: React.FormEvent) => {
+  const handleAddWarehouse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWhName.trim()) return;
 
-    const newWh: WarehouseFacilityItem = {
-      id: `wh-${Date.now()}`,
-      name: newWhName.trim(),
-      province: newWhProvince,
-      municipality: newWhMuni.trim(),
-      capacityPacks: parseInt(newWhCapacity, 10) || 50000,
-      latitude: parseFloat(newWhLat) || 10.7000,
-      longitude: parseFloat(newWhLng) || 122.5000
-    };
-
-    const updated = [...warehouses, newWh];
-    setWarehouses(updated);
     try {
-      localStorage.setItem('dswd_custom_warehouses', JSON.stringify(updated));
-    } catch {}
+      await backendApi.createWarehouse({
+        name: newWhName.trim(),
+        province: newWhProvince || provinces[0]?.name || 'Iloilo',
+        municipality: newWhMuni.trim(),
+        capacityPacks: parseInt(newWhCapacity, 10) || 50000,
+        latitude: parseFloat(newWhLat) || 10.7000,
+        longitude: parseFloat(newWhLng) || 122.5000
+      });
 
-    setNewWhName('');
-    setIsAddWarehouseOpen(false);
-    showToast(`Registered warehouse facility: ${newWh.name}`);
+      const updated = await backendApi.getWarehouses();
+      setWarehouses(updated);
+      setNewWhName('');
+      setIsAddWarehouseOpen(false);
+      showToast(`Registered warehouse facility: ${newWhName.trim()}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to register warehouse');
+    }
   };
 
-  const filteredLgus = dbLgus.length > 0 
-    ? (selectedProvinceFilter === 'All' ? dbLgus : dbLgus.filter(l => l.province.toLowerCase() === selectedProvinceFilter.toLowerCase()))
-    : (selectedProvinceFilter === 'All' ? PANAY_LGUS : PANAY_LGUS.filter(l => l.province.toLowerCase() === selectedProvinceFilter.toLowerCase()));
+  const filteredLgus = selectedProvinceFilter === 'All' 
+    ? dbLgus 
+    : dbLgus.filter(l => l.province.toLowerCase() === selectedProvinceFilter.toLowerCase());
 
   return (
     <div className="space-y-6">
@@ -412,25 +351,21 @@ export function MasterDataView() {
                     </span>
                     <h3 className="text-sm font-bold text-gray-900 mt-1">{kit.name}</h3>
                   </div>
-                  {!kit.isDefault && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteKit(kit.id)}
-                      className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                      title="Remove custom kit type"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteKit(kit.id)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                    title="Remove kit type"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
                 <p className="text-xs text-gray-600 leading-relaxed">{kit.description}</p>
                 <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
                   <span>Unit: <strong className="text-gray-800">{kit.unitType}</strong></span>
-                  {kit.isDefault && (
-                    <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                      <ShieldCheck size={12} /> Standard FNFI
-                    </span>
-                  )}
+                  <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                    <ShieldCheck size={12} /> Active FNFI
+                  </span>
                 </div>
               </div>
             ))}
@@ -466,16 +401,14 @@ export function MasterDataView() {
                     </span>
                     <h3 className="text-sm font-bold text-gray-900 mt-1">{src.name}</h3>
                   </div>
-                  {!src.isDefault && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSource(src.id)}
-                      className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                      title="Remove source"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSource(src.id)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                    title="Remove source"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
                 <div className="text-xs text-gray-600 space-y-0.5">
                   <p>Region: <strong className="text-gray-800">{src.region}</strong></p>
@@ -530,16 +463,16 @@ export function MasterDataView() {
             </button>
             {provinces.map((prov) => (
               <button
-                key={prov}
+                key={prov.id}
                 type="button"
-                onClick={() => setSelectedProvinceFilter(prov)}
+                onClick={() => setSelectedProvinceFilter(prov.name)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-                  selectedProvinceFilter === prov
+                  selectedProvinceFilter === prov.name
                     ? 'bg-blue-600 text-white'
                     : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                {prov}
+                {prov.name}
               </button>
             ))}
           </div>
@@ -829,7 +762,7 @@ export function MasterDataView() {
                     className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium"
                   >
                     {provinces.map((p) => (
-                      <option key={p} value={p}>{p}</option>
+                      <option key={p.id} value={p.name}>{p.name}</option>
                     ))}
                   </select>
                 </div>
@@ -931,7 +864,7 @@ export function MasterDataView() {
                     className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium"
                   >
                     {provinces.map((p) => (
-                      <option key={p} value={p}>{p}</option>
+                      <option key={p.id} value={p.name}>{p.name}</option>
                     ))}
                   </select>
                 </div>

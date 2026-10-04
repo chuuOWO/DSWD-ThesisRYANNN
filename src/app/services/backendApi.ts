@@ -1,5 +1,4 @@
 import { supabase } from '../lib/supabase';
-import { PANAY_LGUS } from '../data/panayLguDirectory';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -25,6 +24,92 @@ export interface IncomingUpdatePayload {
   batchTokenId?: string;
   mintedAt?: string;
   walletAddress?: string;
+}
+
+export interface ProvinceRecord {
+  id: string;
+  name: string;
+  region: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface WarehouseRecord {
+  id: string;
+  name: string;
+  province: string;
+  municipality: string;
+  capacityPacks: number;
+  latitude: number;
+  longitude: number;
+  foodPacks: number;
+  hygieneKits: number;
+  sleepingKits: number;
+  kitchenKits: number;
+  familyKits: number;
+  laminatedSacks: number;
+  rtef: number;
+  isActive: boolean;
+  currentStock: Record<string, number>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface WarehouseInput {
+  name: string;
+  province: string;
+  municipality: string;
+  capacityPacks: number;
+  latitude: number;
+  longitude: number;
+  initialStock?: {
+    'Food Pack'?: number;
+    'Hygiene Kit'?: number;
+    'Family Kit'?: number;
+    'Sleeping Kit'?: number;
+    'Kitchen Kit'?: number;
+    'Laminated Sack'?: number;
+    'RTEF'?: number;
+  };
+}
+
+export interface SupplySourceRecord {
+  id: string;
+  name: string;
+  shortCode: string;
+  facilityType: string;
+  region: string;
+  location: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SupplySourceInput {
+  name: string;
+  shortCode: string;
+  facilityType: string;
+  region: string;
+  location: string;
+}
+
+export interface KitTypeRecord {
+  id: string;
+  name: string;
+  category: 'Food Item' | 'Non-Food Item';
+  unitType: string;
+  description: string;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface KitTypeInput {
+  name: string;
+  category: 'Food Item' | 'Non-Food Item';
+  unitType: string;
+  description: string;
 }
 
 export interface LguRecord {
@@ -202,12 +287,16 @@ const definedOnly = <T extends Record<string, unknown>>(values: T) =>
 
 export const backendApi = {
   async getDashboard() {
-    const [incomingResult, outgoingResult, lguReportsResult, discrepancyResult, lgusResult] = await Promise.all([
+    const [incomingResult, outgoingResult, lguReportsResult, discrepancyResult, lgusResult, provincesResult, warehousesResult, sourcesResult, kitsResult] = await Promise.all([
       supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
       supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }),
       supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }),
       supabase.from('discrepancy_reports').select('*').order('reported_at', { ascending: false }),
-      supabase.from('lgus').select('*').eq('is_active', true).order('province', { ascending: true })
+      supabase.from('lgus').select('*').eq('is_active', true).order('province', { ascending: true }),
+      supabase.from('provinces').select('*').eq('is_active', true).order('name', { ascending: true }),
+      supabase.from('warehouses').select('*').eq('is_active', true).order('name', { ascending: true }),
+      supabase.from('supply_sources').select('*').eq('is_active', true).order('name', { ascending: true }),
+      supabase.from('kit_types').select('*').eq('is_active', true).order('name', { ascending: true })
     ]);
 
     throwIfError(incomingResult.error, 'Failed to fetch incoming manifests');
@@ -216,11 +305,9 @@ export const backendApi = {
     if (lguReportsResult.error) {
       console.warn('LGU inventory reports are not available yet. Run supabase-schema-patch.sql to create lgu_inventory_reports.', lguReportsResult.error);
     }
-
     if (discrepancyResult.error) {
       console.warn('Discrepancy reports are not available yet. Run supabase-schema-patch.sql to create discrepancy_reports.', discrepancyResult.error);
     }
-
     if (lgusResult.error) {
       console.warn('Master LGUs table is not available yet. Run supabase-schema-patch.sql to create public.lgus.', lgusResult.error);
     }
@@ -230,47 +317,313 @@ export const backendApi = {
       outgoing: outgoingResult.data ?? [],
       lguReports: lguReportsResult.error ? [] : lguReportsResult.data ?? [],
       discrepancyReports: discrepancyResult.error ? [] : discrepancyResult.data ?? [],
-      lgus: lgusResult.error ? [] : lgusResult.data ?? []
+      lgus: lgusResult.error ? [] : lgusResult.data ?? [],
+      provinces: provincesResult.error ? [] : provincesResult.data ?? [],
+      warehouses: warehousesResult.error ? [] : warehousesResult.data ?? [],
+      sources: sourcesResult.error ? [] : sourcesResult.data ?? [],
+      kits: kitsResult.error ? [] : kitsResult.data ?? []
     };
   },
 
-  async getLgus(): Promise<LguRecord[]> {
+  // --- PROVINCES ---
+  async getProvinces(): Promise<ProvinceRecord[]> {
+    const { data, error } = await supabase
+      .from('provinces')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('Failed to fetch provinces from Supabase:', error.message);
+      return [];
+    }
+
+    return (data ?? []).map(row => ({
+      id: String(row.id),
+      name: String(row.name),
+      region: String(row.region ?? 'Region VI (Western Visayas)'),
+      isActive: Boolean(row.is_active ?? true),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  },
+
+  async createProvince(name: string, region = 'Region VI (Western Visayas)'): Promise<{ id: string }> {
+    const { data, error } = await supabase
+      .from('provinces')
+      .insert({ name: name.trim(), region: region.trim(), is_active: true })
+      .select('id')
+      .single();
+    throwIfError(error, 'Failed to create province');
+    return data;
+  },
+
+  async deleteProvince(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('provinces')
+      .delete()
+      .eq('id', id);
+    throwIfError(error, 'Failed to delete province');
+    return { ok: true };
+  },
+
+  async deleteProvincesBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase
+      .from('provinces')
+      .delete()
+      .in('id', ids);
+    throwIfError(error, 'Failed to batch delete provinces');
+    return { ok: true };
+  },
+
+  // --- WAREHOUSES ---
+  async getWarehouses(): Promise<WarehouseRecord[]> {
+    const { data, error } = await supabase
+      .from('warehouses')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('Failed to fetch warehouses from Supabase:', error.message);
+      return [];
+    }
+
+    return (data ?? []).map(row => {
+      const foodPacks = Number(row.food_packs ?? 0);
+      const hygieneKits = Number(row.hygiene_kits ?? 0);
+      const sleepingKits = Number(row.sleeping_kits ?? 0);
+      const kitchenKits = Number(row.kitchen_kits ?? 0);
+      const familyKits = Number(row.family_kits ?? 0);
+      const laminatedSacks = Number(row.laminated_sacks ?? 0);
+      const rtef = Number(row.rtef ?? 0);
+
+      return {
+        id: String(row.id),
+        name: String(row.name),
+        province: String(row.province),
+        municipality: String(row.municipality),
+        capacityPacks: Number(row.capacity_packs ?? 50000),
+        latitude: Number(row.latitude ?? 10.6975),
+        longitude: Number(row.longitude ?? 122.4764),
+        foodPacks,
+        hygieneKits,
+        sleepingKits,
+        kitchenKits,
+        familyKits,
+        laminatedSacks,
+        rtef,
+        isActive: Boolean(row.is_active ?? true),
+        currentStock: {
+          'Food Pack': foodPacks,
+          'Hygiene Kit': hygieneKits,
+          'Sleeping Kit': sleepingKits,
+          'Kitchen Kit': kitchenKits,
+          'Family Kit': familyKits,
+          'Laminated Sack': laminatedSacks,
+          'RTEF': rtef
+        },
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+    });
+  },
+
+  async createWarehouse(payload: WarehouseInput): Promise<{ id: string }> {
+    const { data, error } = await supabase
+      .from('warehouses')
+      .insert({
+        name: payload.name.trim(),
+        province: payload.province.trim(),
+        municipality: payload.municipality.trim(),
+        capacity_packs: payload.capacityPacks ?? 50000,
+        latitude: payload.latitude ?? 10.6975,
+        longitude: payload.longitude ?? 122.4764,
+        food_packs: payload.initialStock?.['Food Pack'] || 0,
+        hygiene_kits: payload.initialStock?.['Hygiene Kit'] || 0,
+        sleeping_kits: payload.initialStock?.['Sleeping Kit'] || 0,
+        kitchen_kits: payload.initialStock?.['Kitchen Kit'] || 0,
+        family_kits: payload.initialStock?.['Family Kit'] || 0,
+        laminated_sacks: payload.initialStock?.['Laminated Sack'] || 0,
+        rtef: payload.initialStock?.['RTEF'] || 0,
+        is_active: true
+      })
+      .select('id')
+      .single();
+    throwIfError(error, 'Failed to create warehouse');
+    return data;
+  },
+
+  async updateWarehouse(id: string, payload: Partial<WarehouseInput>): Promise<{ ok: boolean }> {
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (payload.name !== undefined) updates.name = payload.name.trim();
+    if (payload.province !== undefined) updates.province = payload.province.trim();
+    if (payload.municipality !== undefined) updates.municipality = payload.municipality.trim();
+    if (payload.capacityPacks !== undefined) updates.capacity_packs = payload.capacityPacks;
+    if (payload.latitude !== undefined) updates.latitude = payload.latitude;
+    if (payload.longitude !== undefined) updates.longitude = payload.longitude;
+
+    if (payload.initialStock) {
+      if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
+      if (payload.initialStock['Hygiene Kit'] !== undefined) updates.hygiene_kits = payload.initialStock['Hygiene Kit'];
+      if (payload.initialStock['Sleeping Kit'] !== undefined) updates.sleeping_kits = payload.initialStock['Sleeping Kit'];
+      if (payload.initialStock['Kitchen Kit'] !== undefined) updates.kitchen_kits = payload.initialStock['Kitchen Kit'];
+      if (payload.initialStock['Family Kit'] !== undefined) updates.family_kits = payload.initialStock['Family Kit'];
+      if (payload.initialStock['Laminated Sack'] !== undefined) updates.laminated_sacks = payload.initialStock['Laminated Sack'];
+      if (payload.initialStock['RTEF'] !== undefined) updates.rtef = payload.initialStock['RTEF'];
+    }
+
+    const { error } = await supabase.from('warehouses').update(updates).eq('id', id);
+    throwIfError(error, 'Failed to update warehouse');
+    return { ok: true };
+  },
+
+  async deleteWarehouse(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase.from('warehouses').delete().eq('id', id);
+    throwIfError(error, 'Failed to delete warehouse');
+    return { ok: true };
+  },
+
+  async deleteWarehousesBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('warehouses').delete().in('id', ids);
+    throwIfError(error, 'Failed to batch delete warehouses');
+    return { ok: true };
+  },
+
+  // --- SUPPLY SOURCES ---
+  async getSupplySources(): Promise<SupplySourceRecord[]> {
+    const { data, error } = await supabase
+      .from('supply_sources')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('Failed to fetch supply sources from Supabase:', error.message);
+      return [];
+    }
+
+    return (data ?? []).map(row => ({
+      id: String(row.id),
+      name: String(row.name),
+      shortCode: String(row.short_code ?? row.name),
+      facilityType: String(row.facility_type ?? 'National Resource Center'),
+      region: String(row.region ?? 'Region VII (Central Visayas)'),
+      location: String(row.location ?? ''),
+      isActive: Boolean(row.is_active ?? true),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  },
+
+  async createSupplySource(payload: SupplySourceInput): Promise<{ id: string }> {
+    const { data, error } = await supabase
+      .from('supply_sources')
+      .insert({
+        name: payload.name.trim(),
+        short_code: payload.shortCode.trim(),
+        facility_type: payload.facilityType.trim(),
+        region: payload.region.trim(),
+        location: payload.location.trim(),
+        is_active: true
+      })
+      .select('id')
+      .single();
+    throwIfError(error, 'Failed to create supply source');
+    return data;
+  },
+
+  async deleteSupplySource(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase.from('supply_sources').delete().eq('id', id);
+    throwIfError(error, 'Failed to delete supply source');
+    return { ok: true };
+  },
+
+  async deleteSupplySourcesBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('supply_sources').delete().in('id', ids);
+    throwIfError(error, 'Failed to batch delete supply sources');
+    return { ok: true };
+  },
+
+  // --- KIT TYPES ---
+  async getKitTypes(): Promise<KitTypeRecord[]> {
+    const { data, error } = await supabase
+      .from('kit_types')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('Failed to fetch kit types from Supabase:', error.message);
+      return [];
+    }
+
+    return (data ?? []).map(row => ({
+      id: String(row.id),
+      name: String(row.name),
+      category: row.category === 'Food Item' ? 'Food Item' : 'Non-Food Item',
+      unitType: String(row.unit_type ?? 'packs'),
+      description: String(row.description ?? ''),
+      isActive: Boolean(row.is_active ?? true),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }));
+  },
+
+  async createKitType(payload: KitTypeInput): Promise<{ id: string }> {
+    const { data, error } = await supabase
+      .from('kit_types')
+      .insert({
+        name: payload.name.trim(),
+        category: payload.category,
+        unit_type: payload.unitType.trim(),
+        description: payload.description.trim(),
+        is_active: true
+      })
+      .select('id')
+      .single();
+    throwIfError(error, 'Failed to create kit type');
+    return data;
+  },
+
+  async deleteKitType(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase.from('kit_types').delete().eq('id', id);
+    throwIfError(error, 'Failed to delete kit type');
+    return { ok: true };
+  },
+
+  async deleteKitTypesBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('kit_types').delete().in('id', ids);
+    throwIfError(error, 'Failed to batch delete kit types');
+    return { ok: true };
+  },
+
+  // --- LGUS ---
+  async getLgus(provinceFilter?: string): Promise<LguRecord[]> {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('lgus')
         .select('*')
-        .eq('is_active', true)
+        .eq('is_active', true);
+
+      if (provinceFilter && provinceFilter !== 'All') {
+        query = query.ilike('province', provinceFilter.trim());
+      }
+
+      const { data, error } = await query
         .order('province', { ascending: true })
         .order('municipality', { ascending: true });
 
-      if (error || !data || data.length === 0) {
-        return PANAY_LGUS.map(l => ({
-          id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
-          municipality: l.municipality,
-          province: l.province,
-          lguName: l.defaultFacility,
-          contactPerson: '',
-          contactNumber: '',
-          latitude: l.lat,
-          longitude: l.lng,
-          remarks: '',
-          isActive: true,
-          foodPacks: 0,
-          hygieneKits: 0,
-          sleepingKits: 0,
-          kitchenKits: 0,
-          familyKits: 0,
-          laminatedSacks: 0,
-          rtef: 0,
-          urgencyScore: 20,
-          priorityColor: 'Green' as const,
-          affectedFamilies: 0,
-          damageIndex: 0,
-          recommendation: 'Sufficient stock on hand.'
-        }));
+      if (error) {
+        console.error('Failed to fetch LGUs from Supabase:', error.message);
+        return [];
       }
 
-      return data.map((row: Record<string, any>) => {
+      return (data ?? []).map((row: Record<string, any>) => {
         const foodPacks = Number(row.food_packs ?? 0);
         const hygieneKits = Number(row.hygiene_kits ?? 0);
         const sleepingKits = Number(row.sleeping_kits ?? 0);
@@ -319,32 +672,23 @@ export const backendApi = {
           updatedAt: row.updated_at
         };
       });
-    } catch {
-      return PANAY_LGUS.map(l => ({
-        id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
-        municipality: l.municipality,
-        province: l.province,
-        lguName: l.defaultFacility,
-        contactPerson: '',
-        contactNumber: '',
-        latitude: l.lat,
-        longitude: l.lng,
-        remarks: '',
-        isActive: true,
-        foodPacks: 0,
-        hygieneKits: 0,
-        sleepingKits: 0,
-        kitchenKits: 0,
-        familyKits: 0,
-        laminatedSacks: 0,
-        rtef: 0,
-        urgencyScore: 20,
-        priorityColor: 'Green' as const,
-        affectedFamilies: 0,
-        damageIndex: 0,
-        recommendation: 'Sufficient stock on hand.'
-      }));
+    } catch (err) {
+      console.error('Error in getLgus:', err);
+      return [];
     }
+  },
+
+  async deleteLgu(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase.from('lgus').delete().eq('id', id);
+    throwIfError(error, 'Failed to delete LGU');
+    return { ok: true };
+  },
+
+  async deleteLgusBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('lgus').delete().in('id', ids);
+    throwIfError(error, 'Failed to batch delete LGUs');
+    return { ok: true };
   },
 
   async createLgu(payload: LguInput): Promise<{ id: string }> {
@@ -745,20 +1089,25 @@ export const backendApi = {
     // 3. Record or update inventory for this LGU in lgu_inventory_reports
     try {
       let muni = (params.municipality || params.lguName || '').trim();
-      const matchedDirectoryLgu = PANAY_LGUS.find(
-        (l) =>
-          l.municipality.toLowerCase() === muni.toLowerCase() ||
-          muni.toLowerCase().includes(l.municipality.toLowerCase()) ||
-          l.municipality.toLowerCase().includes(muni.toLowerCase())
-      );
+      let prov = params.province || 'Iloilo';
 
-      if (matchedDirectoryLgu) {
-        muni = matchedDirectoryLgu.municipality;
-      } else {
+      try {
+        const { data: dbLgu } = await supabase
+          .from('lgus')
+          .select('municipality, province')
+          .or(`municipality.ilike.${muni},lgu_name.ilike.%${muni}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (dbLgu) {
+          muni = dbLgu.municipality;
+          prov = dbLgu.province;
+        } else {
+          muni = muni.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim();
+        }
+      } catch {
         muni = muni.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim();
       }
-
-      const prov = params.province || matchedDirectoryLgu?.province || 'Iloilo';
       const isFood = params.category.toLowerCase().includes('food');
       const isHygiene = params.category.toLowerCase().includes('hygiene');
       const isFamily = params.category.toLowerCase().includes('family');

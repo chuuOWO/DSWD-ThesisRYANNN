@@ -1,17 +1,21 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { CheckCircle, Edit, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { blockchain } from '../../services/blockchain';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
-import type { LguRecord } from '../../services/backendApi';
+import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
 
 interface InventoryState {
   inventory: InventoryItem[];
   outgoingReleasesList: OutgoingRelease[];
   discrepancyReports: DiscrepancyReport[];
   lgusList?: LguRecord[];
+  provincesList?: ProvinceRecord[];
+  warehousesList?: WarehouseRecord[];
+  supplySourcesList?: SupplySourceRecord[];
+  kitTypesList?: KitTypeRecord[];
   addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => Promise<{ ok: boolean; message: string }>;
@@ -64,7 +68,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,
-    requestOutgoingCorrection
+    requestOutgoingCorrection,
+    provincesList = [],
+    warehousesList = [],
+    supplySourcesList = [],
+    kitTypesList = []
   } = inventoryState;
 
   const [showReleaseModal, setShowReleaseModal] = useState(false);
@@ -79,6 +87,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [actionModal, setActionModal] = useState<ReleaseActionModalState | null>(null);
   const [qrModalRelease, setQrModalRelease] = useState<OutgoingRelease | null>(null);
   const autoCloseDelayMs = 1800;
+
+  const warehouseOptions = useMemo(() => {
+    if (warehousesList.length > 0) return warehousesList.map(w => w.name);
+    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+  }, [warehousesList]);
 
   const handleAddRelease = (newRelease: ReleaseForm) => {
     addOutgoingRelease({
@@ -290,9 +303,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
           >
             <option value="All">All Warehouses</option>
-            <option value="Oton Main Warehouse">Oton Main Warehouse</option>
-            <option value="Pototan Main Warehouse">Pototan Main Warehouse</option>
-            <option value="Leon Municipal Office">Leon Municipal Office</option>
+            {warehouseOptions.map(wh => (
+              <option key={wh} value={wh}>{wh}</option>
+            ))}
           </select>
 
           <select
@@ -488,6 +501,10 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           onSubmit={handleAddRelease}
           availableStock={inventory}
           lgusList={lgusList}
+          provincesList={provincesList}
+          warehousesList={warehousesList}
+          supplySourcesList={supplySourcesList}
+          kitTypesList={kitTypesList}
           mode="add"
         />
       )}
@@ -498,6 +515,10 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           onSubmit={handleEditRelease}
           availableStock={inventory}
           lgusList={lgusList}
+          provincesList={provincesList}
+          warehousesList={warehousesList}
+          supplySourcesList={supplySourcesList}
+          kitTypesList={kitTypesList}
           mode="edit"
           initialData={{
             dateAllocated: editingRelease.dateAllocated,
@@ -508,7 +529,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             fnfiCategory: editingRelease.fnfiCategory,
             amountRequested: editingRelease.amountRequested,
             amountApproved: editingRelease.amountApproved,
-            sourceType: ['Oton Main Warehouse', 'Pototan Main Warehouse'].includes(editingRelease.warehouseSource) ? 'Warehouse' : 'LGU',
+            sourceType: (warehousesList.some(w => w.name.toLowerCase() === editingRelease.warehouseSource.toLowerCase()) || ['Oton Main Warehouse', 'Pototan Main Warehouse'].includes(editingRelease.warehouseSource)) ? 'Warehouse' : 'LGU',
             warehouseSource: editingRelease.warehouseSource,
             deliveryMode: editingRelease.deliveryMode,
             deliveryStatus: editingRelease.deliveryStatus,

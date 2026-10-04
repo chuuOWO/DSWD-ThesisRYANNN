@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { X, Calendar, Package, AlertCircle } from 'lucide-react';
 import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
+import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord } from '../../services/backendApi';
 
 export interface IncomingGoodsForm {
   dateReceived: string;
@@ -19,41 +20,63 @@ interface AddIncomingGoodsModalProps {
   onSubmit: (data: IncomingGoodsForm) => void;
   initialData?: IncomingGoodsForm;
   mode?: 'add' | 'edit';
+  supplySourcesList?: SupplySourceRecord[];
+  warehousesList?: WarehouseRecord[];
+  kitTypesList?: KitTypeRecord[];
 }
 
-const FNFI_CATEGORIES = [
-  'Hygiene Kit',
-  'Food Pack',
-  'Sleeping Kit',
-  'Kitchen Kit',
-  'Family Kit',
-  'Laminated Sack',
-  'RTEF'
-];
+export function AddIncomingGoodsModal({
+  onClose,
+  onSubmit,
+  initialData,
+  mode = 'add',
+  supplySourcesList,
+  warehousesList,
+  kitTypesList
+}: AddIncomingGoodsModalProps) {
+  const sourceOptions = useMemo(() => {
+    if (supplySourcesList && supplySourcesList.length > 0) {
+      return supplySourcesList.map(s => s.shortCode || s.name);
+    }
+    return ['VDRC', 'LDRC'];
+  }, [supplySourcesList]);
 
-const SOURCE_OPTIONS = [
-  'VDRC',
-  'LDRC',
-  'Oton Main Warehouse',
-  'Pototan Main Warehouse',
-  'Others'
-];
+  const categoryOptions = useMemo(() => {
+    if (kitTypesList && kitTypesList.length > 0) {
+      return kitTypesList.map(k => k.name);
+    }
+    return [
+      'Family Food Pack',
+      'Hygiene Kit',
+      'Sleeping Kit',
+      'Kitchen Kit',
+      'Family Kit',
+      'Laminated Sacks',
+      'Ready-to-Eat Food (RTEF)'
+    ];
+  }, [kitTypesList]);
 
-const defaultFormData: IncomingGoodsForm = {
+  const warehouseOptions = useMemo(() => {
+    if (warehousesList && warehousesList.length > 0) {
+      return warehousesList.map(w => w.name);
+    }
+    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+  }, [warehousesList]);
+
+  const defaultFormData: IncomingGoodsForm = {
     dateReceived: new Date().toISOString().split('T')[0],
     fnfiCategory: '',
     quantity: 0,
-    unitType: 'kits',
+    unitType: 'packs',
     expirationDate: '',
-    source: 'VDRC',
+    source: sourceOptions[0] || 'VDRC',
     destinationType: 'Warehouse',
-    destination: 'Oton Main Warehouse',
+    destination: warehouseOptions[0] || 'Oton Main Warehouse',
     incidentCode: ''
-};
+  };
 
-export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = 'add' }: AddIncomingGoodsModalProps) {
   const [formData, setFormData] = useState<IncomingGoodsForm>(
-    initialData ? { ...initialData, unitType: initialData.unitType || 'kits' } : defaultFormData
+    initialData ? { ...initialData, unitType: initialData.unitType || 'packs' } : defaultFormData
   );
   const [errors, setErrors] = useState<Partial<Record<keyof IncomingGoodsForm, string>>>({});
 
@@ -170,13 +193,25 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
             </label>
             <select
               value={formData.fnfiCategory}
-              onChange={(e) => handleChange('fnfiCategory', e.target.value)}
+              onChange={(e) => {
+                const catName = e.target.value;
+                const matchedKit = kitTypesList?.find(k => k.name === catName);
+                const unit = matchedKit?.unitType || 'packs';
+                setFormData(prev => ({
+                  ...prev,
+                  fnfiCategory: catName,
+                  unitType: unit
+                }));
+                if (errors.fnfiCategory) {
+                  setErrors(prev => ({ ...prev, fnfiCategory: '' }));
+                }
+              }}
               className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 errors.fnfiCategory ? 'border-red-500' : 'border-gray-300'
               }`}
             >
               <option value="">Select category...</option>
-              {FNFI_CATEGORIES.map(cat => (
+              {categoryOptions.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
@@ -203,7 +238,7 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
                   const cleaned = sanitizeNumbersOnly(e.target.value);
                   handleChange('quantity', cleaned ? parseInt(cleaned, 10) : 0);
                 }}
-                placeholder="Enter quantity (kits)"
+                placeholder={`Enter quantity (${formData.unitType || 'units'})`}
                 className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.quantity ? 'border-red-500' : 'border-gray-300'
                 }`}
@@ -221,9 +256,9 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
                 Unit Type
               </label>
               <div className="w-full px-4 py-2.5 bg-gray-100 border border-gray-300 rounded-lg text-gray-800 font-semibold text-sm flex items-center justify-between">
-                <span>kits</span>
+                <span>{formData.unitType || 'packs'}</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded shadow-xs">
-                  Fixed
+                  Kit Unit
                 </span>
               </div>
             </div>
@@ -265,7 +300,7 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
                 errors.source ? 'border-red-500' : 'border-gray-300'
               }`}
             >
-              {SOURCE_OPTIONS.map(src => (
+              {sourceOptions.map(src => (
                 <option key={src} value={src}>{src}</option>
               ))}
             </select>
@@ -282,30 +317,34 @@ export function AddIncomingGoodsModal({ onClose, onSubmit, initialData, mode = '
             <label className="block text-sm font-bold text-gray-700 mb-2">
               Destination Warehouse <span className="text-red-500">*</span>
             </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => handleChange('destination', 'Oton Main Warehouse')}
-                className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                  formData.destination === 'Oton Main Warehouse'
-                    ? 'bg-[#2500ba] text-white shadow-md'
-                    : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
-                }`}
+            {warehouseOptions.length <= 4 ? (
+              <div className="grid grid-cols-2 gap-3">
+                {warehouseOptions.map(wh => (
+                  <button
+                    key={wh}
+                    type="button"
+                    onClick={() => handleChange('destination', wh)}
+                    className={`px-4 py-3 rounded-lg font-semibold transition-all ${
+                      formData.destination === wh
+                        ? 'bg-[#2500ba] text-white shadow-md'
+                        : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                    }`}
+                  >
+                    {wh}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <select
+                value={formData.destination}
+                onChange={(e) => handleChange('destination', e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                Oton Main Warehouse
-              </button>
-              <button
-                type="button"
-                onClick={() => handleChange('destination', 'Pototan Main Warehouse')}
-                className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                  formData.destination === 'Pototan Main Warehouse'
-                    ? 'bg-[#2500ba] text-white shadow-md'
-                    : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
-                }`}
-              >
-                Pototan Main Warehouse
-              </button>
-            </div>
+                {warehouseOptions.map(wh => (
+                  <option key={wh} value={wh}>{wh}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Incident Code */}

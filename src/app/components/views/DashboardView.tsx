@@ -25,7 +25,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
   const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports, discrepancyReports } = inventoryState;
   const [showWarehouseOverview, setShowWarehouseOverview] = useState(false);
 
-  const totalInventory = inventory.reduce((sum, item) => sum + item.warehouseA + item.warehouseB, 0);
+  const totalInventory = inventory.reduce((sum, item) => sum + (item.totalStock ?? (item.warehouseA + item.warehouseB)), 0);
   const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
   const releaseRecordCount = outgoingReleasesList.filter(item => item.handoverContractId).length;
   const gpsAcceptedCount = outgoingReleasesList.filter(item => item.receiverGps).length;
@@ -96,14 +96,25 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Warehouse FNFI Overview</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-            {inventory.map((item) => (
-              <div key={item.category} className="bg-gray-50 rounded-lg p-4 text-center border border-gray-100">
-                <Package className="w-8 h-8 text-blue-600 mx-auto mb-2" />
-                <p className="text-lg font-bold text-gray-900">{(item.warehouseA + item.warehouseB).toLocaleString()}</p>
-                <p className="text-xs font-semibold text-gray-600 mt-1">{item.category}</p>
-                <p className="text-[11px] text-gray-500 mt-2">Oton {item.warehouseA.toLocaleString()} | Pototan {item.warehouseB.toLocaleString()}</p>
-              </div>
-            ))}
+            {inventory.map((item) => {
+              const totalStock = item.totalStock ?? (item.warehouseA + item.warehouseB);
+              const breakdownText = item.warehouseBreakdown
+                ? Object.entries(item.warehouseBreakdown)
+                    .map(([whName, qty]) => `${whName.replace(' Main Warehouse', '')}: ${qty.toLocaleString()}`)
+                    .join(' | ')
+                : `Oton: ${item.warehouseA.toLocaleString()} | Pototan: ${item.warehouseB.toLocaleString()}`;
+
+              return (
+                <div key={item.category} className="bg-gray-50 rounded-lg p-4 text-center border border-gray-100">
+                  <Package className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                  <p className="text-lg font-bold text-gray-900">{totalStock.toLocaleString()}</p>
+                  <p className="text-xs font-semibold text-gray-600 mt-1">{item.category}</p>
+                  <p className="text-[11px] text-gray-500 mt-2 truncate" title={breakdownText}>
+                    {breakdownText}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

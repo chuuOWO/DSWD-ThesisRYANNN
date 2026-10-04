@@ -2,10 +2,14 @@ import { useMemo, useState } from 'react';
 import { Calendar, CheckCircle, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
+import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
   discrepancyReports: DiscrepancyReport[];
+  warehousesList?: WarehouseRecord[];
+  supplySourcesList?: SupplySourceRecord[];
+  kitTypesList?: KitTypeRecord[];
   addIncomingGoods: (data: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => void;
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
@@ -83,7 +87,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     submitIncomingForVerification,
     verifyIncomingReceipt,
     mintBatchToken,
-    requestIncomingCorrection
+    requestIncomingCorrection,
+    warehousesList = [],
+    supplySourcesList = [],
+    kitTypesList = []
   } = inventoryState;
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -92,6 +99,16 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [actionModal, setActionModal] = useState<IncomingActionModalState | null>(null);
+
+  const destinationOptions = useMemo(() => {
+    if (warehousesList.length > 0) return warehousesList.map(w => w.name);
+    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+  }, [warehousesList]);
+
+  const categoryOptions = useMemo(() => {
+    if (kitTypesList.length > 0) return kitTypesList.map(k => k.name);
+    return FNFI_CATEGORIES;
+  }, [kitTypesList]);
 
   const handleAddGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
     addIncomingGoods(newGoods);
@@ -277,9 +294,9 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           >
             <option value="All">All Destinations</option>
-            <option value="Oton Main Warehouse">Oton Main Warehouse</option>
-            <option value="Pototan Main Warehouse">Pototan Main Warehouse</option>
-            <option value="Leon">Leon</option>
+            {destinationOptions.map(dest => (
+              <option key={dest} value={dest}>{dest}</option>
+            ))}
           </select>
 
           <select
@@ -288,7 +305,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           >
             <option value="All">All Categories</option>
-            {FNFI_CATEGORIES.map(cat => <option key={cat}>{cat}</option>)}
+            {categoryOptions.map(cat => <option key={cat} value={cat}>{cat}</option>)}
           </select>
         </div>
       </div>
@@ -433,6 +450,9 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           onClose={() => setShowAddModal(false)}
           onSubmit={handleAddGoods}
           mode="add"
+          supplySourcesList={supplySourcesList}
+          warehousesList={warehousesList}
+          kitTypesList={kitTypesList}
         />
       )}
 
@@ -441,6 +461,9 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           onClose={() => setEditingIncoming(null)}
           onSubmit={handleEditGoods}
           mode="edit"
+          supplySourcesList={supplySourcesList}
+          warehousesList={warehousesList}
+          kitTypesList={kitTypesList}
           initialData={{
             dateReceived: editingIncoming.dateReceived,
             fnfiCategory: editingIncoming.fnfiCategory,

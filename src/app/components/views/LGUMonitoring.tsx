@@ -1,10 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit } from 'lucide-react';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock, Plus, Edit, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
-import { PANAY_LGUS } from '../../data/panayLguDirectory';
 import { AddLGUModal, type LGUForm } from '../modals/AddLGUModal';
 import { EditLGUModal } from '../modals/EditLGUModal';
-import type { LguRecord, LguInput } from '../../services/backendApi';
+import type { LguRecord, LguInput, ProvinceRecord, KitTypeRecord } from '../../services/backendApi';
 
 export interface LGUDelivery {
   id: string;
@@ -68,6 +67,8 @@ interface LGUMonitoringProps {
     outgoingReleasesList?: OutgoingRelease[];
     lguPriorityReports: LGUPriorityReport[];
     lgusList?: LguRecord[];
+    provincesList?: ProvinceRecord[];
+    kitTypesList?: KitTypeRecord[];
     addLgu?: (input: LguInput) => Promise<{ ok: boolean; message: string }>;
     editLgu?: (id: string, updates: Partial<LguInput>) => Promise<{ ok: boolean; message: string }>;
   };
@@ -76,94 +77,25 @@ interface LGUMonitoringProps {
 
 export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGUMonitoringProps) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
+  const [selectedProvinceTab, setSelectedProvinceTab] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 12;
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
 
-  // Dynamically compute live LGU list from outgoing releases, reports, and Panay directory (Zero static mock data)
+  // Dynamically compute live LGU list exclusively from master Supabase lgus table
   const baseLguList = useMemo<LGUDelivery[]>(() => {
     const releases = inventoryState?.outgoingReleasesList ?? [];
     const reports = inventoryState?.lguPriorityReports ?? [];
-    const mainInventory = inventoryState?.inventory ?? [];
-
-    const warehouseAStock: NonNullable<LGUDelivery['currentStock']> = { ...EMPTY_STOCK };
-    const warehouseBStock: NonNullable<LGUDelivery['currentStock']> = { ...EMPTY_STOCK };
-    mainInventory.forEach((item) => {
-      if (item.category in warehouseAStock) {
-        (warehouseAStock as Record<string, number>)[item.category] = item.warehouseA || 0;
-      }
-      if (item.category in warehouseBStock) {
-        (warehouseBStock as Record<string, number>)[item.category] = item.warehouseB || 0;
-      }
-    });
-
-    const otonDeliveries = releases.filter((r) => (r.warehouseSource || '').toLowerCase().includes('oton'));
-    const pototanDeliveries = releases.filter((r) => (r.warehouseSource || '').toLowerCase().includes('pototan'));
-
-    // Main Warehouses
-    const mainWarehouses: LGUDelivery[] = [
-      {
-        id: 'MAIN-OTON',
-        lguName: 'Oton Main Warehouse',
-        municipality: 'Oton',
-        province: 'Iloilo',
-        totalItemsReleased: otonDeliveries.reduce((sum, r) => sum + (r.amountApproved || r.amountRequested || 0), 0),
-        deliveryCount: otonDeliveries.length,
-        completedDeliveries: otonDeliveries.filter((r) => ['Delivered', 'Accepted'].includes(r.deliveryStatus)).length,
-        pendingDeliveries: otonDeliveries.filter((r) => ['Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length,
-        lastDeliveryDate: otonDeliveries[0]?.dateAllocated || 'Active',
-        currentStock: warehouseAStock
-      },
-      {
-        id: 'MAIN-POTOTAN',
-        lguName: 'Pototan Main Warehouse',
-        municipality: 'Pototan',
-        province: 'Iloilo',
-        totalItemsReleased: pototanDeliveries.reduce((sum, r) => sum + (r.amountApproved || r.amountRequested || 0), 0),
-        deliveryCount: pototanDeliveries.length,
-        completedDeliveries: pototanDeliveries.filter((r) => ['Delivered', 'Accepted'].includes(r.deliveryStatus)).length,
-        pendingDeliveries: pototanDeliveries.filter((r) => ['Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length,
-        lastDeliveryDate: pototanDeliveries[0]?.dateAllocated || 'Active',
-        currentStock: warehouseBStock
-      }
-    ];
-
-    // Compute Panay LGUs from master Supabase list, falling back to PANAY_LGUS directory
     const masterLgus = inventoryState?.lgusList ?? [];
-    const candidateLgus: { id: string; municipality: string; province: string; lguName: string; contactPerson?: string; contactNumber?: string; remarks?: string; lat?: number; lng?: number }[] = [];
-
-    if (masterLgus.length > 0) {
-      masterLgus.forEach(l => {
-        candidateLgus.push({
-          id: l.id,
-          municipality: l.municipality,
-          province: l.province,
-          lguName: l.lguName,
-          contactPerson: l.contactPerson,
-          contactNumber: l.contactNumber,
-          remarks: l.remarks,
-          lat: l.latitude,
-          lng: l.longitude
-        });
-      });
-    } else {
-      PANAY_LGUS.forEach(l => {
-        candidateLgus.push({
-          id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
-          municipality: l.municipality,
-          province: l.province,
-          lguName: l.defaultFacility,
-          lat: l.lat,
-          lng: l.lng
-        });
-      });
-    }
 
     const lguEntriesMap = new Map<string, LGUDelivery>();
 
-    candidateLgus.forEach((lgu) => {
+    masterLgus.forEach((lgu) => {
       const muni = lgu.municipality;
       const lguReleases = releases.filter((r) => {
         const target = (r.lguName || '').toLowerCase();
@@ -179,17 +111,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       const pending = lguReleases.filter((r) => ['Allocating', 'Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length;
       const lastDate = lguReleases[0]?.dateAllocated || (report ? report.reportedAt?.slice(0, 10) : 'N/A');
 
-      const matchedMaster = masterLgus.find(m => m.id === lgu.id);
       const stock: NonNullable<LGUDelivery['currentStock']> = {
         ...EMPTY_STOCK,
-        ...(matchedMaster?.currentStock || {})
+        ...(lgu.currentStock || {})
       };
+
       // Accumulate accepted relief packages
       lguReleases.forEach((r) => {
         if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory in stock) {
           (stock as Record<string, number>)[r.fnfiCategory] += (r.amountApproved || r.amountRequested || 0);
         }
       });
+
       // Override/augment from official LGU inventory reports
       if (report) {
         stock['Food Pack'] = Math.max(stock['Food Pack'], report.foodPacks || 0);
@@ -210,16 +143,33 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         contactPerson: lgu.contactPerson,
         contactNumber: lgu.contactNumber,
         remarks: lgu.remarks,
-        latitude: lgu.lat,
-        longitude: lgu.lng,
+        latitude: lgu.latitude,
+        longitude: lgu.longitude,
         currentStock: stock
       });
     });
 
-    return [...mainWarehouses, ...Array.from(lguEntriesMap.values())];
-  }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.inventory, inventoryState?.lgusList]);
+    return Array.from(lguEntriesMap.values());
+  }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.lgusList]);
 
-  const displayLGUList = baseLguList;
+  // Province list with counts
+  const provinceOptions = useMemo(() => {
+    if (inventoryState?.provincesList && inventoryState.provincesList.length > 0) {
+      return inventoryState.provincesList.map(p => p.name).sort();
+    }
+    const set = new Set<string>();
+    baseLguList.forEach(l => {
+      if (l.province) set.add(l.province);
+    });
+    return Array.from(set).sort();
+  }, [inventoryState?.provincesList, baseLguList]);
+
+  const categoryOptions = useMemo(() => {
+    if (inventoryState?.kitTypesList && inventoryState.kitTypesList.length > 0) {
+      return inventoryState.kitTypesList.map(k => k.name);
+    }
+    return FNFI_CATEGORIES;
+  }, [inventoryState?.kitTypesList]);
 
   const handleAddLGU = async (newLGU: LGUForm) => {
     if (inventoryState?.addLgu) {
@@ -283,32 +233,37 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
   const priorityReports = inventoryState?.lguPriorityReports || [];
 
-  const filteredLGUs = displayLGUList.filter(lgu => {
-    const matchesSearch = lgu.lguName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          lgu.municipality.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredLGUs = useMemo(() => {
+    return baseLguList.filter(lgu => {
+      const matchesSearch = lgu.lguName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            lgu.municipality.toLowerCase().includes(searchTerm.toLowerCase());
 
-    const isMainWarehouse = lgu.lguName.includes('Main Warehouse');
-    const matchesType = selectedWarehouseType === 'All' ||
-                       (selectedWarehouseType === 'Main' && isMainWarehouse) ||
-                       (selectedWarehouseType === 'LGU' && !isMainWarehouse);
+      const matchesProvince = selectedProvinceTab === 'All' ||
+                             lgu.province.toLowerCase() === selectedProvinceTab.toLowerCase();
 
-    const matchesCategory = selectedCategory === 'All' ||
-                           (lgu.currentStock && (lgu.currentStock[selectedCategory as keyof typeof lgu.currentStock] || 0) > 0);
+      const matchesCategory = selectedCategory === 'All' ||
+                             (lgu.currentStock && (lgu.currentStock[selectedCategory as keyof typeof lgu.currentStock] || 0) > 0);
 
-    return matchesSearch && matchesType && matchesCategory;
-  });
+      return matchesSearch && matchesProvince && matchesCategory;
+    });
+  }, [baseLguList, searchTerm, selectedProvinceTab, selectedCategory]);
 
-  const totalLGUs = displayLGUList.length;
-  const totalItemsReleased = displayLGUList.reduce((sum, lgu) => sum + lgu.totalItemsReleased, 0);
-  const totalDeliveries = displayLGUList.reduce((sum, lgu) => sum + lgu.deliveryCount, 0);
-  const totalCompleted = displayLGUList.reduce((sum, lgu) => sum + lgu.completedDeliveries, 0);
-  const overallCompletionRate = Math.round((totalCompleted / totalDeliveries) * 100);
+  const totalPages = Math.max(1, Math.ceil(filteredLGUs.length / pageSize));
+  const paginatedLGUs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLGUs.slice(start, start + pageSize);
+  }, [filteredLGUs, currentPage, pageSize]);
+
+  const totalLGUs = baseLguList.length;
+  const totalItemsReleased = baseLguList.reduce((sum, lgu) => sum + lgu.totalItemsReleased, 0);
+  const totalDeliveries = baseLguList.reduce((sum, lgu) => sum + lgu.deliveryCount, 0);
+  const totalCompleted = baseLguList.reduce((sum, lgu) => sum + lgu.completedDeliveries, 0);
+  const overallCompletionRate = totalDeliveries > 0 ? Math.round((totalCompleted / totalDeliveries) * 100) : 0;
 
   const dynamicPriorities = useMemo(() => {
-    if (priorityReports.length > 0) return priorityReports;
+    if (priorityReports.length > 0) return priorityReports.slice(0, 5);
 
-    return displayLGUList
-      .filter((lgu) => !lgu.lguName.includes('Main Warehouse'))
+    return baseLguList
       .map((lgu) => {
         const foodStock = lgu.currentStock?.['Food Pack'] || 0;
         const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + v, 0) : 0;
@@ -335,20 +290,21 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             : 'Sufficient stock; continue monitoring.'
         };
       })
-      .sort((a, b) => b.urgencyScore - a.urgencyScore);
-  }, [priorityReports, displayLGUList]);
+      .sort((a, b) => b.urgencyScore - a.urgencyScore)
+      .slice(0, 5);
+  }, [priorityReports, baseLguList]);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-sm"
+          className="flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-sm cursor-pointer"
         >
           <Plus className="w-5 h-5" />
           Add New LGU
@@ -362,7 +318,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             <MapPin className="w-8 h-8" />
           </div>
           <p className="text-3xl font-bold">{totalLGUs}</p>
-          <p className="text-sm font-semibold opacity-90 mt-1">Total LGUs Served</p>
+          <p className="text-sm font-semibold opacity-90 mt-1">Total LGUs Monitored</p>
         </div>
 
         <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-lg p-6 text-white shadow-md">
@@ -390,159 +346,345 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         </div>
       </div>
 
-      {/* Stock-Based Prioritization Logic */}
+      {/* Stock-Based Prioritization Logic (Limited to 5, Scrollable if needed) */}
       {dynamicPriorities.length > 0 && (
         <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div>
-              <h3 className="text-lg font-bold text-gray-900">Stock-Based Prioritization Logic</h3>
-              <p className="text-sm text-gray-600">Red/Yellow/Green indicators computed dynamically from Supabase LGU stock records, delivery status, and relief demand.</p>
+              <h3 className="text-lg font-bold text-gray-900">High-Priority LGU Restocking Watch</h3>
+              <p className="text-sm text-gray-600">Top 5 urgent LGUs requiring relief attention based on low stock and pending requests.</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">
-                Immediate restocking: {dynamicPriorities.filter((report) => report.priorityColor === 'Red').length}
+                Immediate Restocking: {dynamicPriorities.filter((report) => report.priorityColor === 'Red').length}
               </span>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {dynamicPriorities.slice(0, 3).map((report) => (
-              <div key={report.id} className={`rounded-lg border p-4 ${
-                report.priorityColor === 'Red' ? 'bg-red-50 border-red-200' :
-                report.priorityColor === 'Yellow' ? 'bg-yellow-50 border-yellow-200' :
-                'bg-green-50 border-green-200'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-sm text-gray-900">{report.municipality}</p>
-                  <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                    report.priorityColor === 'Red' ? 'bg-red-100 text-red-700' :
-                    report.priorityColor === 'Yellow' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-green-100 text-green-700'
-                  }`}>{report.priorityColor}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {dynamicPriorities.map((report) => (
+              <div
+                key={report.id}
+                className={`rounded-lg border p-3 flex flex-col justify-between ${
+                  report.priorityColor === 'Red' ? 'bg-red-50/70 border-red-200' :
+                  report.priorityColor === 'Yellow' ? 'bg-yellow-50/70 border-yellow-200' :
+                  'bg-green-50/70 border-green-200'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-bold text-sm text-gray-900 truncate" title={report.municipality}>
+                      {report.municipality}
+                    </p>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      report.priorityColor === 'Red' ? 'bg-red-100 text-red-700' :
+                      report.priorityColor === 'Yellow' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-green-100 text-green-700'
+                    }`}>
+                      {report.priorityColor}
+                    </span>
+                  </div>
+                  <p className="text-xl font-bold text-gray-900 mt-1">{report.urgencyScore}</p>
+                  <p className="text-[11px] text-gray-600 mt-1">Food packs: {report.foodPacks}</p>
                 </div>
-                <p className="text-2xl font-bold text-gray-900 mt-2">{report.urgencyScore}</p>
-                <p className="text-xs text-gray-600 mt-1">Food packs: {report.foodPacks} • Affected families: {report.affectedFamilies}</p>
-                <p className="text-xs text-gray-700 mt-2">{report.recommendation}</p>
+                <p className="text-[11px] text-gray-700 mt-2 font-medium truncate" title={report.recommendation}>
+                  {report.recommendation}
+                </p>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Search & Filters */}
-      <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Dynamic Province Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide border-b border-gray-200">
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedProvinceTab('All');
+            setCurrentPage(1);
+          }}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+            selectedProvinceTab === 'All'
+              ? 'bg-[#2500ba] text-white shadow-sm'
+              : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+          }`}
+        >
+          All LGUs
+          <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+            selectedProvinceTab === 'All' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
+          }`}>
+            {baseLguList.length}
+          </span>
+        </button>
+
+        {provinceOptions.map(prov => {
+          const count = baseLguList.filter(l => l.province.toLowerCase() === prov.toLowerCase()).length;
+          return (
+            <button
+              key={prov}
+              type="button"
+              onClick={() => {
+                setSelectedProvinceTab(prov);
+                setCurrentPage(1);
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+                selectedProvinceTab.toLowerCase() === prov.toLowerCase()
+                  ? 'bg-[#2500ba] text-white shadow-sm'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+              }`}
+            >
+              {prov}
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
+                selectedProvinceTab.toLowerCase() === prov.toLowerCase() ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'
+              }`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Search, Category Filter, and View Mode Toggle */}
+      <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by LGU name or municipality..."
+              placeholder="Search municipality or facility..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
           <select
-            value={selectedWarehouseType}
-            onChange={(e) => setSelectedWarehouseType(e.target.value)}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
-          >
-            <option value="All">All Warehouses</option>
-            <option value="Main">Main Warehouses Only</option>
-            <option value="LGU">LGU Warehouses Only</option>
-          </select>
-
-          <select
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
+            onChange={(e) => {
+              setSelectedCategory(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           >
             <option value="All">All Categories</option>
-            {FNFI_CATEGORIES.map(cat => (
+            {categoryOptions.map(cat => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
         </div>
+
+        {/* View mode toggle */}
+        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200 self-end md:self-center">
+          <button
+            type="button"
+            onClick={() => setViewMode('cards')}
+            className={`p-2 rounded-md transition-all ${viewMode === 'cards' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
+            title="Card View"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('table')}
+            className={`p-2 rounded-md transition-all ${viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
+            title="Table View"
+          >
+            <List className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* LGU Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredLGUs.map((lgu, index) => {
-          const completionRate = lgu.deliveryCount > 0
-            ? Math.round((lgu.completedDeliveries / lgu.deliveryCount) * 100)
-            : 0;
-
-          return (
-            <div key={lgu.id} className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+      {/* Content: Cards View or Table View */}
+      {viewMode === 'cards' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {paginatedLGUs.map((lgu) => (
+            <div key={lgu.id} className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-4">
-                <div className="flex items-start gap-3 flex-1">
-                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <MapPin className="w-6 h-6 text-blue-600" />
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <MapPin className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-sm text-gray-900">{lgu.lguName}</h3>
+                    <h3 className="font-bold text-sm text-gray-900 truncate" title={lgu.lguName}>{lgu.lguName}</h3>
                     <p className="text-xs text-gray-600 mt-0.5">{lgu.municipality}, {lgu.province}</p>
                   </div>
                 </div>
                 <button
                   onClick={() => openEditModal(lgu)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
+                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
                   title="Edit LGU"
                 >
                   <Edit className="w-4 h-4 text-gray-600" />
                 </button>
               </div>
 
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-600">Total Items Released</span>
-                <span className="text-lg font-bold text-blue-600">{lgu.totalItemsReleased.toLocaleString()}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-600">Total Deliveries</span>
-                <span className="text-sm font-bold text-gray-900">{lgu.deliveryCount}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-600">Completed</span>
-                <span className="text-sm font-bold text-green-600">{lgu.completedDeliveries}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-600">Pending</span>
-                <span className="text-sm font-bold text-orange-600">{lgu.pendingDeliveries}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-600">Current Stock</span>
-                <span className="text-sm font-bold text-purple-600">
-                  {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} kits
-                </span>
-              </div>
-
-              <div className="pt-2 border-t border-gray-100 space-y-1">
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>Last delivery:</span>
-                  <span className="font-medium text-gray-700">{lgu.lastDeliveryDate || 'N/A'}</span>
+              <div className="space-y-2.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-gray-600">Total Items Released</span>
+                  <span className="font-bold text-blue-600 text-sm">{lgu.totalItemsReleased.toLocaleString()}</span>
                 </div>
-                {(lgu.contactPerson || lgu.contactNumber) && (
-                  <div className="flex justify-between text-[11px] text-gray-500">
-                    <span className="truncate max-w-[140px]">Contact: {lgu.contactPerson || 'Office'}</span>
-                    <span className="font-mono">{lgu.contactNumber || ''}</span>
+
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-gray-600">Deliveries</span>
+                  <span className="font-bold text-gray-900">{lgu.deliveryCount} total</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100 text-[11px]">
+                  <div className="flex justify-between items-center bg-green-50 px-2 py-1 rounded">
+                    <span className="text-green-700">Completed</span>
+                    <span className="font-bold text-green-800">{lgu.completedDeliveries}</span>
                   </div>
-                )}
-                {lgu.remarks && (
-                  <div className="text-[11px] text-gray-400 italic truncate" title={lgu.remarks}>
-                    {lgu.remarks}
+                  <div className="flex justify-between items-center bg-orange-50 px-2 py-1 rounded">
+                    <span className="text-orange-700">Pending</span>
+                    <span className="font-bold text-orange-800">{lgu.pendingDeliveries}</span>
                   </div>
-                )}
+                </div>
+
+                <div className="flex justify-between items-center text-xs pt-1">
+                  <span className="font-semibold text-gray-600">Current Stock</span>
+                  <span className="font-bold text-purple-600">
+                    {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} kits
+                  </span>
+                </div>
+
+                <div className="pt-2 border-t border-gray-100 space-y-1 text-[11px] text-gray-500">
+                  <div className="flex justify-between">
+                    <span>Last delivery:</span>
+                    <span className="font-medium text-gray-700">{lgu.lastDeliveryDate || 'N/A'}</span>
+                  </div>
+                  {(lgu.contactPerson || lgu.contactNumber) && (
+                    <div className="flex justify-between">
+                      <span className="truncate max-w-[140px]">Contact: {lgu.contactPerson || 'Office'}</span>
+                      <span className="font-mono">{lgu.contactNumber || ''}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Municipality</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Province</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Facility</th>
+                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Released</th>
+                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Deliveries</th>
+                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Stock</th>
+                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {paginatedLGUs.map((lgu) => (
+                  <tr key={lgu.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4">
+                      <span className="font-bold text-sm text-gray-900">{lgu.municipality}</span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-gray-100 text-gray-700">
+                        {lgu.province}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600 truncate max-w-xs" title={lgu.lguName}>
+                      {lgu.lguName}
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold text-sm text-blue-600">
+                      {lgu.totalItemsReleased.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 text-center text-xs">
+                      <span className="text-green-700 font-bold">{lgu.completedDeliveries}</span>
+                      <span className="text-gray-400 mx-1">/</span>
+                      <span className="text-gray-700">{lgu.deliveryCount}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold text-sm text-purple-600">
+                      {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0}
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <button
+                        onClick={() => openEditModal(lgu)}
+                        className="p-1 hover:bg-gray-100 rounded text-blue-600 hover:text-blue-800 transition cursor-pointer"
+                        title="Edit LGU"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          );
-        })}
-      </div>
+        </div>
+      )}
+
+      {filteredLGUs.length === 0 && (
+        <div className="bg-white rounded-lg p-12 text-center border border-gray-200">
+          <p className="text-gray-500 font-medium">No municipalities match your search or filter.</p>
+        </div>
+      )}
+
+      {/* Pagination Controls */}
+      {filteredLGUs.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-lg border border-gray-200">
+          <p className="text-xs text-gray-600">
+            Showing <span className="font-bold">{(currentPage - 1) * pageSize + 1}</span> to{' '}
+            <span className="font-bold">{Math.min(currentPage * pageSize, filteredLGUs.length)}</span> of{' '}
+            <span className="font-bold">{filteredLGUs.length}</span> municipalities
+          </p>
+
+          <div className="flex items-center gap-2 self-center">
+            <button
+              type="button"
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="p-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(page => page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1)
+                .map((page, idx, arr) => {
+                  const prevPage = arr[idx - 1];
+                  const hasGap = prevPage && page - prevPage > 1;
+
+                  return (
+                    <div key={page} className="flex items-center gap-1">
+                      {hasGap && <span className="text-xs text-gray-400 px-1">...</span>}
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(page)}
+                        className={`w-8 h-8 rounded-lg text-xs font-bold transition ${
+                          currentPage === page
+                            ? 'bg-[#2500ba] text-white shadow-xs'
+                            : 'text-gray-700 hover:bg-gray-100 border border-gray-200'
+                        }`}
+                      >
+                        {page}
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="p-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Recent Activity Log */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
@@ -590,55 +732,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
               </div>
             ))}
           </div>
-        </div>
-      </div>
-
-      {/* Detailed Table */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-          <h3 className="text-lg font-bold text-gray-900">LGU Summary Table</h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">LGU Name</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Municipality</th>
-                <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Items Released</th>
-                <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Deliveries</th>
-                <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Completed</th>
-                <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Pending</th>
-                <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Last Delivery</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredLGUs.map((lgu) => (
-                <tr key={lgu.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4">
-                    <span className="font-bold text-sm text-gray-900">{lgu.lguName}</span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm font-medium text-gray-700">{lgu.municipality}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="text-sm font-bold text-blue-600">{lgu.totalItemsReleased.toLocaleString()}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="text-sm font-bold text-gray-900">{lgu.deliveryCount}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="text-sm font-bold text-green-600">{lgu.completedDeliveries}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="text-sm font-bold text-orange-600">{lgu.pendingDeliveries}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <span className="text-sm font-medium text-gray-700">{lgu.lastDeliveryDate || 'N/A'}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
 

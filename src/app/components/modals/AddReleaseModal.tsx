@@ -1,8 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
-import type { LguRecord } from '../../services/backendApi';
-import { PANAY_LGUS } from '../../data/panayLguDirectory';
+import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
 import { LocationPickerMap } from '../design/LocationPickerMap';
 import { sanitizeNumbersOnly, sanitizeTextOnly } from '../../lib/inputValidation';
 
@@ -28,26 +27,15 @@ export interface ReleaseForm {
 interface AddReleaseModalProps {
   onClose: () => void;
   onSubmit: (data: ReleaseForm) => void;
-  availableStock: { category: string; warehouseA: number; warehouseB: number }[];
+  availableStock?: { category: string; warehouseA?: number; warehouseB?: number; totalStock?: number; warehouseBreakdown?: Record<string, number> }[];
   initialData?: ReleaseForm;
   mode?: 'add' | 'edit';
   lgusList?: LguRecord[];
+  provincesList?: ProvinceRecord[];
+  warehousesList?: WarehouseRecord[];
+  supplySourcesList?: SupplySourceRecord[];
+  kitTypesList?: KitTypeRecord[];
 }
-
-const FNFI_CATEGORIES = [
-  'Hygiene Kit',
-  'Food Pack',
-  'Sleeping Kit',
-  'Kitchen Kit',
-  'Family Kit',
-  'Laminated Sack',
-  'RTEF'
-];
-
-const WAREHOUSE_OPTIONS = [
-  'Oton Main Warehouse',
-  'Pototan Main Warehouse'
-];
 
 const DELIVERY_MODES = ['Truck'];
 
@@ -83,37 +71,41 @@ const defaultFormData: ReleaseForm = {
     directSource: undefined
 };
 
-export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData, mode = 'add', lgusList }: AddReleaseModalProps) {
+export function AddReleaseModal({
+  onClose,
+  onSubmit,
+  availableStock = [],
+  initialData,
+  mode = 'add',
+  lgusList = [],
+  provincesList = [],
+  warehousesList = [],
+  supplySourcesList = [],
+  kitTypesList = []
+}: AddReleaseModalProps) {
   const [formData, setFormData] = useState<ReleaseForm>(initialData ?? defaultFormData);
   const [directSource, setDirectSource] = useState<'LDRC' | 'VDRC'>('VDRC');
 
-  // Dynamically compute provinces and municipalities from lgusList (master Supabase table) or PANAY_LGUS directory
+  // Master LGUs from Supabase
   const availableLgus = useMemo(() => {
-    if (lgusList && lgusList.length > 0) {
-      return lgusList;
-    }
-    return PANAY_LGUS.map(l => ({
-      id: `STATIC-${l.municipality.toUpperCase().replace(/\s+/g, '-')}`,
-      municipality: l.municipality,
-      province: l.province,
-      lguName: l.defaultFacility,
-      latitude: l.lat,
-      longitude: l.lng,
-      isActive: true
-    })) as LguRecord[];
+    return lgusList;
   }, [lgusList]);
 
   const provinces = useMemo(() => {
+    if (provincesList && provincesList.length > 0) {
+      return provincesList.map(p => p.name).sort();
+    }
     const set = new Set<string>();
     availableLgus.forEach(l => {
       if (l.province) set.add(l.province);
     });
     return Array.from(set).sort();
-  }, [availableLgus]);
+  }, [provincesList, availableLgus]);
 
   const municipalitiesByProvince = useMemo(() => {
     const map: Record<string, string[]> = {};
     availableLgus.forEach(l => {
+      if (!l.province) return;
       if (!map[l.province]) map[l.province] = [];
       if (!map[l.province].includes(l.municipality)) {
         map[l.province].push(l.municipality);
@@ -123,12 +115,42 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     return map;
   }, [availableLgus]);
 
+  const categoryOptions = useMemo(() => {
+    if (kitTypesList && kitTypesList.length > 0) {
+      return kitTypesList.map(k => k.name);
+    }
+    return [
+      'Family Food Pack',
+      'Hygiene Kit',
+      'Sleeping Kit',
+      'Kitchen Kit',
+      'Family Kit',
+      'Laminated Sacks',
+      'Ready-to-Eat Food (RTEF)'
+    ];
+  }, [kitTypesList]);
+
+  const warehouseOptions = useMemo(() => {
+    if (warehousesList && warehousesList.length > 0) {
+      return warehousesList.map(w => w.name);
+    }
+    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+  }, [warehousesList]);
+
+  const directSourceOptions = useMemo(() => {
+    if (supplySourcesList && supplySourcesList.length > 0) {
+      return supplySourcesList.map(s => s.shortCode || s.name);
+    }
+    return ['VDRC', 'LDRC'];
+  }, [supplySourcesList]);
+
   useEffect(() => {
     if (formData.deliveryMode === 'Direct Delivery') {
-      setDirectSource('VDRC');
-      setFormData(prev => ({ ...prev, warehouseSource: 'VDRC', directSource: 'VDRC' }));
+      const defaultSrc = (directSourceOptions[0] || 'VDRC') as 'LDRC' | 'VDRC';
+      setDirectSource(defaultSrc);
+      setFormData(prev => ({ ...prev, warehouseSource: defaultSrc, directSource: defaultSrc }));
     }
-  }, [formData.deliveryMode]);
+  }, [formData.deliveryMode, directSourceOptions]);
 
   const [selectedProvince, setSelectedProvince] = useState(provinces[0] || 'Iloilo');
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
@@ -221,14 +243,32 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
     if (formData.deliveryMode === 'Direct Delivery') return Infinity;
 
     if (formData.sourceType === 'Warehouse') {
-      const stockItem = availableStock.find(item => item.category === formData.fnfiCategory);
+      const targetWh = warehousesList?.find(w => w.name.toLowerCase() === formData.warehouseSource.toLowerCase());
+      if (targetWh) {
+        const catLower = formData.fnfiCategory.toLowerCase();
+        if (catLower.includes('food pack')) return targetWh.foodPacks;
+        if (catLower.includes('hygiene')) return targetWh.hygieneKits;
+        if (catLower.includes('sleeping')) return targetWh.sleepingKits;
+        if (catLower.includes('kitchen')) return targetWh.kitchenKits;
+        if (catLower.includes('family kit')) return targetWh.familyKits;
+        if (catLower.includes('sack')) return targetWh.laminatedSacks;
+        if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) return targetWh.rtef;
+        if (targetWh.currentStock && targetWh.currentStock[formData.fnfiCategory] !== undefined) {
+          return targetWh.currentStock[formData.fnfiCategory];
+        }
+      }
+
+      const stockItem = availableStock.find(item => item.category.toLowerCase() === formData.fnfiCategory.toLowerCase());
       if (!stockItem) return 0;
 
-      // Main warehouses have stock in the inventory system
+      if (stockItem.warehouseBreakdown && stockItem.warehouseBreakdown[formData.warehouseSource] !== undefined) {
+        return stockItem.warehouseBreakdown[formData.warehouseSource];
+      }
+
       if (formData.warehouseSource === 'Oton Main Warehouse') {
-        return stockItem.warehouseA;
+        return stockItem.warehouseA ?? 0;
       } else if (formData.warehouseSource === 'Pototan Main Warehouse') {
-        return stockItem.warehouseB;
+        return stockItem.warehouseB ?? 0;
       }
       return 0;
     }
@@ -395,7 +435,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    Locked upon creation. Status updates automatically via workflow (Approval ➔ Driver Pickup ➔ LGU Acceptance).
+                    Locked upon creation. Status updates automatically via workflow (Approval -&gt; Driver Pickup -&gt; LGU Acceptance).
                   </p>
                 </div>
               ) : (
@@ -442,7 +482,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
               }`}
             >
               <option value="">Select category...</option>
-              {FNFI_CATEGORIES.map(cat => (
+              {categoryOptions.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
@@ -469,34 +509,23 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                   National Resource Center <span className="text-red-500">*</span>
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectSource('VDRC');
-                      setFormData(prev => ({ ...prev, directSource: 'VDRC', warehouseSource: 'VDRC' }));
-                    }}
-                    className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                      directSource === 'VDRC'
-                        ? 'bg-[#2500ba] text-white shadow-md'
-                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    VDRC
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirectSource('LDRC');
-                      setFormData(prev => ({ ...prev, directSource: 'LDRC', warehouseSource: 'LDRC' }));
-                    }}
-                    className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                      directSource === 'LDRC'
-                        ? 'bg-[#2500ba] text-white shadow-md'
-                        : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    LDRC
-                  </button>
+                  {directSourceOptions.map(src => (
+                    <button
+                      key={src}
+                      type="button"
+                      onClick={() => {
+                        setDirectSource(src as any);
+                        setFormData(prev => ({ ...prev, directSource: src as any, warehouseSource: src }));
+                      }}
+                      className={`px-4 py-3 rounded-lg font-semibold transition-all ${
+                        directSource === src || formData.warehouseSource === src
+                          ? 'bg-[#2500ba] text-white shadow-md'
+                          : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {src}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -512,7 +541,7 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                 <button
                   type="button"
                   onClick={() => {
-                    setFormData(prev => ({ ...prev, sourceType: 'Warehouse', warehouseSource: 'Oton Main Warehouse' }));
+                    setFormData(prev => ({ ...prev, sourceType: 'Warehouse', warehouseSource: warehouseOptions[0] || 'Oton Main Warehouse' }));
                   }}
                   className={`px-4 py-3 rounded-lg font-semibold transition-all ${
                     formData.sourceType === 'Warehouse'
@@ -547,30 +576,34 @@ export function AddReleaseModal({ onClose, onSubmit, availableStock, initialData
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   Select Warehouse <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, warehouseSource: 'Oton Main Warehouse' }))}
-                    className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                      formData.warehouseSource === 'Oton Main Warehouse'
-                        ? 'bg-green-600 text-white shadow-md'
-                        : 'bg-green-100 text-green-700 hover:bg-green-200'
-                    }`}
+                {warehouseOptions.length <= 4 ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {warehouseOptions.map(wh => (
+                      <button
+                        key={wh}
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, warehouseSource: wh }))}
+                        className={`px-4 py-3 rounded-lg font-semibold transition-all ${
+                          formData.warehouseSource === wh
+                            ? 'bg-[#2500ba] text-white shadow-md'
+                            : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                        }`}
+                      >
+                        {wh}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <select
+                    value={formData.warehouseSource}
+                    onChange={(e) => setFormData(prev => ({ ...prev, warehouseSource: e.target.value }))}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    Oton Main Warehouse
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, warehouseSource: 'Pototan Main Warehouse' }))}
-                    className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                      formData.warehouseSource === 'Pototan Main Warehouse'
-                        ? 'bg-purple-600 text-white shadow-md'
-                        : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                    }`}
-                  >
-                    Pototan Main Warehouse
-                  </button>
-                </div>
+                    {warehouseOptions.map(wh => (
+                      <option key={wh} value={wh}>{wh}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">

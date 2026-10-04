@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   User,
   Wallet,
@@ -19,13 +19,22 @@ import {
   Warehouse,
   MapPin,
   RefreshCw,
-  LogOut
+  LogOut,
+  Map,
+  Search,
+  Filter
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { blockchain } from '../../services/blockchain';
-import { backendApi, type LguRecord } from '../../services/backendApi';
-import { PANAY_LGUS, PANAY_PROVINCES } from '../../data/panayLguDirectory';
+import {
+  backendApi,
+  type LguRecord,
+  type ProvinceRecord,
+  type WarehouseRecord,
+  type SupplySourceRecord,
+  type KitTypeRecord
+} from '../../services/backendApi';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -36,58 +45,7 @@ interface SettingsModalProps {
 }
 
 type SettingsTab = 'profile' | 'metamask' | 'data';
-type MasterDataSubTab = 'kits' | 'sources' | 'warehouses' | 'lgus';
-
-interface KitTypeItem {
-  id: string;
-  name: string;
-  category: 'Food Item' | 'Non-Food Item';
-  unitType: string;
-  description: string;
-  isDefault?: boolean;
-}
-
-interface SupplySourceItem {
-  id: string;
-  name: string;
-  facilityType: 'National Resource Center' | 'Regional Logistics Hub' | 'Staging Warehouse' | 'External Partner';
-  region: string;
-  location: string;
-  isDefault?: boolean;
-}
-
-interface WarehouseFacilityItem {
-  id: string;
-  name: string;
-  province: string;
-  municipality: string;
-  capacityPacks: number;
-  latitude: number;
-  longitude: number;
-  isDefault?: boolean;
-}
-
-const DEFAULT_KIT_TYPES: KitTypeItem[] = [
-  { id: 'kit-1', name: 'Family Food Pack', category: 'Food Item', unitType: 'packs', description: 'Standard 6kg emergency nutritional food pack (rice, canned goods, coffee)', isDefault: true },
-  { id: 'kit-2', name: 'Hygiene Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Personal sanitation supplies, soap, toothpaste, toothbrush, sanitary napkins', isDefault: true },
-  { id: 'kit-3', name: 'Sleeping Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Blankets, sleeping mats, mosquito nets, and pillowcases', isDefault: true },
-  { id: 'kit-4', name: 'Kitchen Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Cooking pots, frying pan, plates, cups, spoons, forks, and cooking utensils', isDefault: true },
-  { id: 'kit-5', name: 'Family Kit', category: 'Non-Food Item', unitType: 'kits', description: 'Clothing apparel, underwear, bath towels, and footwear for families', isDefault: true },
-  { id: 'kit-6', name: 'Laminated Sacks', category: 'Non-Food Item', unitType: 'sacks', description: 'Heavy-duty weatherproofing tarpaulins for temporary roof shelters', isDefault: true },
-  { id: 'kit-7', name: 'Ready-to-Eat Food (RTEF)', category: 'Food Item', unitType: 'packs', description: 'Pre-cooked retort pouch meals requiring zero preparation', isDefault: true }
-];
-
-const DEFAULT_SOURCES: SupplySourceItem[] = [
-  { id: 'src-1', name: 'Visayas Disaster Resource Center (VDRC)', facilityType: 'National Resource Center', region: 'Region VII (Central Visayas)', location: 'Tingub, Mandaue City, Cebu', isDefault: true },
-  { id: 'src-2', name: 'Luzon Disaster Resource Center (LDRC)', facilityType: 'National Resource Center', region: 'National Capital Region', location: 'Pasay City / Clark Special Zone', isDefault: true },
-  { id: 'src-3', name: 'Oton Regional Warehouse Hub', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: 'Brgy. Tagbac, Oton, Iloilo', isDefault: true },
-  { id: 'src-4', name: 'Pototan Secondary Depot', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: 'Pototan, Iloilo', isDefault: true }
-];
-
-const DEFAULT_WAREHOUSES: WarehouseFacilityItem[] = [
-  { id: 'wh-1', name: 'Oton Main Warehouse', province: 'Iloilo', municipality: 'Oton', capacityPacks: 150000, latitude: 10.6975, longitude: 122.4764, isDefault: true },
-  { id: 'wh-2', name: 'Pototan Main Warehouse', province: 'Iloilo', municipality: 'Pototan', capacityPacks: 80000, latitude: 10.9492, longitude: 122.6289, isDefault: true }
-];
+type MasterDataSubTab = 'kits' | 'sources' | 'warehouses' | 'provinces' | 'lgus';
 
 export function SettingsModal({
   isOpen,
@@ -117,35 +75,27 @@ export function SettingsModal({
   const [walletFeedback, setWalletFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedWallet, setCopiedWallet] = useState(false);
 
-  // Tab 3: Data States
+  // Tab 3: Master Data States (100% Supabase DB-driven via backendApi)
   const [dataSubTab, setDataSubTab] = useState<MasterDataSubTab>('kits');
-  const [kitTypes, setKitTypes] = useState<KitTypeItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_kit_types');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_KIT_TYPES;
-  });
-  const [sources, setSources] = useState<SupplySourceItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_sources');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_SOURCES;
-  });
-  const [warehouses, setWarehouses] = useState<WarehouseFacilityItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('dswd_custom_warehouses');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return DEFAULT_WAREHOUSES;
-  });
+  const [kitTypes, setKitTypes] = useState<KitTypeRecord[]>([]);
+  const [sources, setSources] = useState<SupplySourceRecord[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseRecord[]>([]);
+  const [provinces, setProvinces] = useState<ProvinceRecord[]>([]);
   const [dbLgus, setDbLgus] = useState<LguRecord[]>([]);
+  const [isLoadingMasterData, setIsLoadingMasterData] = useState(false);
+  const [isMutatingMasterData, setIsMutatingMasterData] = useState(false);
+  const [masterDataFeedback, setMasterDataFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Multi-select states for deletion in Master Data
   const [selectedKitIds, setSelectedKitIds] = useState<string[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<string[]>([]);
+  const [selectedProvinceIds, setSelectedProvinceIds] = useState<string[]>([]);
+  const [selectedLguIds, setSelectedLguIds] = useState<string[]>([]);
+
+  // LGU Filters
+  const [lguProvinceFilter, setLguProvinceFilter] = useState('All');
+  const [lguSearchQuery, setLguSearchQuery] = useState('');
 
   // Add Item states
   const [isAddingKit, setIsAddingKit] = useState(false);
@@ -157,8 +107,9 @@ export function SettingsModal({
   });
 
   const [isAddingSource, setIsAddingSource] = useState(false);
-  const [newSource, setNewSource] = useState<{ name: string; facilityType: SupplySourceItem['facilityType']; region: string; location: string }>({
+  const [newSource, setNewSource] = useState<{ name: string; shortCode: string; facilityType: string; region: string; location: string }>({
     name: '',
+    shortCode: '',
     facilityType: 'Regional Logistics Hub',
     region: 'Region VI (Western Visayas)',
     location: ''
@@ -167,9 +118,26 @@ export function SettingsModal({
   const [isAddingWarehouse, setIsAddingWarehouse] = useState(false);
   const [newWarehouse, setNewWarehouse] = useState<{ name: string; province: string; municipality: string; capacityPacks: number; latitude: number; longitude: number }>({
     name: '',
-    province: 'Iloilo',
+    province: '',
     municipality: '',
     capacityPacks: 50000,
+    latitude: 10.7,
+    longitude: 122.5
+  });
+
+  const [isAddingProvince, setIsAddingProvince] = useState(false);
+  const [newProvince, setNewProvince] = useState<{ name: string; region: string }>({
+    name: '',
+    region: 'Region VI (Western Visayas)'
+  });
+
+  const [isAddingLgu, setIsAddingLgu] = useState(false);
+  const [newLgu, setNewLgu] = useState<{ municipality: string; province: string; lguName: string; contactPerson: string; contactNumber: string; latitude: number; longitude: number }>({
+    municipality: '',
+    province: '',
+    lguName: '',
+    contactPerson: '',
+    contactNumber: '',
     latitude: 10.7,
     longitude: 122.5
   });
@@ -193,12 +161,38 @@ export function SettingsModal({
     }
   }, [isOpen, initialTab, profile]);
 
-  // Load live LGUs for Data tab
+  // Load all master data records from Supabase
+  const loadMasterData = async () => {
+    setIsLoadingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      const [kitsData, sourcesData, warehousesData, provincesData, lgusData] = await Promise.all([
+        backendApi.getKitTypes(),
+        backendApi.getSupplySources(),
+        backendApi.getWarehouses(),
+        backendApi.getProvinces(),
+        backendApi.getLgus()
+      ]);
+      setKitTypes(kitsData);
+      setSources(sourcesData);
+      setWarehouses(warehousesData);
+      setProvinces(provincesData);
+      setDbLgus(lgusData);
+      if (provincesData.length > 0) {
+        setNewWarehouse(prev => ({ ...prev, province: prev.province || provincesData[0].name }));
+        setNewLgu(prev => ({ ...prev, province: prev.province || provincesData[0].name }));
+      }
+    } catch (err) {
+      console.error('Failed to load master data in settings:', err);
+      setMasterDataFeedback({ type: 'error', text: 'Failed to load master data from database.' });
+    } finally {
+      setIsLoadingMasterData(false);
+    }
+  };
+
   useEffect(() => {
     if (isOpen && activeTab === 'data') {
-      backendApi.getLgus()
-        .then(list => setDbLgus(list))
-        .catch(err => console.warn('Failed to load lgus in settings:', err));
+      void loadMasterData();
     }
   }, [isOpen, activeTab]);
 
@@ -383,55 +377,68 @@ export function SettingsModal({
     setTimeout(() => setCopiedWallet(false), 2000);
   };
 
-  // Master Data storage helpers
-  const saveKitTypes = (updated: KitTypeItem[]) => {
-    setKitTypes(updated);
-    try { localStorage.setItem('dswd_custom_kit_types', JSON.stringify(updated)); } catch {}
-  };
+  // =================================================================
+  // MASTER DATA CRUD HANDLERS (100% Supabase DB-driven via backendApi)
+  // =================================================================
 
-  const saveSources = (updated: SupplySourceItem[]) => {
-    setSources(updated);
-    try { localStorage.setItem('dswd_custom_sources', JSON.stringify(updated)); } catch {}
-  };
-
-  const saveWarehouses = (updated: WarehouseFacilityItem[]) => {
-    setWarehouses(updated);
-    try { localStorage.setItem('dswd_custom_warehouses', JSON.stringify(updated)); } catch {}
-  };
-
-  // Kit Actions
-  const handleAddKit = (e: React.FormEvent) => {
+  // --- KIT TYPES ---
+  const handleAddKit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKit.name.trim()) return;
-    const item: KitTypeItem = {
-      id: `kit-${Date.now()}`,
-      name: newKit.name.trim(),
-      category: newKit.category,
-      unitType: newKit.unitType.trim() || 'packs',
-      description: newKit.description.trim() || 'Custom relief kit package'
-    };
-    saveKitTypes([item, ...kitTypes]);
-    setNewKit({ name: '', category: 'Food Item', unitType: 'packs', description: '' });
-    setIsAddingKit(false);
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.createKitType({
+        name: newKit.name.trim(),
+        category: newKit.category,
+        unitType: newKit.unitType.trim() || 'packs',
+        description: newKit.description.trim()
+      });
+      const updated = await backendApi.getKitTypes();
+      setKitTypes(updated);
+      setNewKit({ name: '', category: 'Food Item', unitType: 'packs', description: '' });
+      setIsAddingKit(false);
+      setMasterDataFeedback({ type: 'success', text: 'Kit type created successfully.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create kit type.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
   };
 
-  const handleDeleteSelectedKits = () => {
+  const handleDeleteSingleKit = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteKitType(id);
+      setKitTypes(prev => prev.filter(k => k.id !== id));
+      setSelectedKitIds(prev => prev.filter(kId => kId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Kit type deleted.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete kit type.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSelectedKits = async () => {
     if (selectedKitIds.length === 0) return;
-    const updated = kitTypes.filter(k => !selectedKitIds.includes(k.id));
-    saveKitTypes(updated);
-    setSelectedKitIds([]);
-  };
-
-  const handleDeleteSingleKit = (id: string) => {
-    const updated = kitTypes.filter(k => k.id !== id);
-    saveKitTypes(updated);
-    setSelectedKitIds(prev => prev.filter(kId => kId !== id));
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteKitTypesBatch(selectedKitIds);
+      setKitTypes(prev => prev.filter(k => !selectedKitIds.includes(k.id)));
+      setSelectedKitIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedKitIds.length} kit type(s).` });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete kit types.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
   };
 
   const handleToggleSelectKit = (id: string) => {
-    setSelectedKitIds(prev =>
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
+    setSelectedKitIds(prev => prev.includes(id) ? prev.filter(k => k !== id) : [...prev, id]);
   };
 
   const handleToggleSelectAllKits = () => {
@@ -442,39 +449,65 @@ export function SettingsModal({
     }
   };
 
-  // Source Actions
-  const handleAddSource = (e: React.FormEvent) => {
+  // --- SUPPLY SOURCES ---
+  const handleAddSource = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSource.name.trim()) return;
-    const item: SupplySourceItem = {
-      id: `src-${Date.now()}`,
-      name: newSource.name.trim(),
-      facilityType: newSource.facilityType,
-      region: newSource.region.trim() || 'Region VI (Western Visayas)',
-      location: newSource.location.trim() || 'Regional Logistics Hub'
-    };
-    saveSources([item, ...sources]);
-    setNewSource({ name: '', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: '' });
-    setIsAddingSource(false);
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.createSupplySource({
+        name: newSource.name.trim(),
+        shortCode: newSource.shortCode.trim() || newSource.name.trim().slice(0, 8).toUpperCase(),
+        facilityType: newSource.facilityType,
+        region: newSource.region.trim(),
+        location: newSource.location.trim()
+      });
+      const updated = await backendApi.getSupplySources();
+      setSources(updated);
+      setNewSource({ name: '', shortCode: '', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: '' });
+      setIsAddingSource(false);
+      setMasterDataFeedback({ type: 'success', text: 'Supply source created successfully.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create supply source.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
   };
 
-  const handleDeleteSelectedSources = () => {
+  const handleDeleteSingleSource = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteSupplySource(id);
+      setSources(prev => prev.filter(s => s.id !== id));
+      setSelectedSourceIds(prev => prev.filter(sId => sId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Supply source deleted.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete supply source.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSelectedSources = async () => {
     if (selectedSourceIds.length === 0) return;
-    const updated = sources.filter(s => !selectedSourceIds.includes(s.id));
-    saveSources(updated);
-    setSelectedSourceIds([]);
-  };
-
-  const handleDeleteSingleSource = (id: string) => {
-    const updated = sources.filter(s => s.id !== id);
-    saveSources(updated);
-    setSelectedSourceIds(prev => prev.filter(sId => sId !== id));
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteSupplySourcesBatch(selectedSourceIds);
+      setSources(prev => prev.filter(s => !selectedSourceIds.includes(s.id)));
+      setSelectedSourceIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedSourceIds.length} source(s).` });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete sources.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
   };
 
   const handleToggleSelectSource = (id: string) => {
-    setSelectedSourceIds(prev =>
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
+    setSelectedSourceIds(prev => prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]);
   };
 
   const handleToggleSelectAllSources = () => {
@@ -485,41 +518,73 @@ export function SettingsModal({
     }
   };
 
-  // Warehouse Actions
-  const handleAddWarehouse = (e: React.FormEvent) => {
+  // --- WAREHOUSES ---
+  const handleAddWarehouse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWarehouse.name.trim()) return;
-    const item: WarehouseFacilityItem = {
-      id: `wh-${Date.now()}`,
-      name: newWarehouse.name.trim(),
-      province: newWarehouse.province,
-      municipality: newWarehouse.municipality.trim() || 'Regional',
-      capacityPacks: Number(newWarehouse.capacityPacks) || 50000,
-      latitude: Number(newWarehouse.latitude) || 10.7,
-      longitude: Number(newWarehouse.longitude) || 122.5
-    };
-    saveWarehouses([item, ...warehouses]);
-    setNewWarehouse({ name: '', province: 'Iloilo', municipality: '', capacityPacks: 50000, latitude: 10.7, longitude: 122.5 });
-    setIsAddingWarehouse(false);
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.createWarehouse({
+        name: newWarehouse.name.trim(),
+        province: newWarehouse.province.trim() || (provinces[0]?.name ?? 'Iloilo'),
+        municipality: newWarehouse.municipality.trim() || 'Regional',
+        capacityPacks: Number(newWarehouse.capacityPacks) || 50000,
+        latitude: Number(newWarehouse.latitude) || 10.7,
+        longitude: Number(newWarehouse.longitude) || 122.5
+      });
+      const updated = await backendApi.getWarehouses();
+      setWarehouses(updated);
+      setNewWarehouse({
+        name: '',
+        province: provinces[0]?.name ?? 'Iloilo',
+        municipality: '',
+        capacityPacks: 50000,
+        latitude: 10.7,
+        longitude: 122.5
+      });
+      setIsAddingWarehouse(false);
+      setMasterDataFeedback({ type: 'success', text: 'Warehouse created successfully.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create warehouse.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
   };
 
-  const handleDeleteSelectedWarehouses = () => {
+  const handleDeleteSingleWarehouse = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteWarehouse(id);
+      setWarehouses(prev => prev.filter(w => w.id !== id));
+      setSelectedWarehouseIds(prev => prev.filter(wId => wId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Warehouse deleted.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete warehouse.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSelectedWarehouses = async () => {
     if (selectedWarehouseIds.length === 0) return;
-    const updated = warehouses.filter(w => !selectedWarehouseIds.includes(w.id));
-    saveWarehouses(updated);
-    setSelectedWarehouseIds([]);
-  };
-
-  const handleDeleteSingleWarehouse = (id: string) => {
-    const updated = warehouses.filter(w => w.id !== id);
-    saveWarehouses(updated);
-    setSelectedWarehouseIds(prev => prev.filter(wId => wId !== id));
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteWarehousesBatch(selectedWarehouseIds);
+      setWarehouses(prev => prev.filter(w => !selectedWarehouseIds.includes(w.id)));
+      setSelectedWarehouseIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedWarehouseIds.length} warehouse(s).` });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete warehouses.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
   };
 
   const handleToggleSelectWarehouse = (id: string) => {
-    setSelectedWarehouseIds(prev =>
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
+    setSelectedWarehouseIds(prev => prev.includes(id) ? prev.filter(w => w !== id) : [...prev, id]);
   };
 
   const handleToggleSelectAllWarehouses = () => {
@@ -527,6 +592,161 @@ export function SettingsModal({
       setSelectedWarehouseIds([]);
     } else {
       setSelectedWarehouseIds(warehouses.map(w => w.id));
+    }
+  };
+
+  // --- PROVINCES ---
+  const handleAddProvince = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProvince.name.trim()) return;
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.createProvince(newProvince.name.trim(), newProvince.region.trim());
+      const updated = await backendApi.getProvinces();
+      setProvinces(updated);
+      setNewProvince({ name: '', region: 'Region VI (Western Visayas)' });
+      setIsAddingProvince(false);
+      setMasterDataFeedback({ type: 'success', text: 'Province created successfully.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create province.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSingleProvince = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteProvince(id);
+      setProvinces(prev => prev.filter(p => p.id !== id));
+      setSelectedProvinceIds(prev => prev.filter(pId => pId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Province deleted.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete province.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSelectedProvinces = async () => {
+    if (selectedProvinceIds.length === 0) return;
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteProvincesBatch(selectedProvinceIds);
+      setProvinces(prev => prev.filter(p => !selectedProvinceIds.includes(p.id)));
+      setSelectedProvinceIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedProvinceIds.length} province(s).` });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete provinces.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleToggleSelectProvince = (id: string) => {
+    setSelectedProvinceIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+  };
+
+  const handleToggleSelectAllProvinces = () => {
+    if (selectedProvinceIds.length === provinces.length) {
+      setSelectedProvinceIds([]);
+    } else {
+      setSelectedProvinceIds(provinces.map(p => p.id));
+    }
+  };
+
+  // --- MUNICIPALITIES / LGUS ---
+  const filteredLgus = useMemo(() => {
+    return dbLgus.filter(lgu => {
+      const matchProv = lguProvinceFilter === 'All' || lgu.province.toLowerCase() === lguProvinceFilter.toLowerCase();
+      const matchSearch = !lguSearchQuery.trim() ||
+        lgu.municipality.toLowerCase().includes(lguSearchQuery.trim().toLowerCase()) ||
+        lgu.province.toLowerCase().includes(lguSearchQuery.trim().toLowerCase()) ||
+        lgu.lguName.toLowerCase().includes(lguSearchQuery.trim().toLowerCase());
+      return matchProv && matchSearch;
+    });
+  }, [dbLgus, lguProvinceFilter, lguSearchQuery]);
+
+  const handleAddLgu = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLgu.municipality.trim()) return;
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.createLgu({
+        municipality: newLgu.municipality.trim(),
+        province: newLgu.province.trim() || (provinces[0]?.name ?? 'Iloilo'),
+        lguName: newLgu.lguName.trim() || `${newLgu.municipality.trim()} Municipal Hall`,
+        contactPerson: newLgu.contactPerson.trim(),
+        contactNumber: newLgu.contactNumber.trim(),
+        latitude: Number(newLgu.latitude) || 10.7,
+        longitude: Number(newLgu.longitude) || 122.5
+      });
+      const updated = await backendApi.getLgus();
+      setDbLgus(updated);
+      setNewLgu({
+        municipality: '',
+        province: provinces[0]?.name ?? 'Iloilo',
+        lguName: '',
+        contactPerson: '',
+        contactNumber: '',
+        latitude: 10.7,
+        longitude: 122.5
+      });
+      setIsAddingLgu(false);
+      setMasterDataFeedback({ type: 'success', text: 'Municipality / LGU added successfully.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to add LGU.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSingleLgu = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteLgu(id);
+      setDbLgus(prev => prev.filter(l => l.id !== id));
+      setSelectedLguIds(prev => prev.filter(lId => lId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Municipality / LGU deleted.' });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete LGU.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleDeleteSelectedLgus = async () => {
+    if (selectedLguIds.length === 0) return;
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.deleteLgusBatch(selectedLguIds);
+      setDbLgus(prev => prev.filter(l => !selectedLguIds.includes(l.id)));
+      setSelectedLguIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedLguIds.length} LGU(s).` });
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete LGUs.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleToggleSelectLgu = (id: string) => {
+    setSelectedLguIds(prev => prev.includes(id) ? prev.filter(l => l !== id) : [...prev, id]);
+  };
+
+  const handleToggleSelectAllLgus = () => {
+    const filteredIds = filteredLgus.map(l => l.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every(id => selectedLguIds.includes(id));
+    if (allSelected) {
+      setSelectedLguIds(prev => prev.filter(id => !filteredIds.includes(id)));
+    } else {
+      setSelectedLguIds(prev => Array.from(new Set([...prev, ...filteredIds])));
     }
   };
 
@@ -956,13 +1176,25 @@ export function SettingsModal({
               ================================================================= */}
           {activeTab === 'data' && (
             <div className="space-y-4">
+              {/* Feedback Alert */}
+              {masterDataFeedback && (
+                <div className={`p-3 rounded-xl border text-xs font-semibold ${
+                  masterDataFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                }`}>
+                  {masterDataFeedback.text}
+                </div>
+              )}
+
               {/* Sub-tab Navigation */}
-              <div className="flex border-b border-gray-200 gap-1 pb-1">
+              <div className="flex border-b border-gray-200 gap-1 pb-1 overflow-x-auto">
                 {[
                   { id: 'kits', label: 'Kit Types', icon: Boxes },
                   { id: 'sources', label: 'Sources', icon: Building2 },
                   { id: 'warehouses', label: 'Warehouses', icon: Warehouse },
-                  { id: 'lgus', label: 'Provinces & LGUs', icon: MapPin }
+                  { id: 'provinces', label: 'Provinces', icon: Map },
+                  { id: 'lgus', label: 'LGUs & Municipalities', icon: MapPin }
                 ].map(sub => {
                   const Icon = sub.icon;
                   return (
@@ -970,7 +1202,7 @@ export function SettingsModal({
                       key={sub.id}
                       type="button"
                       onClick={() => setDataSubTab(sub.id as MasterDataSubTab)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex-shrink-0 ${
                         dataSubTab === sub.id
                           ? 'bg-blue-100 text-blue-800'
                           : 'text-gray-600 hover:bg-gray-100'
@@ -983,8 +1215,15 @@ export function SettingsModal({
                 })}
               </div>
 
-              {/* Sub-Tab: Kits */}
-              {dataSubTab === 'kits' && (
+              {isLoadingMasterData && (
+                <div className="flex items-center justify-center py-8 text-xs text-gray-500 gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-[#2500ba]" />
+                  <span>Loading master database records...</span>
+                </div>
+              )}
+
+              {/* Sub-Tab 1: Kits */}
+              {!isLoadingMasterData && dataSubTab === 'kits' && (
                 <div className="space-y-3">
                   {/* Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
@@ -1005,7 +1244,8 @@ export function SettingsModal({
                         <button
                           type="button"
                           onClick={handleDeleteSelectedKits}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                          disabled={isMutatingMasterData}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Delete Selected ({selectedKitIds.length})</span>
@@ -1086,9 +1326,10 @@ export function SettingsModal({
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                          disabled={isMutatingMasterData}
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
                         >
-                          Save Kit Type
+                          {isMutatingMasterData ? 'Saving...' : 'Save Kit Type'}
                         </button>
                       </div>
                     </form>
@@ -1124,7 +1365,7 @@ export function SettingsModal({
                                   {kit.category}
                                 </span>
                               </div>
-                              <p className="text-[11px] text-gray-500 mt-0.5">{kit.description}</p>
+                              <p className="text-[11px] text-gray-500 mt-0.5">{kit.description || 'Standard relief kit package'}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1134,7 +1375,8 @@ export function SettingsModal({
                             <button
                               type="button"
                               onClick={() => handleDeleteSingleKit(kit.id)}
-                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              disabled={isMutatingMasterData}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
                               title="Delete Kit"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1145,15 +1387,15 @@ export function SettingsModal({
                     })}
                     {kitTypes.length === 0 && (
                       <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                        No kit types defined. Click "+ Add Kit Type" to create one.
+                        No kit types defined in Supabase database. Click "+ Add Kit Type" to create one.
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Sub-Tab: Sources */}
-              {dataSubTab === 'sources' && (
+              {/* Sub-Tab 2: Sources */}
+              {!isLoadingMasterData && dataSubTab === 'sources' && (
                 <div className="space-y-3">
                   {/* Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
@@ -1174,7 +1416,8 @@ export function SettingsModal({
                         <button
                           type="button"
                           onClick={handleDeleteSelectedSources}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                          disabled={isMutatingMasterData}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Delete Selected ({selectedSourceIds.length})</span>
@@ -1207,7 +1450,18 @@ export function SettingsModal({
                             type="text"
                             value={newSource.name}
                             onChange={e => setNewSource(prev => ({ ...prev, name: e.target.value }))}
-                            placeholder="e.g. MDRRMO Logistics Hub"
+                            placeholder="e.g. Visayas Disaster Resource Center"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Short Code *</label>
+                          <input
+                            type="text"
+                            value={newSource.shortCode}
+                            onChange={e => setNewSource(prev => ({ ...prev, shortCode: e.target.value }))}
+                            placeholder="e.g. VDRC"
                             required
                             className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                           />
@@ -1216,7 +1470,7 @@ export function SettingsModal({
                           <label className="block text-[11px] font-bold text-gray-700 mb-1">Facility Type *</label>
                           <select
                             value={newSource.facilityType}
-                            onChange={e => setNewSource(prev => ({ ...prev, facilityType: e.target.value as any }))}
+                            onChange={e => setNewSource(prev => ({ ...prev, facilityType: e.target.value }))}
                             className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
                           >
                             <option value="National Resource Center">National Resource Center</option>
@@ -1235,13 +1489,13 @@ export function SettingsModal({
                             className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                           />
                         </div>
-                        <div>
+                        <div className="sm:col-span-2">
                           <label className="block text-[11px] font-bold text-gray-700 mb-1">Location / Address</label>
                           <input
                             type="text"
                             value={newSource.location}
                             onChange={e => setNewSource(prev => ({ ...prev, location: e.target.value }))}
-                            placeholder="e.g. Fort San Pedro, Iloilo City"
+                            placeholder="e.g. Tingub, Mandaue City, Cebu"
                             className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                           />
                         </div>
@@ -1256,9 +1510,10 @@ export function SettingsModal({
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                          disabled={isMutatingMasterData}
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
                         >
-                          Save Source
+                          {isMutatingMasterData ? 'Saving...' : 'Save Source'}
                         </button>
                       </div>
                     </form>
@@ -1287,6 +1542,9 @@ export function SettingsModal({
                             <div>
                               <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-900">{src.name}</p>
+                                <span className="font-mono text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold">
+                                  {src.shortCode}
+                                </span>
                                 <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                                   {src.facilityType}
                                 </span>
@@ -1299,7 +1557,8 @@ export function SettingsModal({
                             <button
                               type="button"
                               onClick={() => handleDeleteSingleSource(src.id)}
-                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              disabled={isMutatingMasterData}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
                               title="Delete Source"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1310,15 +1569,15 @@ export function SettingsModal({
                     })}
                     {sources.length === 0 && (
                       <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                        No supply sources defined. Click "+ Add Source" to create one.
+                        No supply sources defined in Supabase database. Click "+ Add Source" to create one.
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Sub-Tab: Warehouses */}
-              {dataSubTab === 'warehouses' && (
+              {/* Sub-Tab 3: Warehouses */}
+              {!isLoadingMasterData && dataSubTab === 'warehouses' && (
                 <div className="space-y-3">
                   {/* Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
@@ -1339,7 +1598,8 @@ export function SettingsModal({
                         <button
                           type="button"
                           onClick={handleDeleteSelectedWarehouses}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                          disabled={isMutatingMasterData}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Delete Selected ({selectedWarehouseIds.length})</span>
@@ -1382,13 +1642,13 @@ export function SettingsModal({
                           <select
                             value={newWarehouse.province}
                             onChange={e => setNewWarehouse(prev => ({ ...prev, province: e.target.value }))}
+                            required
                             className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
                           >
-                            {PANAY_PROVINCES.map(prov => (
-                              <option key={prov} value={prov}>{prov}</option>
+                            <option value="">Select Province</option>
+                            {provinces.map(prov => (
+                              <option key={prov.id} value={prov.name}>{prov.name}</option>
                             ))}
-                            <option value="Guimaras">Guimaras</option>
-                            <option value="Others">Others</option>
                           </select>
                         </div>
                         <div>
@@ -1442,9 +1702,10 @@ export function SettingsModal({
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                          disabled={isMutatingMasterData}
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
                         >
-                          Save Warehouse
+                          {isMutatingMasterData ? 'Saving...' : 'Save Warehouse'}
                         </button>
                       </div>
                     </form>
@@ -1473,7 +1734,9 @@ export function SettingsModal({
                             <div>
                               <p className="font-bold text-gray-900">{wh.name}</p>
                               <p className="text-[11px] text-gray-500">{wh.municipality}, {wh.province}</p>
-                              <p className="text-[10px] text-gray-400">Capacity: {wh.capacityPacks.toLocaleString()} packs &middot; ({wh.latitude}, {wh.longitude})</p>
+                              <p className="text-[10px] text-gray-400">
+                                Capacity: {wh.capacityPacks.toLocaleString()} packs &middot; ({wh.latitude}, {wh.longitude})
+                              </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1483,7 +1746,8 @@ export function SettingsModal({
                             <button
                               type="button"
                               onClick={() => handleDeleteSingleWarehouse(wh.id)}
-                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              disabled={isMutatingMasterData}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
                               title="Delete Warehouse"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1494,38 +1758,381 @@ export function SettingsModal({
                     })}
                     {warehouses.length === 0 && (
                       <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                        No warehouses defined. Click "+ Add Warehouse" to create one.
+                        No warehouses defined in Supabase database. Click "+ Add Warehouse" to create one.
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Sub-Tab: LGUs */}
-              {dataSubTab === 'lgus' && (
+              {/* Sub-Tab 4: Provinces */}
+              {!isLoadingMasterData && dataSubTab === 'provinces' && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 font-semibold">
-                      Panay Provinces & Municipalities ({dbLgus.length || PANAY_LGUS.length})
-                    </p>
+                  {/* Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={provinces.length > 0 && selectedProvinceIds.length === provinces.length}
+                        onChange={handleToggleSelectAllProvinces}
+                        className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">
+                        Select All ({selectedProvinceIds.length}/{provinces.length})
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {selectedProvinceIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteSelectedProvinces}
+                          disabled={isMutatingMasterData}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Selected ({selectedProvinceIds.length})</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingProvince(!isAddingProvince)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isAddingProvince ? 'Cancel' : 'Add Province'}</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {(dbLgus.length > 0 ? dbLgus : PANAY_LGUS).map((lgu: any) => (
-                      <div key={lgu.id || lgu.municipality} className="p-2.5 rounded-xl border border-gray-200 bg-gray-50/50 flex items-center justify-between text-xs">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-gray-900">{lgu.municipality}</span>
-                            <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
-                              {lgu.province}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-500">{lgu.lguName || lgu.defaultFacility || 'Municipal Hall'}</p>
-                        </div>
-                        <span className="text-[10px] font-mono text-gray-400">
-                          {Number(lgu.latitude || lgu.lat).toFixed(3)}, {Number(lgu.longitude || lgu.lng).toFixed(3)}
-                        </span>
+
+                  {/* Inline Add Province Form */}
+                  {isAddingProvince && (
+                    <form onSubmit={handleAddProvince} className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-blue-900">Add New Province</p>
+                        <button type="button" onClick={() => setIsAddingProvince(false)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
-                    ))}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Province Name *</label>
+                          <input
+                            type="text"
+                            value={newProvince.name}
+                            onChange={e => setNewProvince(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="e.g. Guimaras"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Region *</label>
+                          <input
+                            type="text"
+                            value={newProvince.region}
+                            onChange={e => setNewProvince(prev => ({ ...prev, region: e.target.value }))}
+                            placeholder="e.g. Region VI (Western Visayas)"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingProvince(false)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isMutatingMasterData}
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                        >
+                          {isMutatingMasterData ? 'Saving...' : 'Save Province'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Provinces List */}
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {provinces.map(prov => {
+                      const isSelected = selectedProvinceIds.includes(prov.id);
+                      const linkedLguCount = dbLgus.filter(l => l.province.toLowerCase() === prov.name.toLowerCase()).length;
+                      return (
+                        <div
+                          key={prov.id}
+                          className={`p-3 rounded-xl border transition flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'border-blue-300 bg-blue-50/70 shadow-xs'
+                              : 'border-gray-200 bg-gray-50/60 hover:bg-gray-100/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectProvince(prov.id)}
+                              className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-900">{prov.name}</span>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                                  {linkedLguCount} Municipalities
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-0.5">{prov.region}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              Active
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSingleProvince(prov.id)}
+                              disabled={isMutatingMasterData}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
+                              title="Delete Province"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {provinces.length === 0 && (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                        No provinces defined in Supabase database. Click "+ Add Province" to create one.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-Tab 5: LGUs & Municipalities */}
+              {!isLoadingMasterData && dataSubTab === 'lgus' && (
+                <div className="space-y-3">
+                  {/* Province Filter & Municipality Search Controls */}
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative min-w-[200px]">
+                      <select
+                        value={lguProvinceFilter}
+                        onChange={e => setLguProvinceFilter(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-700 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                      >
+                        <option value="All">All Provinces ({dbLgus.length} LGUs)</option>
+                        {provinces.map(prov => {
+                          const count = dbLgus.filter(l => l.province.toLowerCase() === prov.name.toLowerCase()).length;
+                          return (
+                            <option key={prov.id} value={prov.name}>
+                              {prov.name} ({count})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={lguSearchQuery}
+                        onChange={e => setLguSearchQuery(e.target.value)}
+                        placeholder="Search municipality or LGU name..."
+                        className="w-full pl-8 pr-3 py-2 rounded-xl border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={filteredLgus.length > 0 && filteredLgus.every(l => selectedLguIds.includes(l.id))}
+                        onChange={handleToggleSelectAllLgus}
+                        className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">
+                        Select All ({selectedLguIds.filter(id => filteredLgus.some(l => l.id === id)).length}/{filteredLgus.length})
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {selectedLguIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteSelectedLgus}
+                          disabled={isMutatingMasterData}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Selected ({selectedLguIds.length})</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingLgu(!isAddingLgu)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isAddingLgu ? 'Cancel' : 'Add Municipality'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inline Add LGU Form */}
+                  {isAddingLgu && (
+                    <form onSubmit={handleAddLgu} className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-blue-900">Add Panay Municipality / LGU</p>
+                        <button type="button" onClick={() => setIsAddingLgu(false)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Province *</label>
+                          <select
+                            value={newLgu.province}
+                            onChange={e => setNewLgu(prev => ({ ...prev, province: e.target.value }))}
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                          >
+                            <option value="">Select Province</option>
+                            {provinces.map(prov => (
+                              <option key={prov.id} value={prov.name}>{prov.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Municipality / City *</label>
+                          <input
+                            type="text"
+                            value={newLgu.municipality}
+                            onChange={e => setNewLgu(prev => ({ ...prev, municipality: e.target.value }))}
+                            placeholder="e.g. Pavia"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">LGU Facility / Hall Name</label>
+                          <input
+                            type="text"
+                            value={newLgu.lguName}
+                            onChange={e => setNewLgu(prev => ({ ...prev, lguName: e.target.value }))}
+                            placeholder="e.g. Pavia Municipal Hall / Evacuation Center"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Contact Officer</label>
+                          <input
+                            type="text"
+                            value={newLgu.contactPerson}
+                            onChange={e => setNewLgu(prev => ({ ...prev, contactPerson: e.target.value }))}
+                            placeholder="e.g. Officer Juan Dela Cruz"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Latitude</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={newLgu.latitude}
+                            onChange={e => setNewLgu(prev => ({ ...prev, latitude: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Longitude</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={newLgu.longitude}
+                            onChange={e => setNewLgu(prev => ({ ...prev, longitude: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingLgu(false)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isMutatingMasterData}
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                        >
+                          {isMutatingMasterData ? 'Saving...' : 'Save Municipality'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* LGUs List */}
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {filteredLgus.map(lgu => {
+                      const isSelected = selectedLguIds.includes(lgu.id);
+                      return (
+                        <div
+                          key={lgu.id}
+                          className={`p-3 rounded-xl border transition flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'border-blue-300 bg-blue-50/70 shadow-xs'
+                              : 'border-gray-200 bg-gray-50/60 hover:bg-gray-100/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectLgu(lgu.id)}
+                              className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-900">{lgu.municipality}</span>
+                                <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                                  {lgu.province}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-0.5">{lgu.lguName || 'Municipal Disaster Operations Center'}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-mono text-gray-400">
+                              {Number(lgu.latitude).toFixed(3)}, {Number(lgu.longitude).toFixed(3)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSingleLgu(lgu.id)}
+                              disabled={isMutatingMasterData}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
+                              title="Delete LGU"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {filteredLgus.length === 0 && (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                        No municipalities found matching your filter.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

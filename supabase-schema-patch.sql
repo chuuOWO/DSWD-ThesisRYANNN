@@ -10,7 +10,145 @@
 create extension if not exists pgcrypto;
 
 -- ==============================================================================
--- 2. TABLE: lgus (Master Panay & Regional Local Government Units Directory)
+-- 2. MASTER LOOKUP & REGIONAL CONFIGURATION TABLES
+-- ==============================================================================
+
+-- 2.1 TABLE: provinces (Provincial Jurisdictions)
+create table if not exists public.provinces (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  region text not null default 'Region VI (Western Visayas)',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.provinces add column if not exists name text;
+alter table public.provinces add column if not exists region text default 'Region VI (Western Visayas)';
+alter table public.provinces add column if not exists is_active boolean default true;
+alter table public.provinces add column if not exists created_at timestamptz default now();
+alter table public.provinces add column if not exists updated_at timestamptz default now();
+
+create unique index if not exists provinces_name_key on public.provinces (name);
+
+insert into public.provinces (name, region) values
+  ('Aklan', 'Region VI (Western Visayas)'),
+  ('Antique', 'Region VI (Western Visayas)'),
+  ('Capiz', 'Region VI (Western Visayas)'),
+  ('Guimaras', 'Region VI (Western Visayas)'),
+  ('Iloilo', 'Region VI (Western Visayas)'),
+  ('Negros Occidental', 'Region VI (Western Visayas)')
+on conflict (name) do nothing;
+
+-- 2.2 TABLE: warehouses (Regional Storage Warehouses & Authoritative Stock Balances)
+create table if not exists public.warehouses (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  province text not null default 'Iloilo',
+  municipality text not null default 'Oton',
+  capacity_packs integer not null default 50000,
+  latitude double precision not null default 10.6975,
+  longitude double precision not null default 122.4764,
+  food_packs integer not null default 0,
+  hygiene_kits integer not null default 0,
+  sleeping_kits integer not null default 0,
+  kitchen_kits integer not null default 0,
+  family_kits integer not null default 0,
+  laminated_sacks integer not null default 0,
+  rtef integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.warehouses add column if not exists name text;
+alter table public.warehouses add column if not exists province text default 'Iloilo';
+alter table public.warehouses add column if not exists municipality text default 'Oton';
+alter table public.warehouses add column if not exists capacity_packs integer default 50000;
+alter table public.warehouses add column if not exists latitude double precision default 10.6975;
+alter table public.warehouses add column if not exists longitude double precision default 122.4764;
+alter table public.warehouses add column if not exists food_packs integer not null default 0;
+alter table public.warehouses add column if not exists hygiene_kits integer not null default 0;
+alter table public.warehouses add column if not exists sleeping_kits integer not null default 0;
+alter table public.warehouses add column if not exists kitchen_kits integer not null default 0;
+alter table public.warehouses add column if not exists family_kits integer not null default 0;
+alter table public.warehouses add column if not exists laminated_sacks integer not null default 0;
+alter table public.warehouses add column if not exists rtef integer not null default 0;
+alter table public.warehouses add column if not exists is_active boolean default true;
+alter table public.warehouses add column if not exists created_at timestamptz default now();
+alter table public.warehouses add column if not exists updated_at timestamptz default now();
+
+create unique index if not exists warehouses_name_key on public.warehouses (name);
+
+insert into public.warehouses (name, province, municipality, capacity_packs, latitude, longitude, food_packs, hygiene_kits, sleeping_kits, kitchen_kits, family_kits, laminated_sacks, rtef) values
+  ('Oton Main Warehouse', 'Iloilo', 'Oton', 150000, 10.6975, 122.4764, 34500, 12400, 8900, 6200, 7100, 4500, 15000),
+  ('Pototan Main Warehouse', 'Iloilo', 'Pototan', 80000, 10.9492, 122.6289, 21200, 8100, 5400, 4100, 4800, 3200, 9500)
+on conflict (name) do nothing;
+
+-- 2.3 TABLE: supply_sources (National Resource Centers & Distribution Hubs)
+create table if not exists public.supply_sources (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  short_code text not null unique,
+  facility_type text not null default 'National Resource Center',
+  region text not null default 'Region VII (Central Visayas)',
+  location text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.supply_sources add column if not exists name text;
+alter table public.supply_sources add column if not exists short_code text;
+alter table public.supply_sources add column if not exists facility_type text default 'National Resource Center';
+alter table public.supply_sources add column if not exists region text default 'Region VII (Central Visayas)';
+alter table public.supply_sources add column if not exists location text default '';
+alter table public.supply_sources add column if not exists is_active boolean default true;
+alter table public.supply_sources add column if not exists created_at timestamptz default now();
+alter table public.supply_sources add column if not exists updated_at timestamptz default now();
+
+create unique index if not exists supply_sources_name_key on public.supply_sources (name);
+create unique index if not exists supply_sources_short_code_key on public.supply_sources (short_code);
+
+insert into public.supply_sources (name, short_code, facility_type, region, location) values
+  ('Visayas Disaster Resource Center (VDRC)', 'VDRC', 'National Resource Center', 'Region VII (Central Visayas)', 'Tingub, Mandaue City, Cebu'),
+  ('Luzon Disaster Resource Center (LDRC)', 'LDRC', 'National Resource Center', 'National Capital Region / Region III', 'Pasay City / Clark Special Economic Zone')
+on conflict (short_code) do nothing;
+
+-- 2.4 TABLE: kit_types (Relief Goods & Standard Disaster Kit Specifications)
+create table if not exists public.kit_types (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  category text not null default 'Food Item',
+  unit_type text not null default 'packs',
+  description text default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.kit_types add column if not exists name text;
+alter table public.kit_types add column if not exists category text default 'Food Item';
+alter table public.kit_types add column if not exists unit_type text default 'packs';
+alter table public.kit_types add column if not exists description text default '';
+alter table public.kit_types add column if not exists is_active boolean default true;
+alter table public.kit_types add column if not exists created_at timestamptz default now();
+alter table public.kit_types add column if not exists updated_at timestamptz default now();
+
+create unique index if not exists kit_types_name_key on public.kit_types (name);
+
+insert into public.kit_types (name, category, unit_type, description) values
+  ('Family Food Pack', 'Food Item', 'packs', 'Standard 6kg emergency nutritional food pack (rice, canned goods, coffee)'),
+  ('Hygiene Kit', 'Non-Food Item', 'kits', 'Personal sanitation supplies, soap, toothpaste, toothbrush, sanitary napkins'),
+  ('Sleeping Kit', 'Non-Food Item', 'kits', 'Blankets, sleeping mats, mosquito nets, and pillowcases'),
+  ('Kitchen Kit', 'Non-Food Item', 'kits', 'Cooking pots, frying pan, plates, cups, spoons, forks, and cooking utensils'),
+  ('Family Kit', 'Non-Food Item', 'kits', 'Clothing apparel, underwear, bath towels, and footwear for families'),
+  ('Laminated Sacks', 'Non-Food Item', 'sacks', 'Heavy-duty weatherproofing tarpaulins for temporary roof shelters'),
+  ('Ready-to-Eat Food (RTEF)', 'Food Item', 'packs', 'Pre-cooked retort pouch meals requiring zero preparation')
+on conflict (name) do nothing;
+
+-- ==============================================================================
+-- 3. TABLE: lgus (Master Panay & Regional Local Government Units Directory)
 -- ==============================================================================
 create table if not exists public.lgus (
   id uuid primary key default gen_random_uuid(),
@@ -870,10 +1008,42 @@ exception
   when duplicate_object then null;
 end $$;
 
+do $$
+begin
+  alter publication supabase_realtime add table public.provinces;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.warehouses;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.supply_sources;
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.kit_types;
+exception
+  when duplicate_object then null;
+end $$;
+
 -- ==============================================================================
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
 alter table public.lgus enable row level security;
+alter table public.provinces enable row level security;
+alter table public.warehouses enable row level security;
+alter table public.supply_sources enable row level security;
+alter table public.kit_types enable row level security;
 alter table public.incoming_manifests enable row level security;
 alter table public.outgoing_requests enable row level security;
 alter table public.lgu_inventory_reports enable row level security;
@@ -902,7 +1072,117 @@ create policy "Allow update lgus"
   using (true)
   with check (true);
 
--- 11.2 INCOMING MANIFESTS POLICIES
+drop policy if exists "Allow delete lgus" on public.lgus;
+create policy "Allow delete lgus"
+  on public.lgus for delete
+  to authenticated, anon
+  using (true);
+
+-- 11.2 PROVINCES POLICIES
+drop policy if exists "Allow read provinces" on public.provinces;
+create policy "Allow read provinces"
+  on public.provinces for select
+  to authenticated, anon
+  using (true);
+
+drop policy if exists "Allow insert provinces" on public.provinces;
+create policy "Allow insert provinces"
+  on public.provinces for insert
+  to authenticated, anon
+  with check (true);
+
+drop policy if exists "Allow update provinces" on public.provinces;
+create policy "Allow update provinces"
+  on public.provinces for update
+  to authenticated, anon
+  using (true)
+  with check (true);
+
+drop policy if exists "Allow delete provinces" on public.provinces;
+create policy "Allow delete provinces"
+  on public.provinces for delete
+  to authenticated, anon
+  using (true);
+
+-- 11.3 WAREHOUSES POLICIES
+drop policy if exists "Allow read warehouses" on public.warehouses;
+create policy "Allow read warehouses"
+  on public.warehouses for select
+  to authenticated, anon
+  using (true);
+
+drop policy if exists "Allow insert warehouses" on public.warehouses;
+create policy "Allow insert warehouses"
+  on public.warehouses for insert
+  to authenticated, anon
+  with check (true);
+
+drop policy if exists "Allow update warehouses" on public.warehouses;
+create policy "Allow update warehouses"
+  on public.warehouses for update
+  to authenticated, anon
+  using (true)
+  with check (true);
+
+drop policy if exists "Allow delete warehouses" on public.warehouses;
+create policy "Allow delete warehouses"
+  on public.warehouses for delete
+  to authenticated, anon
+  using (true);
+
+-- 11.4 SUPPLY SOURCES POLICIES
+drop policy if exists "Allow read supply sources" on public.supply_sources;
+create policy "Allow read supply sources"
+  on public.supply_sources for select
+  to authenticated, anon
+  using (true);
+
+drop policy if exists "Allow insert supply sources" on public.supply_sources;
+create policy "Allow insert supply sources"
+  on public.supply_sources for insert
+  to authenticated, anon
+  with check (true);
+
+drop policy if exists "Allow update supply sources" on public.supply_sources;
+create policy "Allow update supply sources"
+  on public.supply_sources for update
+  to authenticated, anon
+  using (true)
+  with check (true);
+
+drop policy if exists "Allow delete supply sources" on public.supply_sources;
+create policy "Allow delete supply sources"
+  on public.supply_sources for delete
+  to authenticated, anon
+  using (true);
+
+-- 11.5 KIT TYPES POLICIES
+drop policy if exists "Allow read kit types" on public.kit_types;
+create policy "Allow read kit types"
+  on public.kit_types for select
+  to authenticated, anon
+  using (true);
+
+drop policy if exists "Allow insert kit types" on public.kit_types;
+create policy "Allow insert kit types"
+  on public.kit_types for insert
+  to authenticated, anon
+  with check (true);
+
+drop policy if exists "Allow update kit types" on public.kit_types;
+create policy "Allow update kit types"
+  on public.kit_types for update
+  to authenticated, anon
+  using (true)
+  with check (true);
+
+drop policy if exists "Allow delete kit types" on public.kit_types;
+create policy "Allow delete kit types"
+  on public.kit_types for delete
+  to authenticated, anon
+  using (true);
+
+-- 11.6 INCOMING MANIFESTS POLICIES
 drop policy if exists "Allow read incoming" on public.incoming_manifests;
 create policy "Allow read incoming"
   on public.incoming_manifests for select
@@ -922,7 +1202,7 @@ create policy "Allow update incoming"
   using (true)
   with check (true);
 
--- 11.3 OUTGOING REQUESTS POLICIES
+-- 11.7 OUTGOING REQUESTS POLICIES
 drop policy if exists "Allow read outgoing" on public.outgoing_requests;
 create policy "Allow read outgoing"
   on public.outgoing_requests for select
@@ -942,7 +1222,7 @@ create policy "Allow update outgoing"
   using (true)
   with check (true);
 
--- 11.4 LGU INVENTORY REPORTS POLICIES
+-- 11.8 LGU INVENTORY REPORTS POLICIES
 drop policy if exists "Allow read LGU inventory reports" on public.lgu_inventory_reports;
 create policy "Allow read LGU inventory reports"
   on public.lgu_inventory_reports for select
@@ -962,7 +1242,7 @@ create policy "Allow update LGU inventory reports"
   using (true)
   with check (true);
 
--- 11.5 DISCREPANCY REPORTS POLICIES
+-- 11.9 DISCREPANCY REPORTS POLICIES
 drop policy if exists "Allow read discrepancy reports" on public.discrepancy_reports;
 create policy "Allow read discrepancy reports"
   on public.discrepancy_reports for select
@@ -975,7 +1255,7 @@ create policy "Allow insert discrepancy reports"
   to authenticated, anon
   with check (true);
 
--- 11.6 APP COUNTERS POLICIES
+-- 11.10 APP COUNTERS POLICIES
 drop policy if exists "Allow read app counters" on public.app_counters;
 create policy "Allow read app counters"
   on public.app_counters for select
@@ -995,7 +1275,7 @@ create policy "Allow update app counters"
   using (true)
   with check (true);
 
--- 11.7 PROFILES POLICIES
+-- 11.11 PROFILES POLICIES
 drop policy if exists "Allow profile read" on public.profiles;
 create policy "Allow profile read"
   on public.profiles for select
@@ -1029,7 +1309,7 @@ create policy "Allow profile update"
     )
   );
 
--- 11.8 TRUCK LIVE LOCATIONS POLICIES
+-- 11.12 TRUCK LIVE LOCATIONS POLICIES
 drop policy if exists "Allow authenticated read truck live locations" on public.truck_live_locations;
 create policy "Allow authenticated read truck live locations"
   on public.truck_live_locations for select

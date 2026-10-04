@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { backendApi, type LguRecord } from '../services/backendApi';
+import {
+  backendApi,
+  type LguRecord,
+  type ProvinceRecord,
+  type WarehouseRecord,
+  type SupplySourceRecord,
+  type KitTypeRecord
+} from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
 import { findPanayLgu } from '../data/panayLguDirectory';
 
@@ -7,11 +14,13 @@ export interface InventoryItem {
   category: string;
   warehouseA: number;
   warehouseB: number;
+  totalStock?: number;
+  warehouseBreakdown?: Record<string, number>;
 }
 
 export type UserRole = 'Admin' | 'Receiver' | 'LGUReceiver' | 'Unregistered';
 
-export type WarehouseName = 'Oton Main Warehouse' | 'Pototan Main Warehouse';
+export type WarehouseName = string;
 export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Minted' | 'Correction Requested' | 'Rejected';
 export type OutgoingStatus = 'Draft' | 'Allocating' | 'Approved' | 'Packed' | 'Released' | 'In Transit' | 'Delivered' | 'Accepted' | 'Distributed' | 'Correction Requested' | 'Cancelled';
 export type PriorityColor = 'Red' | 'Yellow' | 'Green';
@@ -372,46 +381,56 @@ const emptyInventoryItem = (category: string): InventoryItem => ({
   warehouseB: 0
 });
 
-const calculateAvailableInventory = (incoming: IncomingGoods[], outgoing: OutgoingRelease[]): InventoryItem[] => {
-  const stock = new Map<string, InventoryItem>();
+const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: KitTypeRecord[]): InventoryItem[] => {
+  const categoryNames = kitTypes.length > 0
+    ? kitTypes.map(k => k.name)
+    : [
+        'Family Food Pack',
+        'Hygiene Kit',
+        'Sleeping Kit',
+        'Kitchen Kit',
+        'Family Kit',
+        'Laminated Sacks',
+        'Ready-to-Eat Food (RTEF)'
+      ];
 
-  const ensureItem = (category: string) => {
-    if (!stock.has(category)) {
-      stock.set(category, emptyInventoryItem(category));
-    }
-    return stock.get(category)!;
-  };
+  const itemsMap = new Map<string, InventoryItem>();
 
-  incoming.forEach(item => {
-    const destination = normalizeWarehouseName(item.destination);
-    if ((item.status !== 'Verified' && item.status !== 'Minted') || item.destinationType !== 'Warehouse' || !destination) return;
+  categoryNames.forEach(category => {
+    let warehouseA = 0;
+    let warehouseB = 0;
+    const warehouseBreakdown: Record<string, number> = {};
+    let totalStock = 0;
 
-    const stockItem = ensureItem(item.fnfiCategory);
-    if (destination === 'Oton Main Warehouse') {
-      stockItem.warehouseA += item.quantity;
-    } else {
-      stockItem.warehouseB += item.quantity;
-    }
+    warehouses.forEach((wh, idx) => {
+      let stock = 0;
+      const catLower = category.toLowerCase();
+      if (catLower.includes('food pack')) stock = wh.foodPacks;
+      else if (catLower.includes('hygiene')) stock = wh.hygieneKits;
+      else if (catLower.includes('sleeping')) stock = wh.sleepingKits;
+      else if (catLower.includes('kitchen')) stock = wh.kitchenKits;
+      else if (catLower.includes('family kit')) stock = wh.familyKits;
+      else if (catLower.includes('sack')) stock = wh.laminatedSacks;
+      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) stock = wh.rtef;
+      else if (wh.currentStock && wh.currentStock[category] !== undefined) stock = wh.currentStock[category];
+
+      warehouseBreakdown[wh.name] = stock;
+      totalStock += stock;
+
+      if (idx === 0) warehouseA = stock;
+      if (idx === 1) warehouseB = stock;
+    });
+
+    itemsMap.set(category, {
+      category,
+      warehouseA,
+      warehouseB,
+      totalStock,
+      warehouseBreakdown
+    });
   });
 
-  outgoing.forEach(release => {
-    // Direct delivery bypasses regional warehouse stock deduction
-    if (release.deliveryMode === 'Direct Delivery') return;
-
-    const consumesStock = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'].includes(release.deliveryStatus);
-    const warehouseSource = normalizeWarehouseName(release.warehouseSource);
-    if (!consumesStock || !warehouseSource) return;
-
-    const stockItem = ensureItem(release.fnfiCategory);
-    const quantity = release.amountApproved || release.amountRequested;
-    if (warehouseSource === 'Oton Main Warehouse') {
-      stockItem.warehouseA = Math.max(0, stockItem.warehouseA - quantity);
-    } else {
-      stockItem.warehouseB = Math.max(0, stockItem.warehouseB - quantity);
-    }
-  });
-
-  return Array.from(stock.values()).sort((a, b) => a.category.localeCompare(b.category));
+  return Array.from(itemsMap.values());
 };
 
 const logBackendError = (action: string) => (error: unknown) => {
@@ -438,40 +457,85 @@ export function useInventoryState(enabled = true) {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
   const [incomingGoodsList, setIncomingGoodsList] = useState<IncomingGoods[]>([]);
-
   const [outgoingReleasesList, setOutgoingReleasesList] = useState<OutgoingRelease[]>([]);
-
   const [lguPriorityReports, setLguPriorityReports] = useState<LGUPriorityReport[]>([]);
-
   const [discrepancyReports, setDiscrepancyReports] = useState<DiscrepancyReport[]>([]);
+
+  // Master relational data directly from Supabase
+  const [provincesList, setProvincesList] = useState<ProvinceRecord[]>([]);
+  const [warehousesList, setWarehousesList] = useState<WarehouseRecord[]>([]);
+  const [supplySourcesList, setSupplySourcesList] = useState<SupplySourceRecord[]>([]);
+  const [kitTypesList, setKitTypesList] = useState<KitTypeRecord[]>([]);
   const [lgusList, setLgusList] = useState<LguRecord[]>([]);
 
+  // Inventory is derived from the authoritative warehouses table
   useEffect(() => {
-    setInventory(calculateAvailableInventory(incomingGoodsList, outgoingReleasesList));
-  }, [incomingGoodsList, outgoingReleasesList]);
+    setInventory(calculateWarehouseInventory(warehousesList, kitTypesList));
+  }, [warehousesList, kitTypesList]);
+
+  const refreshProvinces = async () => {
+    try {
+      const list = await backendApi.getProvinces();
+      setProvincesList(list);
+    } catch (err) {
+      console.warn('Failed to refresh provinces:', err);
+    }
+  };
+
+  const refreshWarehouses = async () => {
+    try {
+      const list = await backendApi.getWarehouses();
+      setWarehousesList(list);
+    } catch (err) {
+      console.warn('Failed to refresh warehouses:', err);
+    }
+  };
+
+  const refreshSupplySources = async () => {
+    try {
+      const list = await backendApi.getSupplySources();
+      setSupplySourcesList(list);
+    } catch (err) {
+      console.warn('Failed to refresh supply sources:', err);
+    }
+  };
+
+  const refreshKitTypes = async () => {
+    try {
+      const list = await backendApi.getKitTypes();
+      setKitTypesList(list);
+    } catch (err) {
+      console.warn('Failed to refresh kit types:', err);
+    }
+  };
 
   const addStock = (category: string, warehouse: WarehouseName, quantity: number) => {
     setInventory(prev => {
       const existingItem = prev.find(item => item.category === category);
-
       if (existingItem) {
         return prev.map(item =>
           item.category === category
             ? {
                 ...item,
-                warehouseA: warehouse === 'Oton Main Warehouse' ? item.warehouseA + quantity : item.warehouseA,
-                warehouseB: warehouse === 'Pototan Main Warehouse' ? item.warehouseB + quantity : item.warehouseB
+                warehouseA: warehouse.toLowerCase().includes('oton') ? item.warehouseA + quantity : item.warehouseA,
+                warehouseB: warehouse.toLowerCase().includes('pototan') ? item.warehouseB + quantity : item.warehouseB,
+                totalStock: (item.totalStock || 0) + quantity,
+                warehouseBreakdown: {
+                  ...(item.warehouseBreakdown || {}),
+                  [warehouse]: ((item.warehouseBreakdown || {})[warehouse] || 0) + quantity
+                }
               }
             : item
         );
       }
-
       return [
         ...prev,
         {
           category,
-          warehouseA: warehouse === 'Oton Main Warehouse' ? quantity : 0,
-          warehouseB: warehouse === 'Pototan Main Warehouse' ? quantity : 0
+          warehouseA: warehouse.toLowerCase().includes('oton') ? quantity : 0,
+          warehouseB: warehouse.toLowerCase().includes('pototan') ? quantity : 0,
+          totalStock: quantity,
+          warehouseBreakdown: { [warehouse]: quantity }
         }
       ];
     });
@@ -481,18 +545,24 @@ export function useInventoryState(enabled = true) {
     const item = inventory.find(i => i.category === category);
     if (!item) return false;
 
-    const currentStock = warehouse === 'Oton Main Warehouse' ? item.warehouseA : item.warehouseB;
+    const currentStock = item.warehouseBreakdown?.[warehouse] ??
+      (warehouse.toLowerCase().includes('oton') ? item.warehouseA : item.warehouseB);
     if (currentStock < quantity) return false;
 
     setInventory(prev =>
-      prev.map(item =>
-        item.category === category
+      prev.map(it =>
+        it.category === category
           ? {
-              ...item,
-              warehouseA: warehouse === 'Oton Main Warehouse' ? item.warehouseA - quantity : item.warehouseA,
-              warehouseB: warehouse === 'Pototan Main Warehouse' ? item.warehouseB - quantity : item.warehouseB
+              ...it,
+              warehouseA: warehouse.toLowerCase().includes('oton') ? Math.max(0, it.warehouseA - quantity) : it.warehouseA,
+              warehouseB: warehouse.toLowerCase().includes('pototan') ? Math.max(0, it.warehouseB - quantity) : it.warehouseB,
+              totalStock: Math.max(0, (it.totalStock || 0) - quantity),
+              warehouseBreakdown: {
+                ...(it.warehouseBreakdown || {}),
+                [warehouse]: Math.max(0, ((it.warehouseBreakdown || {})[warehouse] || 0) - quantity)
+              }
             }
-          : item
+          : it
       )
     );
 
@@ -500,9 +570,20 @@ export function useInventoryState(enabled = true) {
   };
 
   const getAvailableStock = (category: string, warehouse: WarehouseName): number => {
-    const item = inventory.find(i => i.category === category);
-    if (!item) return 0;
-    return warehouse === 'Oton Main Warehouse' ? item.warehouseA : item.warehouseB;
+    const targetWh = warehousesList.find(w => w.name.toLowerCase() === warehouse.toLowerCase());
+    if (targetWh) {
+      const catLower = category.toLowerCase();
+      if (catLower.includes('food pack')) return targetWh.foodPacks;
+      if (catLower.includes('hygiene')) return targetWh.hygieneKits;
+      if (catLower.includes('sleeping')) return targetWh.sleepingKits;
+      if (catLower.includes('kitchen')) return targetWh.kitchenKits;
+      if (catLower.includes('family kit')) return targetWh.familyKits;
+      if (catLower.includes('sack')) return targetWh.laminatedSacks;
+      if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) return targetWh.rtef;
+      if (targetWh.currentStock && targetWh.currentStock[category] !== undefined) return targetWh.currentStock[category];
+    }
+    const item = inventory.find(i => i.category.toLowerCase() === category.toLowerCase());
+    return item?.warehouseBreakdown?.[warehouse] || (warehouse.toLowerCase().includes('oton') ? item?.warehouseA : item?.warehouseB) || 0;
   };
 
   const addIncomingGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
@@ -976,27 +1057,36 @@ export function useInventoryState(enabled = true) {
         })
         .catch(() => setIntegrationMode('mock'));
 
-      backendApi.getLgus()
-        .then(lgus => {
-          setLgusList(lgus);
-          const reportsFromLgus: LGUPriorityReport[] = lgus.map(l => ({
-            id: l.id,
-            municipality: l.municipality,
-            province: l.province,
-            lguName: l.lguName || `${l.municipality} Municipal Office`,
-            foodPacks: l.foodPacks,
-            hygieneKits: l.hygieneKits,
-            familyKits: l.familyKits,
-            affectedFamilies: l.affectedFamilies,
-            damageIndex: l.damageIndex,
-            urgencyScore: l.urgencyScore,
-            priorityColor: l.priorityColor,
-            recommendation: l.recommendation,
-            reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
-          }));
-          setLguPriorityReports(reportsFromLgus);
-        })
-        .catch(err => console.warn('Failed to load lgus:', err));
+      Promise.all([
+        backendApi.getLgus(),
+        backendApi.getProvinces(),
+        backendApi.getWarehouses(),
+        backendApi.getSupplySources(),
+        backendApi.getKitTypes()
+      ]).then(([lgus, provinces, warehouses, sources, kits]) => {
+        setLgusList(lgus);
+        setProvincesList(provinces);
+        setWarehousesList(warehouses);
+        setSupplySourcesList(sources);
+        setKitTypesList(kits);
+
+        const reportsFromLgus: LGUPriorityReport[] = lgus.map(l => ({
+          id: l.id,
+          municipality: l.municipality,
+          province: l.province,
+          lguName: l.lguName || `${l.municipality} Municipal Office`,
+          foodPacks: l.foodPacks,
+          hygieneKits: l.hygieneKits,
+          familyKits: l.familyKits,
+          affectedFamilies: l.affectedFamilies,
+          damageIndex: l.damageIndex,
+          urgencyScore: l.urgencyScore,
+          priorityColor: l.priorityColor,
+          recommendation: l.recommendation,
+          reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
+        }));
+        setLguPriorityReports(reportsFromLgus);
+      }).catch(err => console.warn('Failed to load master tables:', err));
     };
 
     loadDashboard();
@@ -1059,7 +1149,15 @@ export function useInventoryState(enabled = true) {
     lguPriorityReports,
     discrepancyReports,
     lgusList,
+    provincesList,
+    warehousesList,
+    supplySourcesList,
+    kitTypesList,
     refreshLgus,
+    refreshProvinces,
+    refreshWarehouses,
+    refreshSupplySources,
+    refreshKitTypes,
     addStock,
     deductStock,
     getAvailableStock,
