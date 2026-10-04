@@ -71,6 +71,15 @@ const defaultFormData: ReleaseForm = {
     directSource: undefined
 };
 
+const cleanBuildingName = (val?: string): string => {
+  if (!val) return '';
+  let cleaned = val;
+  while (/\s*\([^)]*\)\s*\([^)]*\)/.test(cleaned)) {
+    cleaned = cleaned.replace(/\s*\([^)]*\)\s*(\([^)]*\))$/, '$1');
+  }
+  return cleaned;
+};
+
 export function AddReleaseModal({
   onClose,
   onSubmit,
@@ -83,7 +92,10 @@ export function AddReleaseModal({
   supplySourcesList = [],
   kitTypesList = []
 }: AddReleaseModalProps) {
-  const [formData, setFormData] = useState<ReleaseForm>(initialData ?? defaultFormData);
+  const [formData, setFormData] = useState<ReleaseForm>(() => {
+    if (!initialData) return defaultFormData;
+    return { ...initialData, lguName: cleanBuildingName(initialData.lguName) };
+  });
   const [directSource, setDirectSource] = useState<'LDRC' | 'VDRC'>('VDRC');
 
   // Master LGUs from Supabase
@@ -174,7 +186,8 @@ export function AddReleaseModal({
 
   useEffect(() => {
     if (!initialData) return;
-    setFormData(initialData);
+    const cleanedLguName = cleanBuildingName(initialData.lguName);
+    setFormData({ ...initialData, lguName: cleanedLguName });
     setSelectedProvince(initialData.province || provinces[0] || 'Iloilo');
     setSelectedMunicipality(initialData.municipality || '');
     if (initialData.receiverGps) {
@@ -193,11 +206,10 @@ export function AddReleaseModal({
     setFormData(prev => ({
       ...prev,
       lguId: found.id,
-      lguName: found.lguName || `${found.municipality} Municipal Office`,
       municipality: found.municipality,
       province: found.province,
       receiverGps: `${found.latitude.toFixed(5)}, ${found.longitude.toFixed(5)}`,
-      destinationAddress: `${found.lguName || found.municipality}, ${found.municipality}, ${found.province}`
+      destinationAddress: `${prev.lguName ? prev.lguName + ', ' : ''}${found.municipality}, ${found.province}`
     }));
     setSelectedProvince(found.province);
     setSelectedMunicipality(found.municipality);
@@ -223,7 +235,7 @@ export function AddReleaseModal({
       destinationAddress: address ?? prev.destinationAddress,
       province: resolvedProv,
       municipality: resolvedMuni,
-      lguName: details?.building ? `${details.building} (${resolvedMuni})` : (matchedLgu?.lguName || prev.lguName)
+      lguName: details?.building !== undefined ? details.building : prev.lguName
     }));
     if (resolvedProv) setSelectedProvince(resolvedProv);
     if (resolvedMuni) setSelectedMunicipality(resolvedMuni);
@@ -301,15 +313,6 @@ export function AddReleaseModal({
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: '' }));
     }
-
-    // Auto-generate LGU name from municipality
-    if (field === 'municipality' && typeof value === 'string') {
-      setFormData(prev => ({
-        ...prev,
-        municipality: value,
-        lguName: `${value} Municipal Office`
-      }));
-    }
   };
 
   const validate = (): boolean => {
@@ -319,15 +322,13 @@ export function AddReleaseModal({
       newErrors.dateAllocated = 'Date allocated is required';
     }
 
-    if (!formData.lguName.trim()) {
-      newErrors.lguName = 'LGU destination is required';
-    }
-
     if (!formData.province) {
       newErrors.province = 'Province is required';
     }
 
-    // Municipality is now optional - no validation needed
+    if (!formData.municipality) {
+      newErrors.municipality = 'Destination municipality is required';
+    }
 
     if (!formData.fnfiCategory) {
       newErrors.fnfiCategory = 'FNFI category is required';
@@ -365,16 +366,19 @@ export function AddReleaseModal({
 
     if (validate()) {
       const initialStatus: OutgoingStatus = formData.deliveryMode === 'Direct Delivery' ? 'Approved' : 'Allocating';
-      const submissionData = mode === 'add' ? { ...formData, deliveryStatus: initialStatus } : formData;
+      const buildingFinal = formData.lguName.trim() || `${formData.municipality} Drop-off Center`;
+      const submissionData = mode === 'add'
+        ? { ...formData, lguName: buildingFinal, deliveryStatus: initialStatus }
+        : { ...formData, lguName: buildingFinal };
       onSubmit(submissionData);
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[99999] p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header - Fixed at top, never scrolled */}
+        <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-20">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
               <TruckIcon className="w-6 h-6 text-blue-600" />
@@ -385,6 +389,7 @@ export function AddReleaseModal({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors"
           >
@@ -392,8 +397,16 @@ export function AddReleaseModal({
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        {/* Scrollable Form Body with Enter key guard */}
+        <form
+          onSubmit={handleSubmit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+              e.preventDefault();
+            }
+          }}
+          className="p-6 space-y-6 overflow-y-auto flex-1"
+        >
           {/* Date Allocated & Delivery Status */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -461,10 +474,10 @@ export function AddReleaseModal({
               onLguDestinationChange={(name) => handleChange('lguName', name)}
               onLocationChange={handleLocationChange}
             />
-            {errors.lguName && (
+            {(errors.municipality || errors.province) && (
               <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
                 <AlertCircle className="w-3.5 h-3.5" />
-                {errors.lguName}
+                {errors.municipality || errors.province}
               </p>
             )}
           </div>

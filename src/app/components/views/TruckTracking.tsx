@@ -291,9 +291,13 @@ const toTruckRoute = (
     const cargoItems = activeAssigned.map((r) => {
       const qty = Number(r.amount_approved ?? r.amount_requested ?? 0);
       const cat = String(r.category || 'Relief goods');
-      const dest = String(r.lgu_name || r.municipality || '');
+      let destTag = String(r.municipality || r.lgu_name || '').trim();
+      while (/\s*\([^)]*\)\s*\([^)]*\)/.test(destTag)) {
+        destTag = destTag.replace(/\s*\([^)]*\)\s*(\([^)]*\))$/, '$1');
+      }
+      destTag = destTag.replace(/\s*\([^)]*\)$/, '').trim() || destTag;
       const prefix = qty > 0 ? `${qty} ${cat}` : cat;
-      return dest ? `${prefix} (${dest})` : prefix;
+      return destTag ? `${prefix} (${destTag})` : prefix;
     });
 
     if (cargoItems.length > 1) {
@@ -878,18 +882,18 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                 </span>
               </div>
 
-              <div className="rounded-lg bg-blue-50 p-3.5 space-y-2 border border-blue-100">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-500">Origin:</span>
-                  <span className="font-bold text-gray-800">{selectedTruck.origin}</span>
+              <div className="rounded-lg bg-blue-50/70 p-3.5 border border-blue-100 divide-y divide-blue-100/60 text-xs">
+                <div className="grid grid-cols-[85px_1fr] gap-2 py-1.5 items-start">
+                  <span className="text-gray-500 font-semibold">Origin:</span>
+                  <span className="font-bold text-gray-800 break-words text-left leading-relaxed">{selectedTruck.origin}</span>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-500">Destination:</span>
-                  <span className="font-bold text-blue-800">{selectedTruck.destination}</span>
+                <div className="grid grid-cols-[85px_1fr] gap-2 py-1.5 items-start">
+                  <span className="text-gray-500 font-semibold">Destination:</span>
+                  <span className="font-bold text-blue-900 break-words text-left leading-relaxed">{selectedTruck.destination}</span>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-500">Cargo:</span>
-                  <span className="font-bold text-gray-800">{selectedTruck.cargo}</span>
+                <div className="grid grid-cols-[85px_1fr] gap-2 py-1.5 items-start">
+                  <span className="text-gray-500 font-semibold">Cargo:</span>
+                  <span className="font-bold text-gray-800 break-words text-left leading-relaxed">{selectedTruck.cargo}</span>
                 </div>
               </div>
 

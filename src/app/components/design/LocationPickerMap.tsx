@@ -447,7 +447,7 @@ export function LocationPickerMap({
     const lgu = findPanayLgu(selectedMunicipality || 'Oton', selectedProvince);
     if (lgu) {
       updateAddressFields(
-        building || lgu.defaultFacility,
+        building,
         street,
         barangay,
         district,
@@ -471,7 +471,7 @@ export function LocationPickerMap({
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-1.5 text-xs font-bold text-gray-800 uppercase tracking-wide">
           <MapPin className="h-4 w-4 text-[#2500ba]" />
-          Destination LGU
+          Destination Municipality
         </label>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
@@ -492,11 +492,11 @@ export function LocationPickerMap({
           </span>
         </div>
 
-        {/* Row 1: LGU Destination (Facility / Drop-Off) & Street */}
+        {/* Row 1: Building Name & Street */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div>
             <label className="block text-[11px] font-bold text-gray-700 mb-1">
-              LGU Destination (Facility / Drop-Off) <span className="text-red-500">*</span>
+              Building Name
             </label>
             <input
               type="text"
@@ -507,9 +507,8 @@ export function LocationPickerMap({
                 onLguDestinationChange?.(val);
                 updateAddressFields(val, street, barangay, district, selectedMunicipality, selectedProvince);
               }}
-              placeholder="e.g. Municipal Evacuation Center / Gym"
+              placeholder="e.g. Municipal Evacuation Center, Gym, Hall (optional)"
               className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-              required
             />
           </div>
           <div>
@@ -603,10 +602,10 @@ export function LocationPickerMap({
         {/* Compiled Address Summary */}
         <div className="pt-1">
           <label className="block text-[10.5px] font-semibold text-gray-500 mb-0.5">
-            Compiled Destination LGU Address:
+            Compiled Destination Address:
           </label>
           <div className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 truncate select-all">
-            {destinationAddress || 'LGU Facility, Barangay, Municipality, Province'}
+            {destinationAddress || 'Building, Barangay, Municipality, Province'}
           </div>
         </div>
       </div>
@@ -621,13 +620,19 @@ export function LocationPickerMap({
 
       {/* Mini-Map Search Bar */}
       <div className="relative">
-        <form onSubmit={handleSearch} className="flex gap-1.5">
+        <div className="flex gap-1.5">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSearch();
+                }
+              }}
               placeholder={`Search landmarks in ${selectedProvince}...`}
               className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
             />
@@ -649,7 +654,7 @@ export function LocationPickerMap({
             <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
             <span className="hidden sm:inline">Center</span>
           </button>
-        </form>
+        </div>
 
         {/* Search Results Dropdown */}
         {showResults && searchResults.length > 0 && (
