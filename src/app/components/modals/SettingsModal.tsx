@@ -142,6 +142,38 @@ export function SettingsModal({
   });
   const [dbLgus, setDbLgus] = useState<LguRecord[]>([]);
 
+  // Multi-select states for deletion in Master Data
+  const [selectedKitIds, setSelectedKitIds] = useState<string[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<string[]>([]);
+
+  // Add Item states
+  const [isAddingKit, setIsAddingKit] = useState(false);
+  const [newKit, setNewKit] = useState<{ name: string; category: 'Food Item' | 'Non-Food Item'; unitType: string; description: string }>({
+    name: '',
+    category: 'Food Item',
+    unitType: 'packs',
+    description: ''
+  });
+
+  const [isAddingSource, setIsAddingSource] = useState(false);
+  const [newSource, setNewSource] = useState<{ name: string; facilityType: SupplySourceItem['facilityType']; region: string; location: string }>({
+    name: '',
+    facilityType: 'Regional Logistics Hub',
+    region: 'Region VI (Western Visayas)',
+    location: ''
+  });
+
+  const [isAddingWarehouse, setIsAddingWarehouse] = useState(false);
+  const [newWarehouse, setNewWarehouse] = useState<{ name: string; province: string; municipality: string; capacityPacks: number; latitude: number; longitude: number }>({
+    name: '',
+    province: 'Iloilo',
+    municipality: '',
+    capacityPacks: 50000,
+    latitude: 10.7,
+    longitude: 122.5
+  });
+
   // Camera & File upload refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -349,6 +381,153 @@ export function SettingsModal({
     navigator.clipboard.writeText(activeWallet);
     setCopiedWallet(true);
     setTimeout(() => setCopiedWallet(false), 2000);
+  };
+
+  // Master Data storage helpers
+  const saveKitTypes = (updated: KitTypeItem[]) => {
+    setKitTypes(updated);
+    try { localStorage.setItem('dswd_custom_kit_types', JSON.stringify(updated)); } catch {}
+  };
+
+  const saveSources = (updated: SupplySourceItem[]) => {
+    setSources(updated);
+    try { localStorage.setItem('dswd_custom_sources', JSON.stringify(updated)); } catch {}
+  };
+
+  const saveWarehouses = (updated: WarehouseFacilityItem[]) => {
+    setWarehouses(updated);
+    try { localStorage.setItem('dswd_custom_warehouses', JSON.stringify(updated)); } catch {}
+  };
+
+  // Kit Actions
+  const handleAddKit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newKit.name.trim()) return;
+    const item: KitTypeItem = {
+      id: `kit-${Date.now()}`,
+      name: newKit.name.trim(),
+      category: newKit.category,
+      unitType: newKit.unitType.trim() || 'packs',
+      description: newKit.description.trim() || 'Custom relief kit package'
+    };
+    saveKitTypes([item, ...kitTypes]);
+    setNewKit({ name: '', category: 'Food Item', unitType: 'packs', description: '' });
+    setIsAddingKit(false);
+  };
+
+  const handleDeleteSelectedKits = () => {
+    if (selectedKitIds.length === 0) return;
+    const updated = kitTypes.filter(k => !selectedKitIds.includes(k.id));
+    saveKitTypes(updated);
+    setSelectedKitIds([]);
+  };
+
+  const handleDeleteSingleKit = (id: string) => {
+    const updated = kitTypes.filter(k => k.id !== id);
+    saveKitTypes(updated);
+    setSelectedKitIds(prev => prev.filter(kId => kId !== id));
+  };
+
+  const handleToggleSelectKit = (id: string) => {
+    setSelectedKitIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllKits = () => {
+    if (selectedKitIds.length === kitTypes.length) {
+      setSelectedKitIds([]);
+    } else {
+      setSelectedKitIds(kitTypes.map(k => k.id));
+    }
+  };
+
+  // Source Actions
+  const handleAddSource = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSource.name.trim()) return;
+    const item: SupplySourceItem = {
+      id: `src-${Date.now()}`,
+      name: newSource.name.trim(),
+      facilityType: newSource.facilityType,
+      region: newSource.region.trim() || 'Region VI (Western Visayas)',
+      location: newSource.location.trim() || 'Regional Logistics Hub'
+    };
+    saveSources([item, ...sources]);
+    setNewSource({ name: '', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: '' });
+    setIsAddingSource(false);
+  };
+
+  const handleDeleteSelectedSources = () => {
+    if (selectedSourceIds.length === 0) return;
+    const updated = sources.filter(s => !selectedSourceIds.includes(s.id));
+    saveSources(updated);
+    setSelectedSourceIds([]);
+  };
+
+  const handleDeleteSingleSource = (id: string) => {
+    const updated = sources.filter(s => s.id !== id);
+    saveSources(updated);
+    setSelectedSourceIds(prev => prev.filter(sId => sId !== id));
+  };
+
+  const handleToggleSelectSource = (id: string) => {
+    setSelectedSourceIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllSources = () => {
+    if (selectedSourceIds.length === sources.length) {
+      setSelectedSourceIds([]);
+    } else {
+      setSelectedSourceIds(sources.map(s => s.id));
+    }
+  };
+
+  // Warehouse Actions
+  const handleAddWarehouse = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWarehouse.name.trim()) return;
+    const item: WarehouseFacilityItem = {
+      id: `wh-${Date.now()}`,
+      name: newWarehouse.name.trim(),
+      province: newWarehouse.province,
+      municipality: newWarehouse.municipality.trim() || 'Regional',
+      capacityPacks: Number(newWarehouse.capacityPacks) || 50000,
+      latitude: Number(newWarehouse.latitude) || 10.7,
+      longitude: Number(newWarehouse.longitude) || 122.5
+    };
+    saveWarehouses([item, ...warehouses]);
+    setNewWarehouse({ name: '', province: 'Iloilo', municipality: '', capacityPacks: 50000, latitude: 10.7, longitude: 122.5 });
+    setIsAddingWarehouse(false);
+  };
+
+  const handleDeleteSelectedWarehouses = () => {
+    if (selectedWarehouseIds.length === 0) return;
+    const updated = warehouses.filter(w => !selectedWarehouseIds.includes(w.id));
+    saveWarehouses(updated);
+    setSelectedWarehouseIds([]);
+  };
+
+  const handleDeleteSingleWarehouse = (id: string) => {
+    const updated = warehouses.filter(w => w.id !== id);
+    saveWarehouses(updated);
+    setSelectedWarehouseIds(prev => prev.filter(wId => wId !== id));
+  };
+
+  const handleToggleSelectWarehouse = (id: string) => {
+    setSelectedWarehouseIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllWarehouses = () => {
+    if (selectedWarehouseIds.length === warehouses.length) {
+      setSelectedWarehouseIds([]);
+    } else {
+      setSelectedWarehouseIds(warehouses.map(w => w.id));
+    }
   };
 
   if (!isOpen) return null;
@@ -807,26 +986,168 @@ export function SettingsModal({
               {/* Sub-Tab: Kits */}
               {dataSubTab === 'kits' && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 font-semibold">Active Relief Kit Packages ({kitTypes.length})</p>
+                  {/* Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={kitTypes.length > 0 && selectedKitIds.length === kitTypes.length}
+                        onChange={handleToggleSelectAllKits}
+                        className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">
+                        Select All ({selectedKitIds.length}/{kitTypes.length})
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {selectedKitIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteSelectedKits}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Selected ({selectedKitIds.length})</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingKit(!isAddingKit)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isAddingKit ? 'Cancel' : 'Add Kit Type'}</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {kitTypes.map(kit => (
-                      <div key={kit.id} className="p-3 rounded-xl border border-gray-200 bg-gray-50/60 flex items-center justify-between text-xs">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-gray-900">{kit.name}</span>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
-                              {kit.unitType}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-500 mt-0.5">{kit.description}</p>
-                        </div>
-                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          Active
-                        </span>
+
+                  {/* Inline Add Kit Form */}
+                  {isAddingKit && (
+                    <form onSubmit={handleAddKit} className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-blue-900">Add New Relief Kit Package</p>
+                        <button type="button" onClick={() => setIsAddingKit(false)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
-                    ))}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Kit / Item Name *</label>
+                          <input
+                            type="text"
+                            value={newKit.name}
+                            onChange={e => setNewKit(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="e.g. Hygiene Kit (Family)"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Category *</label>
+                          <select
+                            value={newKit.category}
+                            onChange={e => setNewKit(prev => ({ ...prev, category: e.target.value as 'Food Item' | 'Non-Food Item' }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                          >
+                            <option value="Food Item">Food Item (FNI)</option>
+                            <option value="Non-Food Item">Non-Food Item (NFI)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Unit of Measure *</label>
+                          <input
+                            type="text"
+                            value={newKit.unitType}
+                            onChange={e => setNewKit(prev => ({ ...prev, unitType: e.target.value }))}
+                            placeholder="e.g. packs, kits, sets, boxes"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Description</label>
+                          <input
+                            type="text"
+                            value={newKit.description}
+                            onChange={e => setNewKit(prev => ({ ...prev, description: e.target.value }))}
+                            placeholder="Package description or standard contents"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingKit(false)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          Save Kit Type
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Kit Items List */}
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {kitTypes.map(kit => {
+                      const isSelected = selectedKitIds.includes(kit.id);
+                      return (
+                        <div
+                          key={kit.id}
+                          className={`p-3 rounded-xl border transition flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'border-blue-300 bg-blue-50/70 shadow-xs'
+                              : 'border-gray-200 bg-gray-50/60 hover:bg-gray-100/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectKit(kit.id)}
+                              className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-900">{kit.name}</span>
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                                  {kit.unitType}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-gray-200 text-gray-700">
+                                  {kit.category}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-0.5">{kit.description}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              Active
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSingleKit(kit.id)}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              title="Delete Kit"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {kitTypes.length === 0 && (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                        No kit types defined. Click "+ Add Kit Type" to create one.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -834,20 +1155,164 @@ export function SettingsModal({
               {/* Sub-Tab: Sources */}
               {dataSubTab === 'sources' && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-500 font-semibold">National Distribution Centers ({sources.length})</p>
-                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {sources.map(src => (
-                      <div key={src.id} className="p-3 rounded-xl border border-gray-200 bg-gray-50/60 flex items-center justify-between text-xs">
-                        <div>
-                          <p className="font-bold text-gray-900">{src.name}</p>
-                          <p className="text-[11px] text-gray-500">{src.facilityType} &middot; {src.region}</p>
-                          <p className="text-[10px] text-gray-400">{src.location}</p>
-                        </div>
-                        <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                          Source Hub
-                        </span>
+                  {/* Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={sources.length > 0 && selectedSourceIds.length === sources.length}
+                        onChange={handleToggleSelectAllSources}
+                        className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">
+                        Select All ({selectedSourceIds.length}/{sources.length})
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {selectedSourceIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteSelectedSources}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Selected ({selectedSourceIds.length})</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingSource(!isAddingSource)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isAddingSource ? 'Cancel' : 'Add Source'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inline Add Source Form */}
+                  {isAddingSource && (
+                    <form onSubmit={handleAddSource} className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-blue-900">Add Supply Distribution Source</p>
+                        <button type="button" onClick={() => setIsAddingSource(false)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
-                    ))}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Facility Name *</label>
+                          <input
+                            type="text"
+                            value={newSource.name}
+                            onChange={e => setNewSource(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="e.g. MDRRMO Logistics Hub"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Facility Type *</label>
+                          <select
+                            value={newSource.facilityType}
+                            onChange={e => setNewSource(prev => ({ ...prev, facilityType: e.target.value as any }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                          >
+                            <option value="National Resource Center">National Resource Center</option>
+                            <option value="Regional Logistics Hub">Regional Logistics Hub</option>
+                            <option value="Staging Warehouse">Staging Warehouse</option>
+                            <option value="External Partner">External Partner</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Region</label>
+                          <input
+                            type="text"
+                            value={newSource.region}
+                            onChange={e => setNewSource(prev => ({ ...prev, region: e.target.value }))}
+                            placeholder="e.g. Region VI (Western Visayas)"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Location / Address</label>
+                          <input
+                            type="text"
+                            value={newSource.location}
+                            onChange={e => setNewSource(prev => ({ ...prev, location: e.target.value }))}
+                            placeholder="e.g. Fort San Pedro, Iloilo City"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingSource(false)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          Save Source
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Sources List */}
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {sources.map(src => {
+                      const isSelected = selectedSourceIds.includes(src.id);
+                      return (
+                        <div
+                          key={src.id}
+                          className={`p-3 rounded-xl border transition flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'border-blue-300 bg-blue-50/70 shadow-xs'
+                              : 'border-gray-200 bg-gray-50/60 hover:bg-gray-100/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectSource(src.id)}
+                              className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-bold text-gray-900">{src.name}</p>
+                                <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                                  {src.facilityType}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-gray-500">{src.region}</p>
+                              <p className="text-[10px] text-gray-400">{src.location}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSingleSource(src.id)}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              title="Delete Source"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {sources.length === 0 && (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                        No supply sources defined. Click "+ Add Source" to create one.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -855,20 +1320,183 @@ export function SettingsModal({
               {/* Sub-Tab: Warehouses */}
               {dataSubTab === 'warehouses' && (
                 <div className="space-y-3">
-                  <p className="text-xs text-gray-500 font-semibold">Regional Storage Warehouses ({warehouses.length})</p>
-                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {warehouses.map(wh => (
-                      <div key={wh.id} className="p-3 rounded-xl border border-gray-200 bg-gray-50/60 flex items-center justify-between text-xs">
-                        <div>
-                          <p className="font-bold text-gray-900">{wh.name}</p>
-                          <p className="text-[11px] text-gray-500">{wh.municipality}, {wh.province}</p>
-                          <p className="text-[10px] text-gray-400">Capacity: {wh.capacityPacks.toLocaleString()} packs &middot; ({wh.latitude}, {wh.longitude})</p>
-                        </div>
-                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          Operational
-                        </span>
+                  {/* Toolbar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={warehouses.length > 0 && selectedWarehouseIds.length === warehouses.length}
+                        onChange={handleToggleSelectAllWarehouses}
+                        className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-xs font-semibold text-gray-700">
+                        Select All ({selectedWarehouseIds.length}/{warehouses.length})
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      {selectedWarehouseIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteSelectedWarehouses}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete Selected ({selectedWarehouseIds.length})</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingWarehouse(!isAddingWarehouse)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{isAddingWarehouse ? 'Cancel' : 'Add Warehouse'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inline Add Warehouse Form */}
+                  {isAddingWarehouse && (
+                    <form onSubmit={handleAddWarehouse} className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-3 animate-in fade-in duration-150">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-blue-900">Add Storage Warehouse Facility</p>
+                        <button type="button" onClick={() => setIsAddingWarehouse(false)} className="text-gray-400 hover:text-gray-600">
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
-                    ))}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Warehouse Name *</label>
+                          <input
+                            type="text"
+                            value={newWarehouse.name}
+                            onChange={e => setNewWarehouse(prev => ({ ...prev, name: e.target.value }))}
+                            placeholder="e.g. Roxas Sub-Regional Depot"
+                            required
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Province *</label>
+                          <select
+                            value={newWarehouse.province}
+                            onChange={e => setNewWarehouse(prev => ({ ...prev, province: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                          >
+                            {PANAY_PROVINCES.map(prov => (
+                              <option key={prov} value={prov}>{prov}</option>
+                            ))}
+                            <option value="Guimaras">Guimaras</option>
+                            <option value="Others">Others</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Municipality / City</label>
+                          <input
+                            type="text"
+                            value={newWarehouse.municipality}
+                            onChange={e => setNewWarehouse(prev => ({ ...prev, municipality: e.target.value }))}
+                            placeholder="e.g. Roxas City"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Capacity (Packs)</label>
+                          <input
+                            type="number"
+                            value={newWarehouse.capacityPacks}
+                            onChange={e => setNewWarehouse(prev => ({ ...prev, capacityPacks: Number(e.target.value) }))}
+                            min="100"
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Latitude</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={newWarehouse.latitude}
+                            onChange={e => setNewWarehouse(prev => ({ ...prev, latitude: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-700 mb-1">Longitude</label>
+                          <input
+                            type="number"
+                            step="0.0001"
+                            value={newWarehouse.longitude}
+                            onChange={e => setNewWarehouse(prev => ({ ...prev, longitude: Number(e.target.value) }))}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingWarehouse(false)}
+                          className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                        >
+                          Save Warehouse
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Warehouses List */}
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {warehouses.map(wh => {
+                      const isSelected = selectedWarehouseIds.includes(wh.id);
+                      return (
+                        <div
+                          key={wh.id}
+                          className={`p-3 rounded-xl border transition flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'border-blue-300 bg-blue-50/70 shadow-xs'
+                              : 'border-gray-200 bg-gray-50/60 hover:bg-gray-100/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectWarehouse(wh.id)}
+                              className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+                            />
+                            <div>
+                              <p className="font-bold text-gray-900">{wh.name}</p>
+                              <p className="text-[11px] text-gray-500">{wh.municipality}, {wh.province}</p>
+                              <p className="text-[10px] text-gray-400">Capacity: {wh.capacityPacks.toLocaleString()} packs &middot; ({wh.latitude}, {wh.longitude})</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              Operational
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSingleWarehouse(wh.id)}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              title="Delete Warehouse"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {warehouses.length === 0 && (
+                      <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                        No warehouses defined. Click "+ Add Warehouse" to create one.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

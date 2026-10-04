@@ -25,24 +25,9 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
   ];
 
   return (
-    <div className="w-64 bg-white h-full flex flex-col border-r border-gray-200 shadow-sm">
-      {/* Logo/Header */}
-      <div className="p-5 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <img 
-            src="https://upload.wikimedia.org/wikipedia/commons/7/76/Seal_of_the_Department_of_Social_Welfare_and_Development.svg" 
-            alt="DSWD Seal" 
-            className="h-10 w-auto" 
-          />
-          <div>
-            <h1 className="text-sm font-bold text-gray-900 leading-tight">DSWD Relief System</h1>
-            <p className="text-[11px] text-gray-500 font-medium">Logistics & Tracking</p>
-          </div>
-        </div>
-      </div>
-
+    <div className="w-64 bg-white h-full flex flex-col border-r border-gray-200 shadow-sm select-none">
       {/* Navigation */}
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 overflow-y-auto">
         <nav className="space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
