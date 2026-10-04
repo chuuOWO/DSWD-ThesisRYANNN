@@ -170,8 +170,13 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-lg p-6 border border-gray-200 shadow-sm">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">LGU Priority List</h3>
-          <div className="space-y-3">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-gray-900">LGU Priority List</h3>
+            <span className="text-xs font-medium text-gray-500">
+              Top priorities &middot; Scroll to view all
+            </span>
+          </div>
+          <div className="space-y-3 max-h-[460px] overflow-y-auto pr-2">
             {lguPriorityReports.map(report => (
               <div key={report.id} className="flex items-center justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
                 <div>
