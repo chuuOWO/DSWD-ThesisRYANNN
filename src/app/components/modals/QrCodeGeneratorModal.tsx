@@ -211,7 +211,7 @@ export function QrCodeGeneratorModal({
             <h2>Delivery Receipt QR Code Generator</h2>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            Generates a scannable manifest QR code directly compatible with the <strong>Receiver / Trucker App</strong>. It provides immediate manifest details on scan, with a dedicated slot reserved for blockchain smart contracts.
+            Generates a scannable manifest QR code directly compatible with the <strong>Receiver App</strong>. It provides immediate manifest details on scan, with a dedicated slot reserved for blockchain smart contracts.
           </p>
         </div>
 

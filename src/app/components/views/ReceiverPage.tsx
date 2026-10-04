@@ -109,8 +109,8 @@ const createDestinationPinIcon = (isSelectedOrLabel?: boolean | string, maybeSel
   });
 };
 
-const createDriverVehicleIcon = (accuracy?: number | null) => L.divIcon({
-  className: 'driver-vehicle-puck',
+const createReceiverVehicleIcon = (accuracy?: number | null) => L.divIcon({
+  className: 'receiver-vehicle-puck',
   html: `
     <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer; transform: translate(-50%, -100%);">
       <div style="position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 44px; height: 44px; border-radius: 50%; background: #2500ba; opacity: 0.22; animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>
@@ -355,7 +355,7 @@ function MapController({
     }
   }, [map, destination?.[0], destination?.[1], center?.[0], center?.[1], fitRouteTrigger]);
 
-  // 2. Recenter on driver when recenter button is clicked
+  // 2. Recenter on receiver when recenter button is clicked
   useEffect(() => {
     if (!map || recenterKey === 0 || !center || !isValidCoordinate(center)) return;
     try {
@@ -363,7 +363,7 @@ function MapController({
     } catch {}
   }, [recenterKey, center, map]);
 
-  // 3. Smooth follow when driver moves > 35m
+  // 3. Smooth follow when receiver moves > 35m
   useEffect(() => {
     if (!map || !center || !isValidCoordinate(center)) return;
     if (isInitialMount.current) {
@@ -525,7 +525,7 @@ const getReceiverIdentifier = (profile?: UserProfile | null) => {
   if (profile?.fullName && profile.fullName.trim()) return profile.fullName.trim().replace(/\s+/g, '-').toUpperCase();
   if (profile?.email && profile.email.trim()) return profile.email.split('@')[0].toUpperCase();
   if (profile?.id) return `RCVR-${profile.id.slice(0, 6).toUpperCase()}`;
-  return 'DRIVER';
+  return 'RECEIVER';
 };
 
 interface ErrorBoundaryProps {
@@ -1573,12 +1573,12 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
               {currentPosition && isValidCoordinate(currentPosition) && (
                 <Marker
                   position={currentPosition}
-                  icon={createDriverVehicleIcon(location?.accuracy)}
+                  icon={createReceiverVehicleIcon(location?.accuracy)}
                 >
                   <Popup>
                     <div className="text-center font-sans p-1">
                       <p className="text-[10px] font-extrabold text-[#2500ba]">
-                        {isInTransit ? `In Custody (${receiverId})` : 'Driver Location'}
+                        {isInTransit ? `In Custody (${receiverId})` : 'Receiver Location'}
                       </p>
                       <p className="text-[9px] text-gray-500 mt-0.5">
                         {currentPosition[0].toFixed(6)}, {currentPosition[1].toFixed(6)}
@@ -1755,7 +1755,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
               type="button"
               onClick={() => setRecenterTrigger((prev) => prev + 1)}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-[#2500ba] shadow-lg border border-gray-200 hover:bg-blue-50 active:scale-95 transition"
-              title="Recenter Map on Driver"
+              title="Recenter Map on Receiver"
               aria-label="Recenter Map"
             >
               <LocateFixed size={18} />

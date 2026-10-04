@@ -38,6 +38,7 @@ interface TruckRoute {
   id: string;
   truckName: string;
   driver: string;
+  driverName?: string;
   status: TruckStatus;
   origin: string;
   destination: string;
@@ -183,8 +184,15 @@ const toTruckRoute = (
   releases: ReceiverReleaseRecord[],
   outgoingReleasesList: OutgoingRelease[],
   priorityMap: Record<string, number> = {},
-  heldMap: Record<string, boolean> = {}
+  heldMap: Record<string, boolean> = {},
+  profiles: UserProfile[] = []
 ): TruckRoute => {
+  const matchingProfile = profiles.find((p) =>
+    (p.truckId && p.truckId.trim().toUpperCase() === location.truck_id.trim().toUpperCase()) ||
+    (location.wallet_address && p.walletAddress && p.walletAddress.trim().toLowerCase() === location.wallet_address.trim().toLowerCase())
+  );
+  const driverName = matchingProfile?.fullName;
+
   const uniqueMap = new Map<string, ReceiverReleaseRecord>();
   // 1. Fresh releases from getReceiverReleases (direct query from outgoing_requests)
   for (const rel of releases) {
@@ -346,6 +354,7 @@ const toTruckRoute = (
     id: location.truck_id,
     truckName: location.truck_id,
     driver: shortWallet(location.wallet_address),
+    driverName,
     status,
     origin,
     destination,
@@ -586,7 +595,7 @@ function RouteMap({
                     {route.status}
                   </span>
                 </div>
-                <p className="text-xs text-gray-600 mt-0.5">{route.driver}</p>
+                <p className="text-xs text-gray-600 mt-0.5">{route.driverName || route.driver}</p>
                 <p className="mt-1.5 text-xs text-gray-700">Destination: <strong className="text-gray-900">{route.destination}</strong></p>
                 <p className="mt-1 text-xs text-gray-700">Cargo: <span className="font-medium">{route.cargo}</span></p>
                 <p className="mt-1 font-mono text-[10px] text-gray-500">
@@ -614,7 +623,7 @@ function RouteMap({
           }}
           className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition"
         >
-          Fit Fleet
+          Fit All
         </button>
         <button
           onClick={() => {
@@ -752,8 +761,8 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
     .filter(isActiveReceiverLocation)
     .filter((loc) => !isLguReceiverId(loc.truck_id))
     .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
-    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages)),
-    [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages]);
+    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles)),
+    [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles]);
 
   useEffect(() => {
     if (!liveTruckRoutes.length) {
@@ -813,21 +822,9 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Trucking & Live GPS Tracking</h1>
-          <p className="text-sm text-gray-500 mt-1">Real-time GPS stream of active delivery trucks and receivers across Iloilo.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-bold text-emerald-700">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>{liveTruckRoutes.length} Active Live GPS</span>
-          </div>
-          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3.5 py-1.5 rounded-full text-xs font-bold text-blue-700">
-            <Truck className="w-3.5 h-3.5" />
-            <span>{activeReleases.length} In-Transit Shipments</span>
-          </div>
-        </div>
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <h1 className="text-2xl font-bold text-gray-900">Live Receiver Tracking</h1>
+        <p className="text-sm text-gray-500 mt-1">Real-time GPS stream of active receivers across Iloilo.</p>
       </div>
 
       {!selectedTruck ? (
@@ -883,12 +880,30 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
           {/* Left Column: Truck details and checkpoints */}
           <div className="space-y-5">
             <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-blue-900">{selectedTruck.truckName}</h2>
-                  <p className="text-xs font-semibold text-gray-500">{selectedTruck.driver || 'Active Receiver'}</p>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                    Receiver Code
+                  </label>
+                  <select
+                    value={selectedTruckId}
+                    onChange={(e) => {
+                      setSelectedTruckId(e.target.value);
+                      const target = liveTruckRoutes.find(t => t.id === e.target.value);
+                      if (target && mapRef.current) {
+                        mapRef.current.setView([target.position[0], target.position[1]], 14, { animate: true });
+                      }
+                    }}
+                    className="w-full text-sm font-bold text-blue-900 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2500ba] cursor-pointer"
+                  >
+                    {liveTruckRoutes.map((truck) => (
+                      <option key={truck.id} value={truck.id}>
+                        {truck.truckName} {truck.driverName ? `(${truck.driverName})` : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
+                <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-100 text-blue-800 flex-shrink-0 self-end mb-1">
                   {selectedTruck.status}
                 </span>
               </div>
@@ -905,6 +920,10 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                 <div className="grid grid-cols-[85px_1fr] gap-2 py-1.5 items-start">
                   <span className="text-gray-500 font-semibold">Cargo:</span>
                   <span className="font-bold text-gray-800 break-words text-left leading-relaxed">{selectedTruck.cargo}</span>
+                </div>
+                <div className="grid grid-cols-[85px_1fr] gap-2 py-1.5 items-start">
+                  <span className="text-gray-500 font-semibold">Receiver:</span>
+                  <span className="font-bold text-blue-900 break-words text-left leading-relaxed">{selectedTruck.driverName || selectedTruck.driver || 'Assigned Receiver'}</span>
                 </div>
               </div>
 
@@ -1050,59 +1069,6 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                 </div>
               </div>
             </div>
-
-            {/* Dispatched Fleet Directory (Replaces Delivery Checkpoints) */}
-            <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-[#2500ba]" />
-                  Dispatched Fleet Directory ({liveTruckRoutes.length})
-                </h3>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  Live Stream
-                </span>
-              </div>
-
-              <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                {liveTruckRoutes.map((route) => {
-                  const isSelected = selectedTruckId === route.id;
-                  return (
-                    <button
-                      key={route.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedTruckId(route.id);
-                        mapRef.current?.setView([route.position[0], route.position[1]], 14, { animate: true });
-                      }}
-                      className={`w-full text-left p-3 rounded-xl border transition-all ${
-                        isSelected
-                          ? 'border-[#2500ba] bg-blue-50/80 shadow-sm ring-1 ring-[#2500ba]'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/70 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-2.5 h-2.5 rounded-full ${isSelected ? 'bg-[#2500ba] animate-pulse' : 'bg-emerald-500 animate-pulse'}`} />
-                          <span className="text-xs font-bold text-gray-900">{route.truckName}</span>
-                        </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                          route.status === 'In Transit' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-                        }`}>
-                          {route.status}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-600">
-                        <span className="truncate max-w-[170px]">{route.driver || 'Active Receiver'}</span>
-                        <span className="font-bold text-[#2500ba] font-mono">{route.progress}%</span>
-                      </div>
-                      <p className="mt-1 text-[10px] text-gray-500 truncate">
-                        To: {route.destination} &bull; {route.assignedPackagesList.length} pkg(s)
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </div>
 
           {/* Right Column: Full Interactive Road-Snapped Map */}
@@ -1110,7 +1076,7 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
             <div className="p-4 border-b border-gray-200 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-blue-600" />
-                <span className="text-sm font-bold text-gray-800">Live Road Map: {selectedTruck.origin} → {selectedTruck.destination}</span>
+                <span className="text-sm font-bold text-gray-800">Map</span>
               </div>
               <span className="text-xs text-gray-500 font-mono">Updated: {selectedTruck.updatedAt}</span>
             </div>

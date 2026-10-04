@@ -257,7 +257,7 @@ export function ProfileSettingsModal({
   const getRoleLabel = () => {
     if (profile.role === 'dswd_admin') return 'DSWD Administrator';
     if (profile.lguName) return `LGU Receiver (${profile.lguName})`;
-    if (profile.truckId) return `Truck Driver (${profile.truckId})`;
+    if (profile.truckId) return `Field Receiver (${profile.truckId})`;
     return 'Authorized Receiver';
   };
 

@@ -270,7 +270,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
 
   const currentRelease = upcomingReleases[selectedIndex] || upcomingReleases[0] || null;
 
-  // Status check: Has the delivery driver/trucker scanned the package for pickup yet?
+  // Status check: Has the assigned receiver scanned the package for pickup yet?
   const isPickedUp = useMemo(() => {
     if (!currentRelease) return false;
     return currentRelease.deliveryStatus === 'In Transit' || currentRelease.deliveryStatus === 'Delivered';
@@ -359,7 +359,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
     return null;
   }, [currentRelease, lguInfo]);
 
-  // Real OSRM Road Route Geometry: Driver Truck -> LGU Destination Pin
+  // Real OSRM Road Route Geometry: Assigned Receiver -> LGU Destination Pin
   const [roadRoute, setRoadRoute] = useState<[number, number][]>([]);
 
   useEffect(() => {
@@ -547,13 +547,13 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
       }
 
       // STRICT CHAIN OF CUSTODY VALIDATION:
-      // Manifest MUST pass from Central Admin -> Assigned Truck Driver (Receiver) -> LGU Receiver.
+      // Manifest MUST pass from Central Admin -> Assigned Receiver -> LGU Receiver.
       // Direct Admin -> LGU scan is strictly prohibited.
       if (matchingRelease) {
         const allowedTransitStatuses = ['In Transit', 'Delivered'];
         if (!allowedTransitStatuses.includes(matchingRelease.deliveryStatus)) {
           throw new Error(
-            `Chain of Custody Violation: Shipment ${canonicalDrNumber} is currently "${matchingRelease.deliveryStatus}". It must be picked up and scanned into transit by the designated truck driver (receiver) before the LGU can accept it.`
+            `Chain of Custody Violation: Shipment ${canonicalDrNumber} is currently "${matchingRelease.deliveryStatus}". It must be picked up and scanned into transit by the designated receiver before the LGU can accept it.`
           );
         }
       }
@@ -729,12 +729,12 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
               <div>
                 <p className="font-extrabold text-[11px] leading-tight">Still in Warehouse</p>
                 <p className="text-[10px] text-amber-100 leading-tight">
-                  Package is at {originWarehouseName}, preparing to be scanned by the delivery driver.
+                  Package is at {originWarehouseName}, preparing to be scanned by the assigned receiver.
                 </p>
               </div>
             </div>
             <span className="text-[8.5px] bg-amber-700/90 text-white px-2 py-0.5 rounded font-extrabold uppercase tracking-wide flex-shrink-0 ml-2">
-              Awaiting Driver Scan
+              Awaiting Receiver Scan
             </span>
           </div>
         )}
@@ -923,7 +923,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
                     {isPickedUp ? (
                       <>Dispatched from {originWarehouseName} &rarr; Destination: <span className="font-bold text-gray-800">{effectiveLguName || 'Your Terminal'}{lguFacilityName ? ` (${lguFacilityName})` : ''}</span></>
                     ) : (
-                      <>At {originWarehouseName} (Awaiting driver pickup scan) &rarr; Destination: <span className="font-bold text-gray-800">{effectiveLguName || 'Your Terminal'}</span></>
+                      <>At {originWarehouseName} (Awaiting receiver pickup scan) &rarr; Destination: <span className="font-bold text-gray-800">{effectiveLguName || 'Your Terminal'}</span></>
                     )}
                   </p>
                 </div>

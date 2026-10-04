@@ -404,7 +404,7 @@ export function AuthPage() {
                         required
                         value={jobPosition}
                         onChange={(e) => setJobPosition(sanitizeTextOnly(e.target.value))}
-                        placeholder="e.g. Relief Driver / Officer"
+                        placeholder="e.g. Field Receiver / Officer"
                         className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                       />
                     </div>
@@ -467,7 +467,7 @@ export function AuthPage() {
                   {/* Work ID Photo Upload */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Official Work ID / Driver&apos;s License <span className="text-red-500">*</span>
+                      Official Work ID / Government ID <span className="text-red-500">*</span>
                     </label>
                     {workIdUrl ? (
                       <div className="flex items-center gap-3 p-2 rounded-2xl border border-emerald-300 bg-emerald-50/70">
@@ -500,7 +500,7 @@ export function AuthPage() {
                     ) : (
                       <label className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-indigo-200 hover:border-[#10069f] bg-slate-50/60 hover:bg-indigo-50/30 transition cursor-pointer text-xs text-[#10069f] font-semibold">
                         <Upload className="w-4 h-4 text-[#10069f]" />
-                        <span>Upload Work ID / Driver&apos;s License</span>
+                        <span>Upload Work ID / Government ID</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -979,7 +979,7 @@ export function AuthPage() {
                     required
                     value={jobPosition}
                     onChange={(e) => setJobPosition(sanitizeTextOnly(e.target.value))}
-                    placeholder="e.g. Relief Truck Driver / Dispatcher"
+                    placeholder="e.g. Field Receiver / Dispatcher"
                     className="w-full px-3.5 py-2.5 rounded-2xl border border-indigo-200/90 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#10069f] focus:ring-2 focus:ring-indigo-100 transition bg-white"
                   />
                 </div>

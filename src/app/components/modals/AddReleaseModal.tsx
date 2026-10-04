@@ -448,7 +448,7 @@ export function AddReleaseModal({
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    Locked upon creation. Status updates automatically via workflow (Approval -&gt; Driver Pickup -&gt; LGU Acceptance).
+                    Locked upon creation. Status updates automatically via workflow (Approval -&gt; Receiver Pickup -&gt; LGU Acceptance).
                   </p>
                 </div>
               ) : (
@@ -764,7 +764,7 @@ export function AddReleaseModal({
               <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <TruckIcon className="w-4 h-4 text-[#2500ba]" />
-                  <span>DSWD Relief Truck Driver</span>
+                  <span>DSWD Assigned Receiver</span>
                 </div>
                 <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-100 text-[#2500ba]">
                   Truck Only

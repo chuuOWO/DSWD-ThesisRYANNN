@@ -217,7 +217,7 @@ function MunicipalitySearchPicker({
           >
             <span className="flex items-center gap-1.5">
               <Truck className="w-3.5 h-3.5" />
-              Field Receiver / Driver Mode (No LGU)
+              Field Receiver Mode (No LGU)
             </span>
             {!value && <Check className="w-3.5 h-3.5 text-purple-600" />}
           </button>
@@ -489,10 +489,10 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
     const lguReceivers = verifiedProfiles.filter(
       (p) => p.role === 'receiver' && extractCleanMunicipality(p.lguName)
     ).length;
-    const drivers = verifiedProfiles.filter(
+    const fieldReceivers = verifiedProfiles.filter(
       (p) => p.role === 'receiver' && !extractCleanMunicipality(p.lguName)
     ).length;
-    return { total, pending, admins, lguReceivers, drivers };
+    return { total, pending, admins, lguReceivers, fieldReceivers };
   }, [profiles]);
 
   const filteredProfiles = useMemo(() => {
@@ -626,8 +626,8 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
             <Truck className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-xl font-black text-purple-900">{stats.drivers}</p>
-            <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wider">Relief Drivers</p>
+            <p className="text-xl font-black text-purple-900">{stats.fieldReceivers}</p>
+            <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wider">Receivers</p>
           </div>
         </div>
 
@@ -665,7 +665,7 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
             </button>
           </div>
           <p className="text-[11px] text-blue-200/80">
-            Authorize receiver and driver wallets to sign physical cargo handovers and update custody tokens on Ethereum Sepolia.
+            Authorize receiver wallets to sign physical cargo handovers and update custody tokens on Ethereum Sepolia.
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <input
@@ -746,7 +746,7 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                 roleFilter === 'receiver' ? 'bg-white text-blue-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              Receivers / Drivers
+              Receivers
             </button>
           </div>
 
@@ -907,12 +907,12 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                             ) : (
                               <>
                                 <Truck className="w-3 h-3 text-purple-600" />
-                                Relief Driver
+                                Receiver
                               </>
                             )}
                           </span>
                           <p className="text-[11px] text-gray-600 font-medium">
-                            {profile.jobPosition || (isLgu ? `${cleanLgu} Focal` : profile.truckId ? `Truck ${profile.truckId}` : 'Regional Staff')}
+                            {profile.jobPosition === 'Trucker' ? 'Receiver' : (profile.jobPosition || (isLgu ? `${cleanLgu} Focal` : profile.truckId ? `Code: ${profile.truckId}` : 'Regional Staff'))}
                           </p>
                         </div>
                       </td>
@@ -1176,7 +1176,7 @@ export function AccountManagement({ currentAdminEmail }: AccountManagementProps)
                   Assigned Panay LGU Municipality
                 </label>
                 <p className="text-[11px] text-indigo-700/80">
-                  Assign this account as the designated LGU receiver for a Panay municipality, or revert to Field Delivery Driver mode.
+                  Assign this account as the designated LGU receiver for a Panay municipality, or revert to Field Receiver mode.
                 </p>
 
                 <div className="flex items-center gap-3 flex-wrap pt-1">

@@ -712,7 +712,7 @@ export const blockchain = {
           }
 
           if (text.includes('handover not found')) {
-            throw new Error('On-Chain Revert: Handover not found on-chain. Driver custody scan must be completed first.');
+            throw new Error('On-Chain Revert: Handover not found on-chain. Receiver custody scan must be completed first.');
           }
           if (text.includes('handover is not releasable') || text.includes('not releasable')) {
             return { hash: `on-chain-receipt-confirmed`, walletAddress, mode: 'contract' };
