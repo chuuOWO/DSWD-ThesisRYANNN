@@ -83,7 +83,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 12;
 
-  const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
 
@@ -304,13 +303,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center justify-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition-all shadow-sm cursor-pointer"
-        >
-          <Plus className="w-5 h-5" />
-          Add New LGU
-        </button>
       </div>
 
       {/* Summary Cards */}
@@ -738,14 +730,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           </div>
         </div>
       </div>
-
-      {/* Add LGU Modal */}
-      {showAddModal && (
-        <AddLGUModal
-          onClose={() => setShowAddModal(false)}
-          onSubmit={handleAddLGU}
-        />
-      )}
 
       {/* Edit LGU Modal */}
       {showEditModal && selectedLGU && (

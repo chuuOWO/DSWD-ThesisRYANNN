@@ -8,9 +8,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Edit3,
   Layers,
   LocateFixed,
+  Minus,
   Package,
+  Plus,
+  Save,
   ScanLine,
   Settings,
   Truck,
@@ -403,6 +407,13 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [lguStock, setLguStock] = useState<{ foodPacks: number; hygieneKits: number; familyKits: number; lastReported?: string } | null>(null);
 
+  // Manage LGU stock states
+  const [isEditingStock, setIsEditingStock] = useState(false);
+  const [isSavingStock, setIsSavingStock] = useState(false);
+  const [editFoodPacks, setEditFoodPacks] = useState(0);
+  const [editHygieneKits, setEditHygieneKits] = useState(0);
+  const [editFamilyKits, setEditFamilyKits] = useState(0);
+
   const loadLguStock = async () => {
     if (!targetMuni) return;
     try {
@@ -415,12 +426,18 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
           (r.lguName && r.lguName.toLowerCase().includes(targetMuni))
       );
       if (matched) {
+        const fp = matched.foodPacks || 0;
+        const hk = matched.hygieneKits || 0;
+        const fk = matched.familyKits || 0;
         setLguStock({
-          foodPacks: matched.foodPacks || 0,
-          hygieneKits: matched.hygieneKits || 0,
-          familyKits: matched.familyKits || 0,
+          foodPacks: fp,
+          hygieneKits: hk,
+          familyKits: fk,
           lastReported: matched.reportedAt
         });
+        setEditFoodPacks(fp);
+        setEditHygieneKits(hk);
+        setEditFamilyKits(fk);
       }
     } catch {}
   };
@@ -428,6 +445,57 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
   useEffect(() => {
     loadLguStock();
   }, [targetMuni, effectiveLguName]);
+
+  const handleSaveStock = async () => {
+    const muniName = canonicalUserLgu?.municipality || effectiveLguName;
+    if (!muniName) {
+      setToastMessage({ type: 'error', text: 'No LGU designated for this account.' });
+      return;
+    }
+    const provName = canonicalUserLgu?.province || 'Iloilo';
+    setIsSavingStock(true);
+    try {
+      const fp = Math.max(0, Number(editFoodPacks) || 0);
+      const hk = Math.max(0, Number(editHygieneKits) || 0);
+      const fk = Math.max(0, Number(editFamilyKits) || 0);
+
+      const urgencyScore = Math.max(10, Math.min(100, Math.round(100 - (fp / 5))));
+      const priorityColor: 'Red' | 'Yellow' | 'Green' = fp < 100 ? 'Red' : fp <= 300 ? 'Yellow' : 'Green';
+      const recommendation = fp < 100
+        ? 'Urgent restocking needed (stock below 100 packs).'
+        : fp <= 300
+          ? 'Moderate stock levels. Prepare replenishment request.'
+          : 'Stock levels sufficient.';
+
+      await backendApi.createLGUInventoryReport({
+        municipality: muniName,
+        province: provName,
+        lguName: `${muniName} Municipal Office`,
+        foodPacks: fp,
+        hygieneKits: hk,
+        familyKits: fk,
+        affectedFamilies: 0,
+        damageIndex: 0,
+        urgencyScore,
+        priorityColor,
+        recommendation
+      });
+
+      setLguStock({
+        foodPacks: fp,
+        hygieneKits: hk,
+        familyKits: fk,
+        lastReported: new Date().toISOString()
+      });
+
+      setIsEditingStock(false);
+      setToastMessage({ type: 'success', text: 'LGU inventory updated and synchronized with Supabase.' });
+    } catch (err) {
+      setToastMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update LGU stock.' });
+    } finally {
+      setIsSavingStock(false);
+    }
+  };
 
   // 5. Camera QR Scanner & Direct Inventory Acceptance
   const [isScanning, setIsScanning] = useState(false);
@@ -954,11 +1022,19 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
               <div className="grid grid-cols-2 gap-2 pt-0.5">
                 <button
                   type="button"
-                  onClick={() => setIsInventoryOpen(true)}
+                  onClick={() => {
+                    if (lguStock) {
+                      setEditFoodPacks(lguStock.foodPacks);
+                      setEditHygieneKits(lguStock.hygieneKits);
+                      setEditFamilyKits(lguStock.familyKits);
+                    }
+                    setIsEditingStock(false);
+                    setIsInventoryOpen(true);
+                  }}
                   className="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10.5px] font-bold transition flex items-center justify-center gap-1"
                 >
                   <Layers size={13} className="text-[#2500ba]" />
-                  View LGU Stock
+                  Manage LGU Stock
                 </button>
 
                 <button
@@ -1031,7 +1107,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
         {/* LGU Inventory Drawer Modal */}
         {isInventoryOpen && (
           <div className="absolute inset-0 z-40 bg-black/50 flex flex-col justify-end animate-in fade-in duration-150">
-            <div className="bg-white rounded-t-[24px] p-5 space-y-4 max-h-[85%] overflow-y-auto animate-in slide-in-from-bottom duration-200">
+            <div className="bg-white rounded-t-[24px] p-5 space-y-4 max-h-[88%] overflow-y-auto animate-in slide-in-from-bottom duration-200">
               <div className="flex items-center justify-between border-b pb-3">
                 <div className="flex items-center gap-2">
                   <div className="h-8 w-8 rounded-xl bg-indigo-100 flex items-center justify-center text-[#2500ba]">
@@ -1042,53 +1118,235 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
                     <p className="text-[10px] text-gray-500">Live inventory in Supabase</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsInventoryOpen(false)}
-                  className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Stock Cards */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-                  <p className="text-lg font-black text-blue-900">
-                    {lguStock?.foodPacks?.toLocaleString() ?? 0}
-                  </p>
-                  <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Food Packs</p>
-                </div>
-
-                <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
-                  <p className="text-lg font-black text-teal-900">
-                    {lguStock?.hygieneKits?.toLocaleString() ?? 0}
-                  </p>
-                  <p className="text-[10px] font-bold text-teal-700 uppercase tracking-wide">Hygiene</p>
-                </div>
-
-                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
-                  <p className="text-lg font-black text-purple-900">
-                    {lguStock?.familyKits?.toLocaleString() ?? 0}
-                  </p>
-                  <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">Family Kits</p>
+                <div className="flex items-center gap-2">
+                  {!isEditingStock && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (lguStock) {
+                          setEditFoodPacks(lguStock.foodPacks);
+                          setEditHygieneKits(lguStock.hygieneKits);
+                          setEditFamilyKits(lguStock.familyKits);
+                        }
+                        setIsEditingStock(true);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-[#2500ba]/10 hover:bg-[#2500ba]/20 text-[#2500ba] text-[11px] font-bold transition flex items-center gap-1"
+                    >
+                      <Edit3 size={12} />
+                      Update Stock
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingStock(false);
+                      setIsInventoryOpen(false);
+                    }}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                  >
+                    <X size={18} />
+                  </button>
                 </div>
               </div>
 
-              <div className="rounded-xl bg-gray-50 p-3 text-xs space-y-1 text-gray-600 border border-gray-100">
-                <p className="font-semibold text-gray-800">Designated Municipality: <span className="text-[#2500ba] font-bold">{effectiveLguName || 'Not specified'}</span></p>
-                <p className="text-[11px] text-gray-500">
-                  Every accepted delivery automatically increments these live amounts in the database.
-                </p>
+              {/* Priority Status Badge */}
+              <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-xs">
+                <span className="font-semibold text-gray-600">Restocking Status:</span>
+                {(() => {
+                  const currentFp = isEditingStock ? editFoodPacks : (lguStock?.foodPacks ?? 0);
+                  if (currentFp < 100) {
+                    return (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-200">
+                        Urgent Restocking (&lt;100)
+                      </span>
+                    );
+                  }
+                  if (currentFp <= 300) {
+                    return (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-700 border border-amber-200">
+                        Moderate Stock (100-300)
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 border border-emerald-200">
+                      Sufficient Stock (&gt;300)
+                    </span>
+                  );
+                })()}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setIsInventoryOpen(false)}
-                className="w-full py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-[#1f009e] transition"
-              >
-                Close Stock View
-              </button>
+              {!isEditingStock ? (
+                /* Read-only Stock Display */
+                <>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                      <p className="text-lg font-black text-blue-900">
+                        {lguStock?.foodPacks?.toLocaleString() ?? 0}
+                      </p>
+                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Food Packs</p>
+                    </div>
+
+                    <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
+                      <p className="text-lg font-black text-teal-900">
+                        {lguStock?.hygieneKits?.toLocaleString() ?? 0}
+                      </p>
+                      <p className="text-[10px] font-bold text-teal-700 uppercase tracking-wide">Hygiene</p>
+                    </div>
+
+                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
+                      <p className="text-lg font-black text-purple-900">
+                        {lguStock?.familyKits?.toLocaleString() ?? 0}
+                      </p>
+                      <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">Family Kits</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-gray-50 p-3 text-xs space-y-1 text-gray-600 border border-gray-100">
+                    <p className="font-semibold text-gray-800">
+                      Designated Municipality: <span className="text-[#2500ba] font-bold">{effectiveLguName || 'Not specified'}</span>
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Accepted incoming shipments automatically increment these live amounts. Click &quot;Update Stock&quot; above to report relief distributions or manual counts.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsInventoryOpen(false)}
+                    className="w-full py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition"
+                  >
+                    Close Stock View
+                  </button>
+                </>
+              ) : (
+                /* Editable Stepper Controls */
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-600">
+                    Adjust current on-hand quantities below (e.g. after local relief distribution to barangays):
+                  </p>
+
+                  {/* Food Packs Control */}
+                  <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/50 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-gray-900">Family Food Packs</p>
+                      <p className="text-[10px] text-gray-500">Target baseline: 300+ units</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditFoodPacks(prev => Math.max(0, prev - 10))}
+                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editFoodPacks}
+                        onChange={(e) => setEditFoodPacks(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-16 h-8 text-center bg-white border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditFoodPacks(prev => prev + 10)}
+                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Hygiene Kits Control */}
+                  <div className="p-3 rounded-xl border border-teal-200 bg-teal-50/50 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-gray-900">Hygiene Kits</p>
+                      <p className="text-[10px] text-gray-500">Standard kits</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditHygieneKits(prev => Math.max(0, prev - 10))}
+                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editHygieneKits}
+                        onChange={(e) => setEditHygieneKits(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-16 h-8 text-center bg-white border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditHygieneKits(prev => prev + 10)}
+                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Family Kits Control */}
+                  <div className="p-3 rounded-xl border border-purple-200 bg-purple-50/50 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-gray-900">Family Kits</p>
+                      <p className="text-[10px] text-gray-500">Non-food kits</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditFamilyKits(prev => Math.max(0, prev - 10))}
+                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        value={editFamilyKits}
+                        onChange={(e) => setEditFamilyKits(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="w-16 h-8 text-center bg-white border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditFamilyKits(prev => prev + 10)}
+                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingStock(false)}
+                      disabled={isSavingStock}
+                      className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveStock}
+                      disabled={isSavingStock}
+                      className="flex-[2] py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-[#1f009e] transition flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {isSavingStock ? (
+                        <span>Saving to Supabase...</span>
+                      ) : (
+                        <>
+                          <Save size={14} />
+                          <span>Save Stock to Supabase</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -187,16 +187,6 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
           <h1 className="text-2xl font-bold text-gray-900">Inventory Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Live database inventory from minted incoming batches, approved outgoing releases, and LGU stock receipts</p>
         </div>
-
-        <button
-          type="button"
-          onClick={handleSyncDatabase}
-          disabled={isSyncing}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 shadow-sm transition active:scale-95 disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 text-blue-600 ${isSyncing ? 'animate-spin' : ''}`} />
-          Sync with Supabase
-        </button>
       </div>
 
       {/* Summary Cards */}

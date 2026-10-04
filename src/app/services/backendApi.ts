@@ -482,6 +482,97 @@ export const backendApi = {
     return { ok: true };
   },
 
+  async deductWarehouseStock(warehouseName: string, category: string, quantity: number): Promise<{ ok: boolean }> {
+    try {
+      const cleanName = warehouseName.replace(/main|warehouse/gi, '').trim();
+      const { data: wh } = await supabase
+        .from('warehouses')
+        .select('*')
+        .ilike('name', `%${cleanName}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!wh) {
+        console.warn(`Warehouse "${warehouseName}" not found for stock deduction.`);
+        return { ok: false };
+      }
+
+      const catLower = category.toLowerCase();
+      const updates: Record<string, unknown> = {
+        updated_at: new Date().toISOString()
+      };
+
+      if (catLower.includes('food pack') || catLower === 'food pack') {
+        updates.food_packs = Math.max(0, (wh.food_packs || 0) - quantity);
+      } else if (catLower.includes('hygiene') || catLower === 'hygiene kit') {
+        updates.hygiene_kits = Math.max(0, (wh.hygiene_kits || 0) - quantity);
+      } else if (catLower.includes('sleeping') || catLower === 'sleeping kit') {
+        updates.sleeping_kits = Math.max(0, (wh.sleeping_kits || 0) - quantity);
+      } else if (catLower.includes('kitchen') || catLower === 'kitchen kit') {
+        updates.kitchen_kits = Math.max(0, (wh.kitchen_kits || 0) - quantity);
+      } else if (catLower.includes('family kit') || catLower === 'family kit') {
+        updates.family_kits = Math.max(0, (wh.family_kits || 0) - quantity);
+      } else if (catLower.includes('sack') || catLower === 'laminated sack') {
+        updates.laminated_sacks = Math.max(0, (wh.laminated_sacks || 0) - quantity);
+      } else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) {
+        updates.rtef = Math.max(0, (wh.rtef || 0) - quantity);
+      }
+
+      const stockMap = { ...(wh.current_stock || {}) };
+      stockMap[category] = Math.max(0, (stockMap[category] || 0) - quantity);
+      updates.current_stock = stockMap;
+
+      const { error } = await supabase.from('warehouses').update(updates).eq('id', wh.id);
+      if (error) {
+        console.error('Failed to deduct warehouse stock:', error.message);
+        return { ok: false };
+      }
+      return { ok: true };
+    } catch (err) {
+      console.error('Error in deductWarehouseStock:', err);
+      return { ok: false };
+    }
+  },
+
+  async deductLguStock(municipality: string, category: string, quantity: number): Promise<{ ok: boolean }> {
+    try {
+      const cleanMuni = municipality.trim();
+      const { data: lgu } = await supabase
+        .from('lgus')
+        .select('*')
+        .ilike('municipality', cleanMuni)
+        .limit(1)
+        .maybeSingle();
+
+      if (!lgu) return { ok: false };
+
+      const catLower = category.toLowerCase();
+      const updates: Record<string, unknown> = {
+        last_reported_at: new Date().toISOString()
+      };
+
+      if (catLower.includes('food')) {
+        updates.food_packs = Math.max(0, (lgu.food_packs || 0) - quantity);
+      } else if (catLower.includes('hygiene')) {
+        updates.hygiene_kits = Math.max(0, (lgu.hygiene_kits || 0) - quantity);
+      } else if (catLower.includes('family')) {
+        updates.family_kits = Math.max(0, (lgu.family_kits || 0) - quantity);
+      } else if (catLower.includes('sleeping')) {
+        updates.sleeping_kits = Math.max(0, (lgu.sleeping_kits || 0) - quantity);
+      }
+
+      const stockMap = { ...(lgu.current_stock || {}) };
+      stockMap[category] = Math.max(0, (stockMap[category] || 0) - quantity);
+      updates.current_stock = stockMap;
+
+      await supabase.from('lgus').update(updates).eq('id', lgu.id);
+      return { ok: true };
+    } catch (err) {
+      console.warn('Failed to deduct LGU stock:', err);
+      return { ok: false };
+    }
+  },
+
   // --- SUPPLY SOURCES ---
   async getSupplySources(): Promise<SupplySourceRecord[]> {
     const { data, error } = await supabase

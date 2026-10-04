@@ -751,8 +751,7 @@ export function useInventoryState(enabled = true) {
       return Number.isFinite(value) ? Math.max(max, value) : max;
     }, 0) + 1;
     const newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
-    const isDirect = newRelease.deliveryMode === 'Direct Delivery';
-    const status: OutgoingStatus = isDirect ? 'Approved' : (newRelease.deliveryStatus === 'Released' ? 'Approved' : newRelease.deliveryStatus);
+    const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : (newRelease.deliveryStatus || 'Allocating');
     const matchedLgu = lgusList.find(l =>
       (newRelease.lguId && l.id === newRelease.lguId) ||
       (newRelease.municipality && l.municipality.toLowerCase() === newRelease.municipality.toLowerCase()) ||
@@ -765,16 +764,16 @@ export function useInventoryState(enabled = true) {
       lguId: resolvedLguId,
       deliveryStatus: status,
       drNumber: newDR,
-      amountApproved: isDirect ? (newRelease.amountRequested || newRelease.amountApproved) : (status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved),
+      amountApproved: status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved,
       allocatedBatches: [],
-      auditTrail: [makeAudit(isDirect ? 'Direct National Dispatch Created' : 'Release Draft Created', isDirect ? `Dispatched directly from ${newRelease.warehouseSource} to ${newRelease.lguName}.` : 'Outgoing request saved before blockchain custody transfer.')]
+      auditTrail: [makeAudit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
     backendApi.createOutgoing({
       ...newRelease,
       lguId: resolvedLguId,
       drNumber: newDR,
-      amountApproved: isDirect ? (newRelease.amountRequested || newRelease.amountApproved) : newRelease.amountApproved,
+      amountApproved: newRelease.amountApproved,
       deliveryStatus: status,
       receiverGps: newRelease.receiverGps,
       destinationAddress: newRelease.destinationAddress
@@ -810,25 +809,6 @@ export function useInventoryState(enabled = true) {
     if (!release) return { ok: false, message: 'Release not found.' };
     if (amountApproved <= 0 || amountApproved > release.amountRequested) {
       return { ok: false, message: 'Approved amount must be between 1 and requested amount.' };
-    }
-
-    // Direct Delivery bypasses regional warehouse stock and minting
-    if (release.deliveryMode === 'Direct Delivery') {
-      setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
-        ? {
-            ...item,
-            amountApproved,
-            deliveryStatus: 'Approved',
-            auditTrail: [makeAudit('Direct Dispatch Approved', `Direct delivery from ${release.warehouseSource} approved without regional warehouse minting.`), ...item.auditTrail]
-          }
-        : item));
-      backendApi.updateOutgoing(drNumber, {
-        amountApproved,
-        deliveryStatus: 'Approved'
-      }).catch(error => {
-        logBackendError('Approve direct delivery')(error);
-      });
-      return { ok: true, message: 'Direct delivery dispatched without regional warehouse minting.' };
     }
 
     // Validate available regional warehouse stock
@@ -883,6 +863,41 @@ export function useInventoryState(enabled = true) {
       setIntegrationMode('mock');
     }
 
+    // Deduct stock from the source warehouse or source LGU in Supabase & local state
+    if (isMainWarehouse(release.warehouseSource)) {
+      backendApi.deductWarehouseStock(release.warehouseSource, release.fnfiCategory, amountApproved)
+        .catch(err => console.warn('Supabase deductWarehouseStock error:', err));
+
+      setWarehousesList(prev => {
+        const updated = prev.map(wh => {
+          const matchName = release.warehouseSource.replace(/main|warehouse/gi, '').trim().toLowerCase();
+          if (!wh.name.toLowerCase().includes(matchName)) return wh;
+          const catLower = release.fnfiCategory.toLowerCase();
+          const newWh = { ...wh };
+          if (catLower.includes('food pack')) newWh.foodPacks = Math.max(0, wh.foodPacks - amountApproved);
+          else if (catLower.includes('hygiene')) newWh.hygieneKits = Math.max(0, wh.hygieneKits - amountApproved);
+          else if (catLower.includes('sleeping')) newWh.sleepingKits = Math.max(0, wh.sleepingKits - amountApproved);
+          else if (catLower.includes('kitchen')) newWh.kitchenKits = Math.max(0, wh.kitchenKits - amountApproved);
+          else if (catLower.includes('family kit')) newWh.familyKits = Math.max(0, wh.familyKits - amountApproved);
+          else if (catLower.includes('sack')) newWh.laminatedSacks = Math.max(0, wh.laminatedSacks - amountApproved);
+          else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) newWh.rtef = Math.max(0, wh.rtef - amountApproved);
+
+          if (newWh.currentStock && newWh.currentStock[release.fnfiCategory] !== undefined) {
+            newWh.currentStock = {
+              ...newWh.currentStock,
+              [release.fnfiCategory]: Math.max(0, newWh.currentStock[release.fnfiCategory] - amountApproved)
+            };
+          }
+          return newWh;
+        });
+        setInventory(calculateWarehouseInventory(updated, kitTypesList));
+        return updated;
+      });
+    } else if (release.sourceType === 'LGU' && release.warehouseSource) {
+      backendApi.deductLguStock(release.warehouseSource, release.fnfiCategory, amountApproved)
+        .catch(err => console.warn('Supabase deductLguStock error:', err));
+    }
+
     return { ok: true, message: `Release approved! Batch token ${batchTokenId} minted on blockchain with Admin signature.` };
   };
 
@@ -890,7 +905,7 @@ export function useInventoryState(enabled = true) {
     if (actorRole !== 'Receiver') return { ok: false, message: 'RBAC: only Receiver can sign warehouse release.' };
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release || !['Approved', 'Packed'].includes(release.deliveryStatus)) return { ok: false, message: 'Only approved/packed releases can be signed by sender.' };
-    if (release.deliveryMode !== 'Direct Delivery' && release.allocatedBatches.length === 0) {
+    if (release.allocatedBatches.length === 0) {
       return { ok: false, message: 'No batch allocations found for this release.' };
     }
 
@@ -900,9 +915,7 @@ export function useInventoryState(enabled = true) {
 
     try {
       await blockchain.requireConnectedWalletRole('Receiver');
-      if (release.deliveryMode !== 'Direct Delivery') {
-        await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
-      }
+      await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
       proof = await blockchain.signRelease({
         drNumber,
         handoverContractId,

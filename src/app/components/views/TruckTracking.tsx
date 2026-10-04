@@ -436,6 +436,11 @@ function RoadSnappedRoute({ route, onRouteDataChange }: { route: TruckRoute; onR
         distanceKm: summary.totalDistance / 1000,
         durationMinutes: Math.round(summary.totalTime / 60)
       });
+
+      if (osrmRoute?.coordinates && osrmRoute.coordinates.length > 0) {
+        const bounds = L.latLngBounds(osrmRoute.coordinates);
+        map.fitBounds(bounds, { padding: [55, 55], maxZoom: 15, animate: true });
+      }
     });
 
     control.on('routingerror', () => onRouteDataChange(null));
@@ -618,25 +623,43 @@ function RouteMap({
           onClick={() => {
             if (!mapRef.current) return;
             if (routes.length === 0) return;
-            const bounds = L.latLngBounds(routes.map(r => [r.position[0], r.position[1]]));
-            mapRef.current.fitBounds(bounds, { padding: [40, 40], animate: true });
+            const points: [number, number][] = routes.map(r => [r.position[0], r.position[1]]);
+            routes.forEach(r => {
+              if (r.destinationPosition) points.push([r.destinationPosition[0], r.destinationPosition[1]]);
+              r.assignedPackagesList.forEach(pkg => {
+                if (pkg.coords) points.push([pkg.coords[0], pkg.coords[1]]);
+              });
+            });
+            const bounds = L.latLngBounds(points);
+            mapRef.current.fitBounds(bounds, { padding: [55, 55], maxZoom: 15, animate: true });
           }}
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
         >
           Fit All
         </button>
         <button
           onClick={() => {
             if (!selectedRoute || !mapRef.current) return;
-            mapRef.current.setView([selectedRoute.position[0], selectedRoute.position[1]], 16, { animate: true });
+            const points: [number, number][] = [[selectedRoute.position[0], selectedRoute.position[1]]];
+            if (selectedRoute.destinationPosition) {
+              points.push([selectedRoute.destinationPosition[0], selectedRoute.destinationPosition[1]]);
+            }
+            selectedRoute.assignedPackagesList.forEach(pkg => {
+              if (pkg.coords) points.push([pkg.coords[0], pkg.coords[1]]);
+            });
+            if (points.length > 1) {
+              mapRef.current.fitBounds(L.latLngBounds(points), { padding: [55, 55], maxZoom: 15, animate: true });
+            } else {
+              mapRef.current.setView([selectedRoute.position[0], selectedRoute.position[1]], 15, { animate: true });
+            }
           }}
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
         >
           Locate
         </button>
         <button
           onClick={() => mapRef.current?.setView([11.0, 122.5], 9, { animate: true })}
-          className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition"
+          className="px-3 py-2 bg-white border border-gray-300 rounded-lg shadow text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
         >
           Overview
         </button>
@@ -891,7 +914,18 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
                       setSelectedTruckId(e.target.value);
                       const target = liveTruckRoutes.find(t => t.id === e.target.value);
                       if (target && mapRef.current) {
-                        mapRef.current.setView([target.position[0], target.position[1]], 14, { animate: true });
+                        const points: [number, number][] = [[target.position[0], target.position[1]]];
+                        if (target.destinationPosition) {
+                          points.push([target.destinationPosition[0], target.destinationPosition[1]]);
+                        }
+                        target.assignedPackagesList.forEach(pkg => {
+                          if (pkg.coords) points.push([pkg.coords[0], pkg.coords[1]]);
+                        });
+                        if (points.length > 1) {
+                          mapRef.current.fitBounds(L.latLngBounds(points), { padding: [55, 55], maxZoom: 15, animate: true });
+                        } else {
+                          mapRef.current.setView([target.position[0], target.position[1]], 14, { animate: true });
+                        }
                       }
                     }}
                     className="w-full text-sm font-bold text-blue-900 bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2500ba] cursor-pointer"

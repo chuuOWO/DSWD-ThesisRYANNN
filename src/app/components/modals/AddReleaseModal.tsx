@@ -21,7 +21,6 @@ export interface ReleaseForm {
   incidentCode: string;
   destinationAddress?: string;
   receiverGps?: string;
-  directSource?: 'LDRC' | 'VDRC';
 }
 
 interface AddReleaseModalProps {
@@ -67,8 +66,7 @@ const defaultFormData: ReleaseForm = {
     deliveryStatus: 'Allocating',
     incidentCode: '',
     destinationAddress: '',
-    receiverGps: '10.6415, 122.2352',
-    directSource: undefined
+    receiverGps: '10.6415, 122.2352'
 };
 
 const cleanBuildingName = (val?: string): string => {
@@ -96,7 +94,6 @@ export function AddReleaseModal({
     if (!initialData) return defaultFormData;
     return { ...initialData, lguName: cleanBuildingName(initialData.lguName) };
   });
-  const [directSource, setDirectSource] = useState<'LDRC' | 'VDRC'>('VDRC');
 
   // Master LGUs from Supabase
   const availableLgus = useMemo(() => {
@@ -148,21 +145,6 @@ export function AddReleaseModal({
     }
     return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
   }, [warehousesList]);
-
-  const directSourceOptions = useMemo(() => {
-    if (supplySourcesList && supplySourcesList.length > 0) {
-      return supplySourcesList.map(s => s.shortCode || s.name);
-    }
-    return ['VDRC', 'LDRC'];
-  }, [supplySourcesList]);
-
-  useEffect(() => {
-    if (formData.deliveryMode === 'Direct Delivery') {
-      const defaultSrc = (directSourceOptions[0] || 'VDRC') as 'LDRC' | 'VDRC';
-      setDirectSource(defaultSrc);
-      setFormData(prev => ({ ...prev, warehouseSource: defaultSrc, directSource: defaultSrc }));
-    }
-  }, [formData.deliveryMode, directSourceOptions]);
 
   const [selectedProvince, setSelectedProvince] = useState(provinces[0] || 'Iloilo');
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
@@ -252,7 +234,6 @@ export function AddReleaseModal({
   // Get available stock for selected category and source (Warehouse or LGU)
   const getAvailableStock = () => {
     if (!formData.fnfiCategory) return 0;
-    if (formData.deliveryMode === 'Direct Delivery') return Infinity;
 
     if (formData.sourceType === 'Warehouse') {
       const targetWh = warehousesList?.find(w => w.name.toLowerCase() === formData.warehouseSource.toLowerCase());
@@ -334,26 +315,21 @@ export function AddReleaseModal({
       newErrors.fnfiCategory = 'FNFI category is required';
     }
 
-    if (formData.deliveryMode !== 'Direct Delivery') {
-      if (formData.sourceType === 'Warehouse' && !formData.warehouseSource) {
-        newErrors.warehouseSource = 'Warehouse source is required';
-      }
+    if (formData.sourceType === 'Warehouse' && !formData.warehouseSource) {
+      newErrors.warehouseSource = 'Warehouse source is required';
+    }
 
-      if (formData.sourceType === 'LGU' && !selectedMunicipality) {
-        newErrors.warehouseSource = 'LGU source is required';
-      }
+    if (formData.sourceType === 'LGU' && !selectedMunicipality) {
+      newErrors.warehouseSource = 'LGU source is required';
     }
 
     if (!formData.amountRequested || formData.amountRequested <= 0) {
       newErrors.amountRequested = 'Amount requested must be greater than 0';
     } else {
-      // Validate stock when not Direct Delivery
-      if (formData.deliveryMode !== 'Direct Delivery') {
-        if (formData.sourceType === 'Warehouse' && formData.amountRequested > availableQty) {
-          newErrors.amountRequested = 'Insufficient stock in the warehouse.';
-        } else if (formData.sourceType === 'LGU' && formData.amountRequested > availableQty) {
-          newErrors.amountRequested = `Insufficient stock in source LGU (${availableQty} available).`;
-        }
+      if (formData.sourceType === 'Warehouse' && formData.amountRequested > availableQty) {
+        newErrors.amountRequested = 'Insufficient stock in the warehouse.';
+      } else if (formData.sourceType === 'LGU' && formData.amountRequested > availableQty) {
+        newErrors.amountRequested = `Insufficient stock in source LGU (${availableQty} available).`;
       }
     }
 
@@ -365,7 +341,7 @@ export function AddReleaseModal({
     e.preventDefault();
 
     if (validate()) {
-      const initialStatus: OutgoingStatus = formData.deliveryMode === 'Direct Delivery' ? 'Approved' : 'Allocating';
+      const initialStatus: OutgoingStatus = 'Allocating';
       const buildingFinal = formData.lguName.trim() || `${formData.municipality} Drop-off Center`;
       const submissionData = mode === 'add'
         ? { ...formData, lguName: buildingFinal, deliveryStatus: initialStatus }
@@ -507,49 +483,11 @@ export function AddReleaseModal({
             )}
           </div>
 
-          {/* Direct Delivery Source — shown only for Direct Delivery mode */}
-          {formData.deliveryMode === 'Direct Delivery' && (
-            <div className="rounded-lg border border-[#2500ba]/20 bg-[#2500ba]/5 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-bold text-[#2500ba] uppercase tracking-wider">Direct National Dispatch</p>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#2500ba] text-white">Direct to LGU</span>
-              </div>
-              <p className="text-xs text-gray-600">
-                Goods dispatched directly from a national disaster resource center &mdash; regional warehouse stock is not deducted.
-              </p>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">
-                  National Resource Center <span className="text-red-500">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {directSourceOptions.map(src => (
-                    <button
-                      key={src}
-                      type="button"
-                      onClick={() => {
-                        setDirectSource(src as any);
-                        setFormData(prev => ({ ...prev, directSource: src as any, warehouseSource: src }));
-                      }}
-                      className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                        directSource === src || formData.warehouseSource === src
-                          ? 'bg-[#2500ba] text-white shadow-md'
-                          : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      {src}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Source Type - Hidden when Direct Delivery */}
-          {formData.deliveryMode !== 'Direct Delivery' && (
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Source Type <span className="text-red-500">*</span>
-              </label>
+          {/* Source Type */}
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">
+              Source Type <span className="text-red-500">*</span>
+            </label>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
@@ -580,11 +518,9 @@ export function AddReleaseModal({
                 </button>
               </div>
             </div>
-          )}
 
-          {/* Source Selection - Hidden when Direct Delivery */}
-          {formData.deliveryMode !== 'Direct Delivery' && (
-            formData.sourceType === 'Warehouse' ? (
+          {/* Source Selection */}
+          {formData.sourceType === 'Warehouse' ? (
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">
                   Select Warehouse <span className="text-red-500">*</span>
@@ -666,11 +602,10 @@ export function AddReleaseModal({
                   )}
                 </div>
               </div>
-            )
-          )}
+            )}
 
           {/* Source LGU Live Stock Breakdown - Shown when Source Type is LGU */}
-          {formData.deliveryMode !== 'Direct Delivery' && formData.sourceType === 'LGU' && selectedMunicipality && sourceLguRecord && (
+          {formData.sourceType === 'LGU' && selectedMunicipality && sourceLguRecord && (
             <div className="rounded-xl border border-purple-200 bg-purple-50/70 p-4 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -705,7 +640,7 @@ export function AddReleaseModal({
           )}
 
           {/* Available Stock Display - Shown for Warehouse and LGU sources */}
-          {formData.deliveryMode !== 'Direct Delivery' && formData.fnfiCategory && (
+          {formData.fnfiCategory && (
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
