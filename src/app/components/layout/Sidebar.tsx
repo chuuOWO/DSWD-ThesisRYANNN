@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, LogOut, Users, User, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, LogOut, Users, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { SettingsModal } from '../modals/SettingsModal';
 
@@ -66,54 +66,18 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
         </nav>
       </div>
 
-      {/* Footer / Settings */}
-      <div ref={settingsRef} className="p-4 border-t border-gray-200 relative">
-        {/* Settings Text Bubble */}
-        {isSettingsOpen && (
-          <div className="absolute bottom-full left-4 mb-3 w-56 bg-white rounded-xl shadow-2xl border border-gray-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-            {/* Bubble arrow pointing down */}
-            <div className="absolute -bottom-1.5 left-7 w-3 h-3 bg-white border-b border-r border-gray-200 rotate-45" />
-
-            <div className="space-y-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSettingsOpen(false);
-                  setIsProfileModalOpen(true);
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-left transition"
-              >
-                <User className="w-4 h-4 text-blue-600" />
-                <span>Profile Settings</span>
-              </button>
-
-              <div className="my-1.5 border-t border-gray-100" />
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSettingsOpen(false);
-                  onSignOut?.();
-                }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg text-left transition"
-              >
-                <LogOut className="w-4 h-4 text-red-600" />
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-        )}
-
+      {/* Footer / Profile Status & Settings Button */}
+      <div className="p-4 border-t border-gray-200 bg-white">
         {/* User Profile Card */}
         {profile && (
           <div
-            onClick={() => setIsProfileModalOpen(true)}
+            onClick={() => (onOpenSettings ? onOpenSettings() : setIsProfileModalOpen(true))}
             className={`mb-2 p-2 rounded-xl cursor-pointer transition flex items-center gap-2.5 group relative ${
               !profile.walletAddress
                 ? 'bg-red-50/80 hover:bg-red-100/80 border-2 border-red-500 ring-2 ring-red-400/40 shadow-sm'
                 : 'bg-gray-50 hover:bg-gray-100 border border-gray-200/80'
             }`}
-            title={!profile.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to edit profile"}
+            title={!profile.walletAddress ? "You need to open settings and link it to MetaMask." : "Click to open settings"}
           >
             <div className="relative flex-shrink-0">
               {profile.avatarUrl ? (
@@ -153,7 +117,7 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
 
             {!profile.walletAddress && (
               <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                You need to open profile and link it to MetaMask.
+                You need to open settings and link it to MetaMask.
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-red-900" />
               </div>
             )}
@@ -163,11 +127,22 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
         <button
           type="button"
           onClick={() => (onOpenSettings ? onOpenSettings() : setIsProfileModalOpen(true))}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
         >
           <Settings className="w-5 h-5 text-gray-600" />
           <span>Settings</span>
         </button>
+
+        {onSignOut && (
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="w-full flex items-center gap-3 px-4 py-2 mt-1 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 transition-all cursor-pointer"
+          >
+            <LogOut className="w-4 h-4 text-red-600" />
+            <span>Sign Out</span>
+          </button>
+        )}
 
         {/* Settings Modal fallback if rendered inside Sidebar */}
         {profile && !onOpenSettings && (
