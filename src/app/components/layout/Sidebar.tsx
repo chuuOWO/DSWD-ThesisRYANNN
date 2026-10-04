@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, LogOut, Users, AlertTriangle } from 'lucide-react';
+import { LayoutDashboard, PackagePlus, PackageMinus, Package, MapPin, Settings, Truck, Users, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { SettingsModal } from '../modals/SettingsModal';
 
@@ -123,17 +123,6 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
           <Settings className="w-5 h-5 text-gray-600" />
           <span>Settings</span>
         </button>
-
-        {onSignOut && (
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="w-full flex items-center gap-3 px-4 py-2 mt-1 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 transition-all cursor-pointer"
-          >
-            <LogOut className="w-4 h-4 text-red-600" />
-            <span>Sign Out</span>
-          </button>
-        )}
 
         {/* Settings Modal fallback if rendered inside Sidebar */}
         {profile && !onOpenSettings && (
