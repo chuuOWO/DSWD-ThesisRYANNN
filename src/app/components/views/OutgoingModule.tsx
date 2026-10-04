@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { CheckCircle, Edit, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { CheckCircle, Edit, Loader2, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { SuccessModal } from '../modals/SuccessModal';
@@ -85,6 +85,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [selectedRelease, setSelectedRelease] = useState<OutgoingRelease | null>(null);
   const [approvalAmount, setApprovalAmount] = useState(0);
   const [isApproving, setIsApproving] = useState(false);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [actionModal, setActionModal] = useState<ReleaseActionModalState | null>(null);
   const [qrModalRelease, setQrModalRelease] = useState<OutgoingRelease | null>(null);
   const autoCloseDelayMs = 1800;
@@ -178,30 +179,35 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   };
 
   const handleConfirmReleaseAction = async () => {
-    if (!actionModal?.release) return;
+    if (!actionModal?.release || isSubmittingAction) return;
     const release = actionModal.release;
+    setIsSubmittingAction(true);
 
-    if (actionModal.type === 'senderSign') {
-      const result = await senderSignAndRelease(release.drNumber, currentRole);
-      showResult(result.message.replace('handover contract opened', 'release record signed'), result.ok);
-      return;
-    }
+    try {
+      if (actionModal.type === 'senderSign') {
+        const result = await senderSignAndRelease(release.drNumber, currentRole);
+        showResult(result.message.replace('handover contract opened', 'release record signed'), result.ok);
+        return;
+      }
 
-    if (actionModal.type === 'inTransit') {
-      markInTransit(release.drNumber);
-      closeActionModal();
-      return;
-    }
+      if (actionModal.type === 'inTransit') {
+        markInTransit(release.drNumber);
+        closeActionModal();
+        return;
+      }
 
-    if (actionModal.type === 'receiverAccept') {
-      const result = await receiverAcceptWithGps(release.drNumber, currentRole);
-      showResult(result.message, result.ok);
-      return;
-    }
+      if (actionModal.type === 'receiverAccept') {
+        const result = await receiverAcceptWithGps(release.drNumber, currentRole);
+        showResult(result.message, result.ok);
+        return;
+      }
 
-    if (actionModal.type === 'correction') {
-      if (actionModal.note) requestOutgoingCorrection(release.drNumber, actionModal.note);
-      closeActionModal();
+      if (actionModal.type === 'correction') {
+        if (actionModal.note) requestOutgoingCorrection(release.drNumber, actionModal.note);
+        closeActionModal();
+      }
+    } finally {
+      setIsSubmittingAction(false);
     }
   };
 
@@ -683,9 +689,17 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               <button
                 type="button"
                 onClick={handleConfirmReleaseAction}
-                className="flex-1 px-5 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700"
+                disabled={isSubmittingAction}
+                className="flex-1 px-5 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
               >
-                Confirm
+                {isSubmittingAction ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  'Confirm'
+                )}
               </button>
             </div>
           </div>

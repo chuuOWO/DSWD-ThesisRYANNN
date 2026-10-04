@@ -747,6 +747,8 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
     matchingRelease?: ReceiverReleaseRecord;
   } | null>(null);
   const [isMetaMaskSigning, setIsMetaMaskSigning] = useState(false);
+  const [metaMaskStage, setMetaMaskStage] = useState<'idle' | 'wallet' | 'mining'>('idle');
+  const isExecutingCustodyRef = useRef(false);
   const [metaMaskSignError, setMetaMaskSignError] = useState<string | null>(null);
   const [verifiedQuantity, setVerifiedQuantity] = useState<number>(1);
   const [pendingVerifyPayload, setPendingVerifyPayload] = useState<QrPayload | null>(null);
@@ -1201,8 +1203,14 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
   }) => {
     const custody = custodyOverride || pendingCustody;
     if (!custody) return;
+    if (isExecutingCustodyRef.current) {
+      console.warn('Custody sign already executing. Ignoring duplicate click.');
+      return;
+    }
+    isExecutingCustodyRef.current = true;
     const { payload, location: nextLocation } = custody;
     setIsMetaMaskSigning(true);
+    setMetaMaskStage('wallet');
     setMetaMaskSignError(null);
 
     let activeProofHash: string | undefined = undefined;
@@ -1219,6 +1227,11 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
         from: payload.from || 'DSWD Logistics Hub',
         to: payload.to || 'Assigned LGU',
         gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`
+      }, (stage, txHash) => {
+        setMetaMaskStage(stage);
+        if (txHash) {
+          setConfirmedTxHash(txHash);
+        }
       });
       activeProofHash = proof.hash;
       activeWalletAddr = proof.walletAddress;
@@ -1283,10 +1296,55 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
       nav('verify');
     } catch (err: any) {
       console.warn('Receiver sign custody error:', err);
+      // Double check if the DR was already signed on Sepolia despite the error
+      try {
+        let handoverId = await blockchain.getHandoverIdByDr(payload.drNumber);
+        if (handoverId === 0n) {
+          // If a prior popup was just confirmed, wait 2 seconds for block propagation and re-check
+          await new Promise((r) => setTimeout(r, 2000));
+          handoverId = await blockchain.getHandoverIdByDr(payload.drNumber);
+        }
+        if (handoverId > 0n) {
+          console.log(`On-chain recovery: handover ${handoverId} confirmed for ${payload.drNumber}.`);
+          await backendApi.assignTruckToRelease(payload.drNumber, receiverId, 'In Transit');
+          await backendApi.updateOutgoing(payload.drNumber, {
+            senderSignature: `on-chain-handover-${handoverId}`,
+            txHash: `on-chain-handover-${handoverId}`,
+            walletAddress: activeWalletAddr,
+            deliveryStatus: 'In Transit'
+          }).catch(() => {});
+
+          const updatedPackages = [
+            ...activePackages.filter((p) => p.drNumber !== payload.drNumber),
+            payload
+          ];
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(updatedPackages));
+          } catch {}
+          setActivePackages(updatedPackages);
+          setInventory({
+            batchTokenId: payload.batchTokenIds[0] ?? payload.handoverContractId,
+            category: payload.category,
+            quantity: payload.quantity,
+            status: 'In transit',
+            remarks: ''
+          });
+          setVerifiedQuantity(payload.quantity);
+          setPendingVerifyPayload(payload);
+          setPendingCustody(null);
+          nav('verify');
+          return;
+        }
+      } catch (checkErr) {
+        console.warn('Handover check failed:', checkErr);
+      }
+
       const msg = err?.message || 'MetaMask transaction was cancelled or reverted on Sepolia.';
       setMetaMaskSignError(msg);
     } finally {
+      isExecutingCustodyRef.current = false;
       setIsMetaMaskSigning(false);
+      setMetaMaskStage('idle');
     }
   };
 
@@ -1827,14 +1885,23 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
           {step === 'sign_custody' && (
             <FiveDotsLoadingModal
               isOpen={step === 'sign_custody'}
-              title="Opening MetaMask..."
+              title={
+                metaMaskStage === 'mining'
+                  ? 'Confirming on Blockchain...'
+                  : 'Opening MetaMask...'
+              }
               subtitle={
-                metaMaskSignError
+                metaMaskStage === 'mining'
+                  ? 'Transaction broadcast! Waiting for Sepolia block confirmation...'
+                  : metaMaskSignError
                   ? metaMaskSignError
                   : 'Please approve the proof of custody in your MetaMask wallet...'
               }
-              onRetry={() => void handleExecuteCustodySign()}
+              onRetry={isMetaMaskSigning ? undefined : () => void handleExecuteCustodySign()}
               onClose={() => {
+                if (isMetaMaskSigning && metaMaskStage === 'mining') {
+                  return;
+                }
                 setIsMetaMaskSigning(false);
                 setPendingCustody(null);
                 nav('pickup');

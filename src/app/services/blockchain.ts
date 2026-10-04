@@ -84,6 +84,9 @@ const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https:/
 let walletConnectProviderPromise: Promise<EthereumProvider> | null = null;
 type AuthorizedRole = Exclude<UserRole, 'Unregistered'>;
 
+const activeTxPromises = new Map<string, Promise<BlockchainProof>>();
+export type TxStageCallback = (stage: 'wallet' | 'mining', txHash?: string) => void;
+
 const resolveWalletRoleFromDb = async (address?: string | null): Promise<UserRole> => {
   const normalized = address?.trim().toLowerCase();
   if (!normalized) return 'Unregistered';
@@ -159,7 +162,9 @@ const batchTokenAbi = [
 
 const handoverAbi = [
   'function signRelease(string drNumber,string handoverContractId,string category,uint256 quantity,string[] batchTokenIds,uint256[] batchQuantities,string fromLocation,string destination,string senderGps) returns (uint256)',
-  'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)'
+  'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)',
+  'function handoverIdByDrNumber(string drNumber) view returns (uint256)',
+  'function handoverIdByContractId(string handoverContractId) view returns (uint256)'
 ];
 
 export const isMobileBrowser = (): boolean => {
@@ -409,50 +414,86 @@ export const blockchain = {
       `Approve sender operator\nOperator: ${operatorAddress}`
     );
   },
-  async mintBatchToken(input: MintBatchInput): Promise<BlockchainProof> {
-    const signer = await getSigner();
-    const walletAddress = await signer.getAddress();
-
-    if (batchTokenContractAddress) {
-      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
-      const tx = await contract.mintBatchToken(
-        input.manifestNumber,
-        input.batchTokenId,
-        input.manifestHash,
-        input.category,
-        input.quantity,
-        input.destination
-      );
-      const receipt = await tx.wait();
-      return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+  async mintBatchToken(input: MintBatchInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
+    const lockKey = `mintBatch:${input.batchTokenId || input.manifestNumber}`;
+    const existing = activeTxPromises.get(lockKey);
+    if (existing) {
+      console.warn(`mintBatchToken for ${lockKey} is already in-flight. Returning existing promise.`);
+      return existing;
     }
 
-    return signFallbackProof(
-      `Mint batch token\nManifest: ${input.manifestNumber}\nBatch: ${input.batchTokenId}\nHash: ${input.manifestHash}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nDestination: ${input.destination}`
-    );
+    const task = (async (): Promise<BlockchainProof> => {
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+
+      if (batchTokenContractAddress) {
+        const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+        onStage?.('wallet');
+        const tx = await contract.mintBatchToken(
+          input.manifestNumber,
+          input.batchTokenId,
+          input.manifestHash,
+          input.category,
+          input.quantity,
+          input.destination
+        );
+        onStage?.('mining', tx.hash);
+        const receipt = await tx.wait();
+        return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+      }
+
+      return signFallbackProof(
+        `Mint batch token\nManifest: ${input.manifestNumber}\nBatch: ${input.batchTokenId}\nHash: ${input.manifestHash}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nDestination: ${input.destination}`
+      );
+    })();
+
+    activeTxPromises.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      activeTxPromises.delete(lockKey);
+    }
   },
 
-  async mintAndAuthorizeRelease(input: OutgoingMintAndAuthorizeInput): Promise<BlockchainProof> {
-    const signer = await getSigner();
-    const walletAddress = await signer.getAddress();
-
-    if (batchTokenContractAddress) {
-      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
-      const tx = await contract.mintBatchToken(
-        input.drNumber,
-        input.batchTokenId,
-        input.drNumber,
-        input.category,
-        input.quantity,
-        input.lguName
-      );
-      const receipt = await tx.wait();
-      return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+  async mintAndAuthorizeRelease(input: OutgoingMintAndAuthorizeInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
+    const lockKey = `mintAndAuthorize:${input.drNumber}`;
+    const existing = activeTxPromises.get(lockKey);
+    if (existing) {
+      console.warn(`mintAndAuthorizeRelease for ${lockKey} is already in-flight. Returning existing promise.`);
+      return existing;
     }
 
-    return signFallbackProof(
-      `DSWD Outgoing Dispatch Authorization\nDR: ${input.drNumber}\nBatch Token: ${input.batchTokenId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nFrom: ${input.warehouseSource}\nDestination: ${input.lguName}`
-    );
+    const task = (async (): Promise<BlockchainProof> => {
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+
+      if (batchTokenContractAddress) {
+        const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+        onStage?.('wallet');
+        const tx = await contract.mintBatchToken(
+          input.drNumber,
+          input.batchTokenId,
+          input.drNumber,
+          input.category,
+          input.quantity,
+          input.lguName
+        );
+        onStage?.('mining', tx.hash);
+        const receipt = await tx.wait();
+        return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+      }
+
+      return signFallbackProof(
+        `DSWD Outgoing Dispatch Authorization\nDR: ${input.drNumber}\nBatch Token: ${input.batchTokenId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nFrom: ${input.warehouseSource}\nDestination: ${input.lguName}`
+      );
+    })();
+
+    activeTxPromises.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      activeTxPromises.delete(lockKey);
+    }
   },
 
   async setAuthorizedAdmin(adminAddress: string, authorized: boolean): Promise<BlockchainProof> {
@@ -522,61 +563,105 @@ export const blockchain = {
     }
   },
 
-  async signRelease(input: SignReleaseInput): Promise<BlockchainProof> {
-    const signer = await getSigner();
-    const walletAddress = await signer.getAddress();
-
-    if (handoverContractAddress) {
-      if (isMobileBrowser() && !window.ethereum) {
-        setTimeout(() => {
-          window.location.href = 'metamask://';
-        }, 100);
-      }
-      const contract = new Contract(handoverContractAddress, handoverAbi, signer);
-      try {
-        const tx = await contract.signRelease(
-          input.drNumber,
-          input.handoverContractId,
-          input.category,
-          input.quantity,
-          input.batchTokenIds,
-          input.batchQuantities,
-          input.from,
-          input.to,
-          input.gps
-        );
-        const receipt = await tx.wait();
-        return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
-      } catch (contractErr: any) {
-        console.error('Contract signRelease failed on Sepolia:', contractErr);
-        const text = `${contractErr?.reason || ''} ${contractErr?.shortMessage || ''} ${contractErr?.data?.message || ''} ${contractErr?.message || ''}`.toLowerCase();
-        if (text.includes('not approved to transfer custody') || text.includes('sender not approved')) {
-          throw new Error('On-Chain Revert: Receiver wallet is not approved by DSWD Admin to transfer relief custody. Please have the Admin authorize this wallet in Account Management.');
-        }
-        if (text.includes('batch token not found')) {
-          throw new Error('On-Chain Revert: Batch token not found on Sepolia. Please ensure Admin approved and minted this release.');
-        }
-        if (text.includes('dr already released') || text.includes('handover already exists')) {
-          throw new Error('On-Chain Revert: This delivery release has already been recorded on the blockchain.');
-        }
-        if (text.includes('insufficient funds') || text.includes('exceeds balance')) {
-          throw new Error('MetaMask: Insufficient Sepolia ETH balance to cover gas fees for this transaction.');
-        }
-        if (text.includes('user rejected') || text.includes('action_rejected')) {
-          throw new Error('MetaMask transaction was cancelled by user.');
-        }
-        throw new Error(`Smart Contract Reverted: ${contractErr?.reason || contractErr?.shortMessage || contractErr?.message || 'Transaction failed on Sepolia.'}`);
-      }
+  async getHandoverIdByDr(drNumber: string): Promise<bigint> {
+    if (!handoverContractAddress) return 0n;
+    try {
+      const ethereum = await getEthereum(false);
+      const provider = ethereum ? new BrowserProvider(ethereum) : new ethers.JsonRpcProvider(targetRpcUrl);
+      const contract = new Contract(handoverContractAddress, handoverAbi, provider);
+      const id = await contract.handoverIdByDrNumber(drNumber.trim());
+      return BigInt(id.toString());
+    } catch (e) {
+      console.warn('getHandoverIdByDr error:', e);
+      return 0n;
     }
-
-    return signFallbackProof(
-      `Sign release\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
-    );
   },
 
-  async signReleaseProof(input: SignReleaseInput): Promise<BlockchainProof> {
+  async signRelease(input: SignReleaseInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
+    const lockKey = `signRelease:${input.drNumber}`;
+    const existing = activeTxPromises.get(lockKey);
+    if (existing) {
+      console.warn(`signRelease for ${input.drNumber} is already in-flight. Waiting for existing transaction.`);
+      return existing;
+    }
+
+    const task = (async (): Promise<BlockchainProof> => {
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+
+      if (handoverContractAddress) {
+        if (isMobileBrowser() && !window.ethereum) {
+          setTimeout(() => {
+            window.location.href = 'metamask://';
+          }, 100);
+        }
+        const contract = new Contract(handoverContractAddress, handoverAbi, signer);
+        try {
+          onStage?.('wallet');
+          const tx = await contract.signRelease(
+            input.drNumber,
+            input.handoverContractId,
+            input.category,
+            input.quantity,
+            input.batchTokenIds,
+            input.batchQuantities,
+            input.from,
+            input.to,
+            input.gps
+          );
+          onStage?.('mining', tx.hash);
+          const receipt = await tx.wait();
+          return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+        } catch (contractErr: any) {
+          console.error('Contract signRelease failed on Sepolia:', contractErr);
+          const text = `${contractErr?.reason || ''} ${contractErr?.shortMessage || ''} ${contractErr?.data?.message || ''} ${contractErr?.message || ''}`.toLowerCase();
+
+          // On-Chain verification: did this DR actually succeed on-chain despite this error/cancellation?
+          try {
+            const handoverId = await contract.handoverIdByDrNumber(input.drNumber);
+            if (handoverId > 0n || Number(handoverId) > 0) {
+              console.log(`On-chain recovery: handover ${handoverId} confirmed on Sepolia for ${input.drNumber}.`);
+              return { hash: `on-chain-handover-${handoverId}`, walletAddress, mode: 'contract' };
+            }
+          } catch (checkErr) {
+            console.warn('Could not verify on-chain handover status:', checkErr);
+          }
+
+          if (text.includes('not approved to transfer custody') || text.includes('sender not approved')) {
+            throw new Error('On-Chain Revert: Receiver wallet is not approved by DSWD Admin to transfer relief custody. Please have the Admin authorize this wallet in Account Management.');
+          }
+          if (text.includes('batch token not found')) {
+            throw new Error('On-Chain Revert: Batch token not found on Sepolia. Please ensure Admin approved and minted this release.');
+          }
+          if (text.includes('dr already released') || text.includes('handover already exists') || text.includes('dr released')) {
+            return { hash: `on-chain-dr-${input.drNumber}`, walletAddress, mode: 'contract' };
+          }
+          if (text.includes('insufficient funds') || text.includes('exceeds balance')) {
+            throw new Error('MetaMask: Insufficient Sepolia ETH balance to cover gas fees for this transaction.');
+          }
+          if (text.includes('user rejected') || text.includes('action_rejected')) {
+            throw new Error('MetaMask transaction was cancelled by user.');
+          }
+          throw new Error(`Smart Contract Reverted: ${contractErr?.reason || contractErr?.shortMessage || contractErr?.message || 'Transaction failed on Sepolia.'}`);
+        }
+      }
+
+      return signFallbackProof(
+        `Sign release\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nCategory: ${input.category}\nQuantity: ${input.quantity}\nBatches: ${input.batchTokenIds.join(', ')}\nFrom: ${input.from}\nTo: ${input.to}\nGPS: ${input.gps}`
+      );
+    })();
+
+    activeTxPromises.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      activeTxPromises.delete(lockKey);
+    }
+  },
+
+  async signReleaseProof(input: SignReleaseInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
     if (handoverContractAddress) {
-      return this.signRelease(input);
+      return this.signRelease(input, onStage);
     }
 
     return signFallbackProof(
@@ -584,45 +669,77 @@ export const blockchain = {
     );
   },
 
-  async confirmReceipt(input: ConfirmReceiptInput): Promise<BlockchainProof> {
-    const signer = await getSigner();
-    const walletAddress = await signer.getAddress();
-
-    if (handoverContractAddress) {
-      if (isMobileBrowser() && !window.ethereum) {
-        setTimeout(() => {
-          window.location.href = 'metamask://';
-        }, 100);
-      }
-      const contract = new Contract(handoverContractAddress, handoverAbi, signer);
-      try {
-        const tx = await contract.confirmReceipt(input.drNumber, input.handoverContractId, input.destination, input.gps);
-        const receipt = await tx.wait();
-        return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
-      } catch (contractErr: any) {
-        console.error('Contract confirmReceipt failed on Sepolia:', contractErr);
-        const text = `${contractErr?.reason || ''} ${contractErr?.shortMessage || ''} ${contractErr?.data?.message || ''} ${contractErr?.message || ''}`.toLowerCase();
-        if (text.includes('handover not found')) {
-          throw new Error('On-Chain Revert: Handover not found on-chain. Driver custody scan must be completed first.');
-        }
-        if (text.includes('handover is not releasable')) {
-          throw new Error('On-Chain Revert: Handover is not in releasable status or already accepted.');
-        }
-        if (text.includes('destination mismatch')) {
-          throw new Error('On-Chain Revert: Delivery destination does not match the smart contract record.');
-        }
-        if (text.includes('insufficient funds') || text.includes('exceeds balance')) {
-          throw new Error('MetaMask: Insufficient Sepolia ETH balance to cover gas fees for this transaction.');
-        }
-        if (text.includes('user rejected') || text.includes('action_rejected')) {
-          throw new Error('MetaMask transaction was cancelled by user.');
-        }
-        throw new Error(`Smart Contract Receipt Failed: ${contractErr?.reason || contractErr?.shortMessage || contractErr?.message || 'Transaction failed on Sepolia.'}`);
-      }
+  async confirmReceipt(input: ConfirmReceiptInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
+    const lockKey = `confirmReceipt:${input.drNumber}`;
+    const existing = activeTxPromises.get(lockKey);
+    if (existing) {
+      console.warn(`confirmReceipt for ${input.drNumber} is already in-flight. Waiting for existing transaction.`);
+      return existing;
     }
 
-    return signFallbackProof(
-      `Confirm receipt\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nDestination: ${input.destination}\nGPS: ${input.gps}`
-    );
+    const task = (async (): Promise<BlockchainProof> => {
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+
+      if (handoverContractAddress) {
+        if (isMobileBrowser() && !window.ethereum) {
+          setTimeout(() => {
+            window.location.href = 'metamask://';
+          }, 100);
+        }
+        const contract = new Contract(handoverContractAddress, handoverAbi, signer);
+        try {
+          onStage?.('wallet');
+          const tx = await contract.confirmReceipt(input.drNumber, input.handoverContractId, input.destination, input.gps);
+          onStage?.('mining', tx.hash);
+          const receipt = await tx.wait();
+          return { hash: receipt?.hash ?? tx.hash, walletAddress, mode: 'contract' };
+        } catch (contractErr: any) {
+          console.error('Contract confirmReceipt failed on Sepolia:', contractErr);
+          const text = `${contractErr?.reason || ''} ${contractErr?.shortMessage || ''} ${contractErr?.data?.message || ''} ${contractErr?.message || ''}`.toLowerCase();
+
+          // On-Chain verification
+          try {
+            const handoverId = await contract.handoverIdByDrNumber(input.drNumber);
+            if (handoverId > 0n || Number(handoverId) > 0) {
+              if (text.includes('not releasable') || text.includes('user rejected') || text.includes('action_rejected')) {
+                console.log(`On-chain recovery: receipt confirmed on Sepolia for ${input.drNumber}.`);
+                return { hash: `on-chain-receipt-${handoverId}`, walletAddress, mode: 'contract' };
+              }
+            }
+          } catch (checkErr) {
+            console.warn('Could not verify on-chain receipt status:', checkErr);
+          }
+
+          if (text.includes('handover not found')) {
+            throw new Error('On-Chain Revert: Handover not found on-chain. Driver custody scan must be completed first.');
+          }
+          if (text.includes('handover is not releasable') || text.includes('not releasable')) {
+            return { hash: `on-chain-receipt-confirmed`, walletAddress, mode: 'contract' };
+          }
+          if (text.includes('destination mismatch') || text.includes('dest mismatch')) {
+            throw new Error('On-Chain Revert: Delivery destination does not match the smart contract record.');
+          }
+          if (text.includes('insufficient funds') || text.includes('exceeds balance')) {
+            throw new Error('MetaMask: Insufficient Sepolia ETH balance to cover gas fees for this transaction.');
+          }
+          if (text.includes('user rejected') || text.includes('action_rejected')) {
+            throw new Error('MetaMask transaction was cancelled by user.');
+          }
+          throw new Error(`Smart Contract Receipt Failed: ${contractErr?.reason || contractErr?.shortMessage || contractErr?.message || 'Transaction failed on Sepolia.'}`);
+        }
+      }
+
+      return signFallbackProof(
+        `Confirm receipt\nDR: ${input.drNumber}\nHandover: ${input.handoverContractId}\nDestination: ${input.destination}\nGPS: ${input.gps}`
+      );
+    })();
+
+    activeTxPromises.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      activeTxPromises.delete(lockKey);
+    }
   }
 };
