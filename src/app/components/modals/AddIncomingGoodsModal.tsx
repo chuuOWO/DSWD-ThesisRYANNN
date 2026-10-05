@@ -36,31 +36,23 @@ export function AddIncomingGoodsModal({
 }: AddIncomingGoodsModalProps) {
   const sourceOptions = useMemo(() => {
     if (supplySourcesList && supplySourcesList.length > 0) {
-      return supplySourcesList.map(s => s.shortCode || s.name);
+      return supplySourcesList.filter(s => s.isActive !== false).map(s => s.shortCode || s.name);
     }
-    return ['VDRC', 'LDRC'];
+    return [];
   }, [supplySourcesList]);
 
   const categoryOptions = useMemo(() => {
     if (kitTypesList && kitTypesList.length > 0) {
-      return kitTypesList.map(k => k.name);
+      return kitTypesList.filter(k => k.isActive !== false).map(k => k.name);
     }
-    return [
-      'Family Food Pack',
-      'Hygiene Kit',
-      'Sleeping Kit',
-      'Kitchen Kit',
-      'Family Kit',
-      'Laminated Sacks',
-      'Ready-to-Eat Food (RTEF)'
-    ];
+    return [];
   }, [kitTypesList]);
 
   const warehouseOptions = useMemo(() => {
     if (warehousesList && warehousesList.length > 0) {
-      return warehousesList.map(w => w.name);
+      return warehousesList.filter(w => w.isActive !== false).map(w => w.name);
     }
-    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+    return [];
   }, [warehousesList]);
 
   const defaultFormData: IncomingGoodsForm = {
@@ -69,9 +61,9 @@ export function AddIncomingGoodsModal({
     quantity: 0,
     unitType: 'packs',
     expirationDate: '',
-    source: sourceOptions[0] || 'VDRC',
+    source: sourceOptions[0] || '',
     destinationType: 'Warehouse',
-    destination: warehouseOptions[0] || 'Oton Main Warehouse',
+    destination: warehouseOptions[0] || '',
     incidentCode: ''
   };
 

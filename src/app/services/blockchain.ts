@@ -66,7 +66,9 @@ export const generateBatchTokenId = (): string => {
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
-  const random10 = Math.floor(1000000000 + Math.random() * 9000000000);
+  const array = new Uint32Array(1);
+  crypto.getRandomValues(array);
+  const random10 = Math.floor(1000000000 + (array[0] / 0xffffffff) * 9000000000);
   return `BATCH-${yyyy}-${mm}${dd}-${random10}`;
 };
 

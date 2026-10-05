@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   backendApi,
   type LguRecord,
@@ -8,7 +8,7 @@ import {
   type KitTypeRecord
 } from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
-import { findPanayLgu } from '../data/panayLguDirectory';
+import { findMatchingLgu, normalizeLguName } from '../lib/lguMatching';
 
 export interface InventoryItem {
   category: string;
@@ -29,6 +29,7 @@ export interface AuditEvent {
   id: string;
   timestamp: string;
   actor: string;
+  role?: string;
   action: string;
   details: string;
   txHash?: string;
@@ -121,10 +122,16 @@ export type LGUInventoryReportInput = Omit<LGUPriorityReport, 'id' | 'reportedAt
 
 const nowStamp = () => new Date().toLocaleString('en-PH', { hour12: false });
 
-const makeAudit = (action: string, details: string, txHash?: string): AuditEvent => ({
-  id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+const makeAudit = (
+  action: string,
+  details: string,
+  txHash?: string,
+  actor?: { name?: string; role?: string }
+): AuditEvent => ({
+  id: `AUD-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
   timestamp: nowStamp(),
-  actor: 'DSWD FO VI Logistics Officer',
+  actor: actor?.name || 'System / Unattributed',
+  role: actor?.role,
   action,
   details,
   txHash
@@ -260,7 +267,7 @@ const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
   return {
     ...item,
     manifestHash: item.manifestHash || makeManifestHash(item),
-    auditTrail: [makeAudit('Loaded from Supabase', `Incoming manifest restored from database as ${item.status}.`, item.blockchainTxHash)]
+    auditTrail: []
   };
 };
 
@@ -310,12 +317,13 @@ const mapLGUInventoryReport = (row: LGUInventoryReportRow): LGUPriorityReport =>
   };
 };
 
-export const deduplicateLguPriorityReports = (reports: LGUPriorityReport[]): LGUPriorityReport[] => {
+export const deduplicateLguPriorityReports = (reports: LGUPriorityReport[], lgus?: LguRecord[]): LGUPriorityReport[] => {
   const map = new Map<string, LGUPriorityReport>();
 
   for (const report of reports) {
     const rawMuni = report.municipality || report.lguName || '';
-    const canonical = findPanayLgu(rawMuni, report.province)?.municipality ?? rawMuni.trim();
+    const matched = lgus && lgus.length > 0 ? findMatchingLgu(lgus, rawMuni, report.province) : undefined;
+    const canonical = matched?.municipality ?? (normalizeLguName(rawMuni) ? rawMuni.trim() : rawMuni.trim());
     if (!canonical) continue;
 
     const key = canonical.toLowerCase();
@@ -362,7 +370,7 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
   assignedTruckId: row.assigned_truck_id ?? undefined,
   assigned_truck_id: row.assigned_truck_id ?? undefined,
   blockchainTxHash: row.tx_hash ?? undefined,
-  auditTrail: [makeAudit('Loaded from Supabase', `Outgoing request restored from database as ${row.delivery_status ?? 'Allocating'}.`, row.tx_hash ?? undefined)]
+  auditTrail: []
 });
 
 const mapDiscrepancyReport = (row: DiscrepancyReportRow): DiscrepancyReport => ({
@@ -450,9 +458,26 @@ const toFriendlyTxError = (error: unknown, fallback: string) => {
   return fallback;
 };
 
-export function useInventoryState(enabled = true) {
+export interface ActorProfile {
+  fullName?: string;
+  email?: string;
+  role?: string;
+}
+
+export function useInventoryState(enabled = true, actorProfile?: ActorProfile | null) {
   const [integrationMode, setIntegrationMode] = useState<'backend' | 'mock'>('mock');
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+
+  const currentActor = useMemo(() => {
+    if (!actorProfile) return { name: 'System / Unattributed', role: 'System' };
+    return {
+      name: actorProfile.fullName || actorProfile.email || 'Authenticated Personnel',
+      role: actorProfile.role || 'Personnel'
+    };
+  }, [actorProfile]);
+
+  const audit = (action: string, details: string, txHash?: string) =>
+    makeAudit(action, details, txHash, currentActor);
 
   const [incomingGoodsList, setIncomingGoodsList] = useState<IncomingGoods[]>([]);
   const [outgoingReleasesList, setOutgoingReleasesList] = useState<OutgoingRelease[]>([]);
@@ -591,13 +616,14 @@ export function useInventoryState(enabled = true) {
       const value = Number.parseInt(match[1], 10);
       return Number.isFinite(value) ? Math.max(max, value) : max;
     }, 0) + 1;
-    const newId = `INC-2026-${String(nextIndex).padStart(3, '0')}`;
+    const year = new Date().getFullYear();
+    const newId = `INC-${year}-${String(nextIndex).padStart(3, '0')}`;
     const goodsWithId: IncomingGoods = {
       ...newGoods,
       id: newId,
       status: 'Draft',
       manifestHash: makeManifestHash(newGoods),
-      auditTrail: [makeAudit('Draft Created', 'Incoming manifest saved as editable draft. No blockchain minting yet.')]
+      auditTrail: [audit('Draft Created', 'Incoming manifest saved as editable draft. No blockchain minting yet.')]
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
     backendApi.createIncoming({
@@ -620,14 +646,14 @@ export function useInventoryState(enabled = true) {
       return {
         ...updated,
         manifestHash: makeManifestHash(updated),
-        auditTrail: [makeAudit('Edited', 'Pre-tokenization record edited to correct human encoding error.'), ...item.auditTrail]
+        auditTrail: [audit('Edited', 'Pre-tokenization record edited to correct human encoding error.'), ...item.auditTrail]
       };
     }));
   };
 
   const submitIncomingForVerification = (id: string) => {
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Draft'
-      ? { ...item, status: 'Pending Verification', auditTrail: [makeAudit('Submitted for Verification', 'Draft locked for warehouse review.'), ...item.auditTrail] }
+      ? { ...item, status: 'Pending Verification', auditTrail: [audit('Submitted for Verification', 'Draft locked for warehouse review.'), ...item.auditTrail] }
       : item));
     backendApi.updateIncoming(id, { status: 'Pending Verification' }).catch(error => {
       logBackendError('Submit incoming manifest')(error);
@@ -637,7 +663,7 @@ export function useInventoryState(enabled = true) {
 
   const verifyIncomingReceipt = (id: string) => {
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Pending Verification'
-      ? { ...item, status: 'Verified', verifiedBy: 'Warehouse Supervisor', auditTrail: [makeAudit('Verified', 'Physical count and manifest details verified.'), ...item.auditTrail] }
+      ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified', `Physical count and manifest details verified by ${currentActor.name}.`), ...item.auditTrail] }
       : item));
     backendApi.updateIncoming(id, { status: 'Verified' }).catch(error => {
       logBackendError('Verify incoming manifest')(error);
@@ -704,7 +730,7 @@ export function useInventoryState(enabled = true) {
           batchTokenId: tokenId,
           blockchainTxHash: proof.hash,
           mintedAt,
-          auditTrail: [makeAudit('Batch Token Minted', `Manifest hash ${incoming.manifestHash} minted as ${tokenId}.`, proof.hash), ...incoming.auditTrail]
+          auditTrail: [audit('Batch Token Minted', `Manifest hash ${incoming.manifestHash} minted as ${tokenId}.`, proof.hash), ...incoming.auditTrail]
         }
       : incoming));
 
@@ -725,7 +751,7 @@ export function useInventoryState(enabled = true) {
 
   const requestIncomingCorrection = (id: string, note: string) => {
     setIncomingGoodsList(prev => prev.map(item => item.id === id
-      ? { ...item, status: 'Correction Requested', correctionNote: note, auditTrail: [makeAudit('Correction Requested', note), ...item.auditTrail] }
+      ? { ...item, status: 'Correction Requested', correctionNote: note, auditTrail: [audit('Correction Requested', note), ...item.auditTrail] }
       : item));
     backendApi.updateIncoming(id, { status: 'Correction Requested' }).catch(error => {
       logBackendError('Request incoming correction')(error);
@@ -748,7 +774,8 @@ export function useInventoryState(enabled = true) {
       const value = Number.parseInt(match[1], 10);
       return Number.isFinite(value) ? Math.max(max, value) : max;
     }, 0) + 1;
-    const newDR = `DR-2026-${String(nextIndex).padStart(3, '0')}`;
+    const year = new Date().getFullYear();
+    const newDR = `DR-${year}-${String(nextIndex).padStart(3, '0')}`;
     const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : (newRelease.deliveryStatus || 'Allocating');
     const matchedLgu = lgusList.find(l =>
       (newRelease.lguId && l.id === newRelease.lguId) ||
@@ -764,7 +791,7 @@ export function useInventoryState(enabled = true) {
       drNumber: newDR,
       amountApproved: status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved,
       allocatedBatches: [],
-      auditTrail: [makeAudit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
+      auditTrail: [audit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
     backendApi.createOutgoing({
@@ -789,7 +816,7 @@ export function useInventoryState(enabled = true) {
       return {
         ...release,
         ...patch,
-        auditTrail: [makeAudit('Edited', 'Pre-handover release details edited before immutable custody event.'), ...release.auditTrail]
+        auditTrail: [audit('Edited', 'Pre-handover release details edited before immutable custody event.'), ...release.auditTrail]
       };
     }));
 
@@ -842,7 +869,7 @@ export function useInventoryState(enabled = true) {
           allocatedBatches: allocations,
           adminSignature: proof.hash,
           blockchainTxHash: proof.hash,
-          auditTrail: [makeAudit('Release Minted & Authorized', `Admin authorized dispatch and minted batch ${batchTokenId} on blockchain.`, proof.hash), ...item.auditTrail]
+          auditTrail: [audit('Release Minted & Authorized', `Admin authorized dispatch and minted batch ${batchTokenId} on blockchain.`, proof.hash), ...item.auditTrail]
         }
       : item));
 
@@ -907,7 +934,10 @@ export function useInventoryState(enabled = true) {
       return { ok: false, message: 'No batch allocations found for this release.' };
     }
 
-    const senderGps = release.warehouseSource === 'Pototan Main Warehouse' ? '11.0039, 122.5364' : '10.6922, 122.4731';
+    const targetWarehouse = warehousesList.find(w => w.name.toLowerCase() === (release.warehouseSource || '').toLowerCase());
+    const senderGps = targetWarehouse
+      ? `${targetWarehouse.latitude.toFixed(5)}, ${targetWarehouse.longitude.toFixed(5)}`
+      : '10.6975, 122.4764'; // Authoritative Oton main warehouse origin coordinate
     const handoverContractId = `HANDOVER-${drNumber.replace('DR-', '')}`;
     let proof;
 
@@ -938,7 +968,7 @@ export function useInventoryState(enabled = true) {
           senderSignature: proof.hash,
           senderGps,
           blockchainTxHash: proof.hash,
-          auditTrail: [makeAudit('Sender Signed Handover', 'Warehouse signed release; GPS origin captured and custody transfer opened.', proof.hash), ...item.auditTrail]
+          auditTrail: [audit('Sender Signed Handover', 'Warehouse signed release; GPS origin captured and custody transfer opened.', proof.hash), ...item.auditTrail]
         }
       : item));
     backendApi.updateOutgoing(drNumber, {
@@ -957,7 +987,7 @@ export function useInventoryState(enabled = true) {
 
   const markInTransit = (drNumber: string) => {
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber && item.deliveryStatus === 'Released'
-      ? { ...item, deliveryStatus: 'In Transit', auditTrail: [makeAudit('In Transit', 'Shipment is moving to destination LGU.'), ...item.auditTrail] }
+      ? { ...item, deliveryStatus: 'In Transit', auditTrail: [audit('In Transit', 'Shipment is moving to destination LGU.'), ...item.auditTrail] }
       : item));
     backendApi.updateOutgoing(drNumber, { deliveryStatus: 'In Transit' }).catch(error => {
       logBackendError('Mark outgoing in transit')(error);
@@ -968,7 +998,8 @@ export function useInventoryState(enabled = true) {
   const receiverAcceptWithGps = async (
     drNumber: string,
     actorRole: UserRole = 'LGUReceiver',
-    actorLguMunicipality?: string
+    actorLguMunicipality?: string,
+    explicitGps?: string
   ) => {
     if (actorRole !== 'LGUReceiver') return { ok: false, message: 'RBAC: only LGUReceiver can confirm receipt.' };
     const targetDrUpper = drNumber.trim().toUpperCase();
@@ -1006,8 +1037,8 @@ export function useInventoryState(enabled = true) {
       };
     }
 
-    const lguLookup = findPanayLgu(release?.destinationAddress || release?.lguName || release?.municipality || '', release?.province);
-    const latestGps = release?.receiverGps || (lguLookup ? `${lguLookup.lat}, ${lguLookup.lng}` : '10.7202, 122.5621');
+    const lguLookup = findMatchingLgu(lgusList, release?.destinationAddress || release?.lguName || release?.municipality || '', release?.province);
+    const latestGps = explicitGps || release?.receiverGps || (lguLookup ? `${lguLookup.latitude.toFixed(5)}, ${lguLookup.longitude.toFixed(5)}` : '10.7202, 122.5621');
     const handoverContractId = release.handoverContractId ?? `HANDOVER-${canonicalDr.replace('DR-', '')}`;
     let proof: { hash: string; walletAddress: string; mode: 'contract' | 'signature' };
 
@@ -1032,7 +1063,7 @@ export function useInventoryState(enabled = true) {
           receiverSignature: proof.hash,
           receiverGps: latestGps,
           blockchainTxHash: proof.hash,
-          auditTrail: [makeAudit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', proof.hash), ...item.auditTrail]
+          auditTrail: [audit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', proof.hash), ...item.auditTrail]
         }
       : item));
     backendApi.updateOutgoing(canonicalDr, {

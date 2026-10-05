@@ -10,13 +10,15 @@ import {
   X 
 } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
-import { findPanayLgu } from '../../data/panayLguDirectory';
+import type { LguRecord } from '../../services/backendApi';
+import { findMatchingLgu } from '../../lib/lguMatching';
 
 interface QrCodeGeneratorModalProps {
   releases?: OutgoingRelease[];
   initialRelease?: OutgoingRelease | null;
   onClose?: () => void;
   isFullPage?: boolean;
+  lgusList?: LguRecord[];
 }
 
 export interface ThesisQrPayload {
@@ -44,7 +46,8 @@ export function QrCodeGeneratorModal({
   releases = [],
   initialRelease,
   onClose,
-  isFullPage = false
+  isFullPage = false,
+  lgusList = []
 }: QrCodeGeneratorModalProps) {
   const [selectedDr, setSelectedDr] = useState<string>(initialRelease?.drNumber || releases[0]?.drNumber || '');
 
@@ -62,9 +65,15 @@ export function QrCodeGeneratorModal({
   const payload: ThesisQrPayload | null = useMemo(() => {
     if (!currentRelease) return null;
 
+    const rawQty = Number(currentRelease.amountApproved || currentRelease.amountRequested || 0);
+    // Strict data-integrity safeguard: missing or non-positive quantity must not silently fallback to 100
+    if (!rawQty || rawQty <= 0 || isNaN(rawQty)) {
+      return null;
+    }
+    const qty = rawQty;
+
     const batchIds = currentRelease.allocatedBatches?.map(b => b.batchTokenId) || [`BATCH-${currentRelease.drNumber}`];
-    const batchQtys = currentRelease.allocatedBatches?.map(b => b.quantity) || [currentRelease.amountApproved || currentRelease.amountRequested || 100];
-    const qty = currentRelease.amountApproved || currentRelease.amountRequested || 100;
+    const batchQtys = currentRelease.allocatedBatches?.map(b => b.quantity).filter(q => q > 0) || [qty];
     let releaseCoords: [number, number] | undefined = undefined;
     if (currentRelease.receiverGps) {
       const parts = currentRelease.receiverGps.split(',').map((s) => Number(s.trim()));
@@ -76,9 +85,9 @@ export function QrCodeGeneratorModal({
     if (!releaseCoords) {
       const lguName = currentRelease.destinationAddress || currentRelease.lguName || currentRelease.municipality;
       if (lguName) {
-        const found = findPanayLgu(lguName, currentRelease.province);
+        const found = findMatchingLgu(lgusList, lguName, currentRelease.province);
         if (found) {
-          releaseCoords = [found.lat, found.lng];
+          releaseCoords = [found.latitude, found.longitude];
         }
       }
     }
@@ -96,13 +105,13 @@ export function QrCodeGeneratorModal({
       blockchain: {
         status: 'Direct Manifest Scan',
         network: 'Sepolia Testnet (Chain ID 11155111)',
-        contractAddress: (import.meta as any).env?.VITE_HANDOVER_CONTRACT_ADDRESS || '0x91c976fEe18761d8331d759D24987Ab65ec486A1',
+        contractAddress: (import.meta as any).env?.VITE_HANDOVER_CONTRACT_ADDRESS || '0x91c976fFee18761d8331d759D24987Ab65ec486A1',
         tokenStandard: 'ERC-1155 Multi-Token Relief Handover',
         merkleRootHash: `0x${Array.from(currentRelease.drNumber + qty).reduce((acc, char) => acc + char.charCodeAt(0).toString(16), '').padEnd(64, 'a').slice(0, 64)}`,
         txHash: currentRelease.blockchainTxHash || null
       }
     };
-  }, [currentRelease]);
+  }, [currentRelease, lgusList]);
 
   const jsonString = useMemo(() => (payload ? JSON.stringify(payload, null, 2) : ''), [payload]);
 
@@ -291,8 +300,14 @@ export function QrCodeGeneratorModal({
           }`}>
             {isCompleted ? 'Completed Shipment' : 'Official Manifest QR'}
           </span>
-          <h3 className="text-base font-extrabold text-gray-900">{payload?.drNumber || 'No Release'}</h3>
-          <p className="text-xs text-gray-500">{payload?.category} &bull; {payload?.quantity.toLocaleString()} kits &rarr; {payload?.to}</p>
+          <h3 className="text-base font-extrabold text-gray-900">{payload?.drNumber || currentRelease?.drNumber || 'No Release'}</h3>
+          {payload ? (
+            <p className="text-xs text-gray-500">{payload.category} &bull; {payload.quantity.toLocaleString()} kits &rarr; {payload.to}</p>
+          ) : currentRelease ? (
+            <p className="text-xs text-red-600 font-semibold">Missing valid quantity ({currentRelease.amountApproved || currentRelease.amountRequested || 0})</p>
+          ) : (
+            <p className="text-xs text-gray-400">Select a release above</p>
+          )}
         </div>
 
         {/* QR Code Canvas / Image */}
@@ -306,8 +321,14 @@ export function QrCodeGeneratorModal({
               className="w-56 h-56 object-contain rounded-lg"
             />
           ) : (
-            <div className="w-56 h-56 flex items-center justify-center text-gray-400 text-xs">
-              {releases.length === 0 ? 'No Release Available' : 'Generating QR Code...'}
+            <div className="w-56 h-56 flex flex-col items-center justify-center p-4 text-center text-gray-400 text-xs">
+              {currentRelease && !payload ? (
+                <span className="text-red-600 font-medium">QR disabled: Please allocate a positive quantity for this release.</span>
+              ) : releases.length === 0 ? (
+                'No Release Available'
+              ) : (
+                'Generating QR Code...'
+              )}
             </div>
           )}
           <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full shadow ${

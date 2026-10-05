@@ -1,33 +1,14 @@
 -- ==============================================================================
--- DSWD RELIEF SYSTEM: OPERATIONAL DATA RESET & ZERO-BASELINE LGU INVENTORY SEED
+-- DSWD RELIEF SYSTEM: NON-DESTRUCTIVE MASTER LGU SEED & IDEMPOTENT BASELINE SETUP
 -- ==============================================================================
--- This query:
--- 1. Cleans operational tables (preserves table structures and triggers)
--- 2. Preserves your primary admin user in public.profiles
--- 3. Inserts all 101 Panay Island & Guimaras municipalities into public.lgus
--- 4. Seeds zero-baseline inventory reports linked via lgu_id foreign key
+-- Safe to rerun at any time. This script:
+-- 1. Does NOT truncate operational records (manifests, releases, discrepancies).
+-- 2. Does NOT delete user accounts or profiles.
+-- 3. Inserts or updates all 101 Panay Island & Guimaras municipalities in public.lgus.
+-- 4. Idempotently seeds initial zero-baseline reports ONLY for LGUs with no prior reports.
 -- ==============================================================================
 
--- 1. Clean operational tables
-truncate table public.incoming_manifests cascade;
-truncate table public.outgoing_requests cascade;
-truncate table public.truck_live_locations cascade;
-truncate table public.discrepancy_reports cascade;
-truncate table public.lgu_inventory_reports cascade;
-
--- Reset batch and DR sequential counters
-update public.app_counters set value = 0 where key = 'batch_index';
-
--- 2. Clean non-admin test accounts from public.profiles (preserves primary admin)
-delete from public.profiles
-where id not in (
-  select id from public.profiles
-  where role = 'dswd_admin'
-  order by created_at asc
-  limit 1
-);
-
--- 3. Seed Master LGUs table with all 101 Panay Island & Guimaras municipalities
+-- 1. Seed Master LGUs table with all 101 Panay Island & Guimaras municipalities
 insert into public.lgus (municipality, province, lgu_name, latitude, longitude)
 select
   l.municipality,
@@ -144,7 +125,8 @@ on conflict (municipality, province) do update set
   latitude = excluded.latitude,
   longitude = excluded.longitude;
 
--- 4. Seed zero-baseline inventory reports linked directly to public.lgus via lgu_id
+-- 2. Idempotently seed zero-baseline inventory reports ONLY for LGUs with no prior reports.
+-- Clearly marked as unverified baseline awaiting official LGU assessment.
 insert into public.lgu_inventory_reports (
   lgu_id,
   municipality,
@@ -168,9 +150,15 @@ select
   now(),
   0, 0, 0, 0, 0, 0, 'Green',
   'Baseline initial inventory; awaiting incident report.'
-from public.lgus l;
+from public.lgus l
+where not exists (
+  select 1 from public.lgu_inventory_reports r
+  where r.lgu_id = l.id
+     or (lower(trim(r.municipality)) = lower(trim(l.municipality))
+         and lower(trim(r.province)) = lower(trim(l.province)))
+);
 
--- 5. Verification count query
+-- 3. Verification count query
 select
   l.province,
   count(distinct l.id) as total_lgus,
@@ -178,4 +166,5 @@ select
 from public.lgus l
 left join public.lgu_inventory_reports r on r.lgu_id = l.id
 group by l.province
+order by l.province;
 order by l.province;

@@ -43,7 +43,7 @@ export default function App() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const { session, profile, isLoading, signOut, refreshProfile } = useAuth();
-  const inventoryState = useInventoryState(Boolean(session));
+  const inventoryState = useInventoryState(Boolean(session), profile);
 
   const requestSignOut = () => setIsLogoutConfirmOpen(true);
 
@@ -149,6 +149,7 @@ export default function App() {
         <LGUReceiverPage
           profile={activeProfile}
           releases={inventoryState.outgoingReleasesList}
+          lgusList={inventoryState.lgusList}
           onAccept={inventoryState.receiverAcceptWithGps}
           onSignOut={requestSignOut}
         />
@@ -176,7 +177,7 @@ export default function App() {
   if (activeProfile.role === 'receiver' || ['/receiver', '/trucker'].includes(window.location.pathname)) {
     return (
       <Suspense fallback={<ViewLoading />}>
-        <ReceiverPage profile={activeProfile} onSignOut={requestSignOut} />
+        <ReceiverPage profile={activeProfile} lgusList={inventoryState.lgusList} onSignOut={requestSignOut} />
         <MetaMaskMismatchModal
           isOpen={walletMismatch && Boolean(profile?.walletAddress)}
           registeredWallet={profile?.walletAddress || ''}
@@ -208,11 +209,11 @@ export default function App() {
       case 'lgu-monitoring':
         return <LGUMonitoring inventoryState={inventoryState} currentRole={currentRole} />;
       case 'truck-tracking':
-        return <TruckTracking outgoingReleasesList={inventoryState.outgoingReleasesList} />;
+        return <TruckTracking outgoingReleasesList={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
       case 'qr-generator':
         return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
       case 'accounts':
-        return <AccountManagement currentAdminEmail={activeProfile.email} releases={inventoryState.outgoingReleasesList} />;
+        return <AccountManagement currentAdminEmail={activeProfile.email} releases={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
       case 'master-data':
         return <MasterDataView />;
       case 'dashboard':

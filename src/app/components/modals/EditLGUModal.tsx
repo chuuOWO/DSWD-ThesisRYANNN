@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { X, MapPin, AlertCircle, Edit } from 'lucide-react';
 import { sanitizeTextOnly, sanitizeNumbersOnly, sanitizePhone } from '../../lib/inputValidation';
+import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import type { LGUDelivery } from '../views/LGUMonitoring';
 
 interface EditLGUModalProps {
@@ -10,15 +11,15 @@ interface EditLGUModalProps {
   availableCategories?: string[];
 }
 
-const PROVINCES = ['Iloilo', 'Antique', 'Capiz', 'Aklan', 'Guimaras', 'Negros Occidental'];
+const PROVINCES = REGIONAL_PROVINCES;
 
 export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] }: EditLGUModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState<LGUDelivery>({
     ...lgu,
-    latitude: lgu.latitude ?? 10.7870,
-    longitude: lgu.longitude ?? 122.3892,
+    latitude: lgu.latitude,
+    longitude: lgu.longitude,
     currentStock: lgu.currentStock || {}
   });
   const [errors, setErrors] = useState<Partial<Record<keyof LGUDelivery, string>>>({});
@@ -316,9 +317,9 @@ export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] 
               <input
                 type="number"
                 step="any"
-                value={formData.latitude ?? 10.7870}
-                onChange={(e) => handleChange('latitude', parseFloat(e.target.value) || 0)}
-                placeholder="10.7870"
+                value={formData.latitude !== undefined && formData.latitude !== null ? formData.latitude : ''}
+                onChange={(e) => handleChange('latitude', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                placeholder="e.g. 10.7202"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
@@ -329,9 +330,9 @@ export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] 
               <input
                 type="number"
                 step="any"
-                value={formData.longitude ?? 122.3892}
-                onChange={(e) => handleChange('longitude', parseFloat(e.target.value) || 0)}
-                placeholder="122.3892"
+                value={formData.longitude !== undefined && formData.longitude !== null ? formData.longitude : ''}
+                onChange={(e) => handleChange('longitude', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                placeholder="e.g. 122.5621"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>

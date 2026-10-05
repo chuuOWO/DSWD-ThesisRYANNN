@@ -22,7 +22,9 @@ import dswdLogo from '../../../imports/dswdlogo.png';
 import dswdBuilding from '../../../imports/dswd_building.png';
 
 const generateTruckId = () => {
-  const number = Math.floor(1 + Math.random() * 9999);
+  const array = new Uint32Array(1);
+  crypto.getRandomValues(array);
+  const number = Math.floor(1 + (array[0] / 0xffffffff) * 9999);
   return `RCVR-${String(number).padStart(4, '0')}`;
 };
 

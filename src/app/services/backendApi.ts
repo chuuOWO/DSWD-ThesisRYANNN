@@ -1132,6 +1132,52 @@ export const backendApi = {
     return nextValue;
   },
 
+  async getNextManifestIndex() {
+    try {
+      const { data, error } = await supabase
+        .from('app_counters')
+        .select('value')
+        .eq('key', 'manifest_index')
+        .maybeSingle();
+
+      if (error || !data) {
+        return null;
+      }
+
+      const nextValue = ((data as { value?: number } | null)?.value ?? 0) + 1;
+      await supabase
+        .from('app_counters')
+        .update({ value: nextValue, updated_at: new Date().toISOString() })
+        .eq('key', 'manifest_index');
+      return nextValue;
+    } catch {
+      return null;
+    }
+  },
+
+  async getNextDrIndex() {
+    try {
+      const { data, error } = await supabase
+        .from('app_counters')
+        .select('value')
+        .eq('key', 'dr_index')
+        .maybeSingle();
+
+      if (error || !data) {
+        return null;
+      }
+
+      const nextValue = ((data as { value?: number } | null)?.value ?? 0) + 1;
+      await supabase
+        .from('app_counters')
+        .update({ value: nextValue, updated_at: new Date().toISOString() })
+        .eq('key', 'dr_index');
+      return nextValue;
+    } catch {
+      return null;
+    }
+  },
+
   async markHandoverAccepted(drNumber: string, receiverGps: string, txHash?: string) {
     const { error } = await supabase
       .from('outgoing_requests')
@@ -1371,7 +1417,7 @@ export const backendApi = {
   },
 
   subscribeDashboard(onChange: () => void) {
-    const channelName = `dashboard-db-changes-${Math.random().toString(36).slice(2, 9)}`;
+    const channelName = `dashboard-db-changes-${crypto.randomUUID().slice(0, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lgus' }, onChange)
@@ -1395,7 +1441,7 @@ export const backendApi = {
       .then((locations) => locations.forEach(onUpsert))
       .catch(() => {});
 
-    const channelName = `truck-live-locations-${Math.random().toString(36).slice(2, 9)}`;
+    const channelName = `truck-live-locations-${crypto.randomUUID().slice(0, 8)}`;
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, (payload) => {

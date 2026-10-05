@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, MapPin, AlertCircle } from 'lucide-react';
 import { sanitizeTextOnly, sanitizeNumbersOnly, sanitizePhone } from '../../lib/inputValidation';
+import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
 
 export interface LGUForm {
   lguName: string;
@@ -32,7 +33,7 @@ interface AddLGUModalProps {
   onSubmit: (data: LGUForm) => void | Promise<void>;
 }
 
-const PROVINCES = ['Iloilo', 'Antique', 'Capiz', 'Aklan', 'Guimaras', 'Negros Occidental'];
+const PROVINCES = REGIONAL_PROVINCES;
 const FNFI_CATEGORIES = ['Hygiene Kit', 'Food Pack', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sack', 'RTEF'] as const;
 
 export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
@@ -42,8 +43,8 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
     lguName: '',
     municipality: '',
     province: '',
-    latitude: 10.7870,
-    longitude: 122.3892,
+    latitude: undefined,
+    longitude: undefined,
     totalItemsReleased: 0,
     deliveryCount: 0,
     completedDeliveries: 0,
@@ -396,9 +397,9 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
               <input
                 type="number"
                 step="any"
-                value={formData.latitude ?? 10.7870}
-                onChange={(e) => handleChange('latitude', parseFloat(e.target.value) || 0)}
-                placeholder="10.7870"
+                value={formData.latitude !== undefined && formData.latitude !== null ? formData.latitude : ''}
+                onChange={(e) => handleChange('latitude', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                placeholder="e.g. 10.7202"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
@@ -409,9 +410,9 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
               <input
                 type="number"
                 step="any"
-                value={formData.longitude ?? 122.3892}
-                onChange={(e) => handleChange('longitude', parseFloat(e.target.value) || 0)}
-                placeholder="122.3892"
+                value={formData.longitude !== undefined && formData.longitude !== null ? formData.longitude : ''}
+                onChange={(e) => handleChange('longitude', e.target.value === '' ? '' : parseFloat(e.target.value))}
+                placeholder="e.g. 122.5621"
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>

@@ -161,7 +161,7 @@ The smart contract verifies wallet identity + GPS location, permanently sealing 
 | `src/app/services/authApi.ts` | Authentication service managing Supabase Auth sign-ins, registrations, password resets, profile retrieval, profile photo updates, and wallet address bindings. |
 | `src/app/lib/supabase.ts` | Singleton factory initializing and exporting the `supabase` JavaScript client using runtime environment variables. |
 | `src/app/lib/inputValidation.ts` | Centralized sanitization library enforcing strict data types: `sanitizeNumbersOnly` (numeric inputs), `sanitizeTextOnly` (letters, spaces, periods, hyphens), `sanitizePhone` (digits and single leading `+`), and `sanitizeAlphanumeric`. |
-| `src/app/lib/lguCoordinates.ts` | Geospatial lookup mapping Panay Island municipalities to exact latitude and longitude coordinates for map centering and distance verification. |
+| `src/app/lib/lguMatching.ts` | Master utility matching database LGU records from Supabase, resolving names/aliases, extracting distinct provinces, grouping municipalities, and defining regional provinces. |
 
 ---
 
@@ -173,11 +173,11 @@ The smart contract verifies wallet identity + GPS location, permanently sealing 
 
 ---
 
-### Static Reference Data (`src/app/data/`)
+### Geographic Reference Data (`src/app/data/`)
 
 | File | Description |
 | :--- | :--- |
-| `src/app/data/panayLguDirectory.ts` | Official registry of all 93 Local Government Units across the 4 provinces of Panay Island (Iloilo, Antique, Capiz, Aklan). Contains municipal names, provincial designations, centroid GPS coordinates, and helper search utilities (`findPanayLgu`). |
+| `src/app/data/panayProvinceBoundaries.ts` | Static geographic reference boundaries (GeoJSON polygon geometries) for Panay Island provinces used for map layer overlays. |
 
 ---
 

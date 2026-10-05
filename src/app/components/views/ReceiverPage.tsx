@@ -28,9 +28,9 @@ import L from 'leaflet';
 import 'leaflet-routing-machine';
 
 import type { UserProfile } from '../../services/authApi';
-import { backendApi, type ReceiverReleaseRecord } from '../../services/backendApi';
+import { backendApi, type ReceiverReleaseRecord, type LguRecord } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
-import { findPanayLgu } from '../../data/panayLguDirectory';
+import { findMatchingLgu } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
@@ -174,7 +174,7 @@ const smoothCoordinate = (prev: number, next: number, alpha = 0.6) => {
   return prev + alpha * (next - prev);
 };
 
-const parseQrPayload = (value: string): QrPayload => {
+const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPayload => {
   const trimmed = value.trim();
   if (!trimmed) throw new Error('QR code is empty.');
 
@@ -192,7 +192,7 @@ const parseQrPayload = (value: string): QrPayload => {
           try {
             const parsed = JSON.parse(decodeURIComponent(rawData));
             if (parsed && typeof parsed.drNumber === 'string') {
-              return parseQrPayload(JSON.stringify(parsed));
+              return parseQrPayload(JSON.stringify(parsed), releases);
             }
           } catch {}
         }
@@ -200,31 +200,52 @@ const parseQrPayload = (value: string): QrPayload => {
         // Check for 'dr' or 'drNumber' param
         const drParam = params.get('dr') || params.get('drNumber');
         if (drParam) {
-          const qty = Number(params.get('qty') || 100);
+          const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === drParam.toUpperCase());
+          const rawQty = params.get('qty');
+          const parsedQty = rawQty && Number(rawQty) > 0 ? Number(rawQty) : (matchingRel?.amount_approved ?? matchingRel?.amount_requested);
+          if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {
+            throw new Error(`Missing or invalid quantity for shipment ${drParam}. Scan a complete QR payload.`);
+          }
           return {
             drNumber: drParam,
             handoverContractId: `HANDOVER-${drParam.replace('DR-', '')}`,
-            category: params.get('cat') || 'Food Pack',
-            quantity: qty,
+            category: params.get('cat') || matchingRel?.category || 'Food Pack',
+            quantity: parsedQty,
             batchTokenIds: [`BATCH-${drParam}`],
-            batchQuantities: [qty],
-            from: params.get('from') || 'DSWD Logistics Hub',
-            to: params.get('to') || 'Assigned LGU'
+            batchQuantities: [parsedQty],
+            from: params.get('from') || matchingRel?.warehouse_source || 'DSWD Logistics Hub',
+            to: params.get('to') || matchingRel?.destination_address || matchingRel?.lgu_name || matchingRel?.municipality || 'Assigned LGU'
           };
         }
       }
-    } catch {}
+    } catch (err) {
+      if (err instanceof Error) throw err;
+    }
   }
 
   // 2. Standard JSON manifest parsing
   try {
     const data = JSON.parse(trimmed) as Partial<QrPayload>;
-    const batchTokenIds = Array.isArray(data.batchTokenIds) && data.batchTokenIds.length ? data.batchTokenIds.map(String) : [`BATCH-${data.drNumber || 'MANIFEST'}`];
-    const batchQuantities = Array.isArray(data.batchQuantities) && data.batchQuantities.length ? data.batchQuantities.map(Number) : [Number(data.quantity ?? 1)];
-
     if (!data.drNumber) {
       throw new Error('QR code does not contain a DR number.');
     }
+
+    const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === String(data.drNumber).toUpperCase());
+    const batchQuantities = Array.isArray(data.batchQuantities) && data.batchQuantities.length
+      ? data.batchQuantities.map(Number).filter((q) => q > 0)
+      : [];
+    const sumQuantities = batchQuantities.reduce((sum, amount) => sum + amount, 0);
+    const parsedQty = (data.quantity !== undefined && data.quantity !== null && Number(data.quantity) > 0)
+      ? Number(data.quantity)
+      : (sumQuantities > 0 ? sumQuantities : (matchingRel?.amount_approved ?? matchingRel?.amount_requested));
+
+    if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {
+      throw new Error(`Missing or invalid quantity for shipment ${data.drNumber}. Valid positive quantity required.`);
+    }
+
+    const batchTokenIds = Array.isArray(data.batchTokenIds) && data.batchTokenIds.length
+      ? data.batchTokenIds.map(String)
+      : [`BATCH-${data.drNumber}`];
 
     const destinationCoords = Array.isArray(data.destinationCoords) && isValidCoordinate(data.destinationCoords as any)
       ? [Number(data.destinationCoords[0]), Number(data.destinationCoords[1])] as [number, number]
@@ -233,25 +254,30 @@ const parseQrPayload = (value: string): QrPayload => {
     return {
       drNumber: String(data.drNumber),
       handoverContractId: String(data.handoverContractId || `HANDOVER-${data.drNumber}`),
-      category: String(data.category || 'Relief Goods'),
-      quantity: Number(data.quantity ?? (batchQuantities.reduce((sum, amount) => sum + amount, 0) || 1)),
+      category: String(data.category || matchingRel?.category || 'Relief Goods'),
+      quantity: Number(parsedQty),
       batchTokenIds,
-      batchQuantities,
-      from: String(data.from || 'DSWD Oton Main Warehouse'),
-      to: String(data.to || 'Assigned LGU'),
+      batchQuantities: batchQuantities.length > 0 ? batchQuantities : [Number(parsedQty)],
+      from: String(data.from || matchingRel?.warehouse_source || 'DSWD Oton Main Warehouse'),
+      to: String(data.to || matchingRel?.destination_address || matchingRel?.lgu_name || matchingRel?.municipality || 'Assigned LGU'),
       destinationCoords
     };
   } catch (err) {
     if (trimmed.startsWith('DR-') || trimmed.startsWith('INC-')) {
+      const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === trimmed.toUpperCase());
+      const parsedQty = matchingRel?.amount_approved ?? matchingRel?.amount_requested;
+      if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {
+        throw new Error(`Shipment ${trimmed} scanned without quantity and no matching record found in loaded releases.`);
+      }
       return {
         drNumber: trimmed,
         handoverContractId: `HANDOVER-${trimmed}`,
-        category: 'Relief Goods',
-        quantity: 1,
+        category: matchingRel?.category || 'Relief Goods',
+        quantity: Number(parsedQty),
         batchTokenIds: [`BATCH-${trimmed}`],
-        batchQuantities: [1],
-        from: 'DSWD Oton Main Warehouse',
-        to: 'Assigned LGU'
+        batchQuantities: [Number(parsedQty)],
+        from: matchingRel?.warehouse_source || 'DSWD Logistics Hub',
+        to: matchingRel?.destination_address || matchingRel?.lgu_name || matchingRel?.municipality || 'Assigned LGU'
       };
     }
     throw new Error(err instanceof Error ? err.message : 'Invalid QR code format. Please scan a valid shipment QR code.');
@@ -285,7 +311,7 @@ const getBrowserLocation = () =>
     );
   });
 
-const releaseToPayload = (release: ReceiverReleaseRecord): QrPayload => {
+const releaseToPayload = (release: ReceiverReleaseRecord, dbLgus: LguRecord[] = []): QrPayload => {
   const allocatedBatches = release.allocated_batches ?? [];
   let destinationCoords: [number, number] | undefined = undefined;
   if (release.receiver_gps) {
@@ -294,21 +320,25 @@ const releaseToPayload = (release: ReceiverReleaseRecord): QrPayload => {
       destinationCoords = [parts[0], parts[1]];
     }
   }
-  if (!destinationCoords) {
-    const lguLookup = findPanayLgu(
+  if (!destinationCoords && dbLgus.length > 0) {
+    const lguLookup = findMatchingLgu(
+      dbLgus,
       release.destination_address || release.lgu_name || release.municipality || '',
       release.province || undefined
     );
-    if (lguLookup) {
-      destinationCoords = [lguLookup.lat, lguLookup.lng];
+    if (lguLookup && typeof lguLookup.latitude === 'number' && typeof lguLookup.longitude === 'number') {
+      destinationCoords = [lguLookup.latitude, lguLookup.longitude];
     }
   }
+
+  const rawQty = release.amount_approved ?? release.amount_requested;
+  const verifiedQty = rawQty && !isNaN(rawQty) && rawQty > 0 ? Number(rawQty) : 0;
 
   return {
     drNumber: release.dr_number,
     handoverContractId: release.handover_contract_id || `HANDOVER-${release.dr_number}`,
     category: release.category || 'Relief Goods',
-    quantity: Number(release.amount_approved ?? release.amount_requested ?? 1),
+    quantity: verifiedQty,
     batchTokenIds: allocatedBatches.map((batch) => String(batch.batchTokenId || '')).filter(Boolean),
     batchQuantities: allocatedBatches.map((batch) => Number(batch.quantity ?? 0)).filter((quantity) => quantity > 0),
     from: release.warehouse_source || 'DSWD Oton Main Warehouse',
@@ -620,6 +650,7 @@ const checkIsMobileDevice = () => {
 
 export interface ReceiverPageProps {
   profile?: UserProfile | null;
+  lgusList?: LguRecord[];
   onSignOut?: () => void;
 }
 
@@ -673,10 +704,29 @@ export function ReceiverPage(props: ReceiverPageProps) {
   );
 }
 
-function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
+function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps) {
   const receiverId = useMemo(() => getReceiverIdentifier(profile), [profile]);
   const storageKey = `trucker_active_packages_${receiverId}`;
   const lastKnownPosKey = `trucker_last_known_pos_${receiverId}`;
+
+  // Authoritative LGU list from Supabase
+  const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
+
+  useEffect(() => {
+    if (lgusList && lgusList.length > 0) {
+      setDbLgus(lgusList);
+      return;
+    }
+    let isMounted = true;
+    backendApi.getLgus().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setDbLgus(data);
+      }
+    }).catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [lgusList]);
 
   const [step, setStep] = useState<Step>('pickup');
   const [inventory, setInventory] = useState(initialInventory);
@@ -831,8 +881,9 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
       }
     }
 
-    // 3. Authoritative fallback from Panay LGU Directory (Every municipality on Panay)
-    const lguLookup = findPanayLgu(
+    // 3. Authoritative fallback from database LGUs
+    const lguLookup = findMatchingLgu(
+      dbLgus,
       targetRelease?.destination_address ||
       targetRelease?.lgu_name ||
       targetRelease?.municipality ||
@@ -840,10 +891,10 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
       '',
       targetRelease?.province || undefined
     );
-    if (lguLookup) {
+    if (lguLookup && typeof lguLookup.latitude === 'number' && typeof lguLookup.longitude === 'number') {
       return {
-        name: lguLookup.defaultFacility || `${lguLookup.municipality} Terminal`,
-        position: [lguLookup.lat, lguLookup.lng] as [number, number],
+        name: lguLookup.lguName || `${lguLookup.municipality} Terminal`,
+        position: [lguLookup.latitude, lguLookup.longitude] as [number, number],
         isPinned: true
       };
     }
@@ -853,7 +904,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
       position: null,
       isPinned: false
     };
-  }, [activePackages.length, activePayload, activeRelease]);
+  }, [activePackages.length, activePayload, activeRelease, dbLgus]);
 
   // Compute destination pins for all active packages in custody
   const allPackageDestinations = useMemo(() => {
@@ -874,7 +925,8 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
           }
         }
         if (!position) {
-          const lguLookup = findPanayLgu(
+          const lguLookup = findMatchingLgu(
+            dbLgus,
             matchingRelease?.destination_address ||
             matchingRelease?.lgu_name ||
             matchingRelease?.municipality ||
@@ -882,9 +934,9 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
             '',
             matchingRelease?.province || undefined
           );
-          if (lguLookup) {
-            position = [lguLookup.lat, lguLookup.lng];
-            name = lguLookup.defaultFacility || `${lguLookup.municipality} Terminal`;
+          if (lguLookup && typeof lguLookup.latitude === 'number' && typeof lguLookup.longitude === 'number') {
+            position = [lguLookup.latitude, lguLookup.longitude];
+            name = lguLookup.lguName || `${lguLookup.municipality} Terminal`;
           }
         }
       }
@@ -1335,7 +1387,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
 
   const handleQrValue = (value: string) => {
     try {
-      const payload = parseQrPayload(value);
+      const payload = parseQrPayload(value, allReleases);
       void handleInitiateCustody(payload);
     } catch (error) {
       setCameraMessage(error instanceof Error ? error.message : 'Invalid QR payload.');
@@ -1353,9 +1405,9 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
       try {
         let payloadToLoad: QrPayload | null = null;
         if (urlData) {
-          payloadToLoad = parseQrPayload(decodeURIComponent(urlData));
+          payloadToLoad = parseQrPayload(decodeURIComponent(urlData), allReleases);
         } else if (urlDr) {
-          payloadToLoad = parseQrPayload(urlDr);
+          payloadToLoad = parseQrPayload(urlDr, allReleases);
         }
         if (payloadToLoad) {
           window.history.replaceState({}, '', window.location.pathname);

@@ -81,9 +81,14 @@ alter table public.warehouses add column if not exists updated_at timestamptz de
 
 create unique index if not exists warehouses_name_key on public.warehouses (name);
 
+-- Bootstrap regional warehouses with zero opening stock.
+-- NOTE FOR ADMINISTRATORS: Verified initial balances must NOT be hardcoded into migrations.
+-- Administrators should record verified physical inventory via the Incoming Goods module
+-- (using source "VDRC", "LDRC", or initial physical count audit) so that all operational stock
+-- is backed by an auditable digital manifest and transaction trail.
 insert into public.warehouses (name, province, municipality, capacity_packs, latitude, longitude, food_packs, hygiene_kits, sleeping_kits, kitchen_kits, family_kits, laminated_sacks, rtef) values
-  ('Oton Main Warehouse', 'Iloilo', 'Oton', 150000, 10.6975, 122.4764, 34500, 12400, 8900, 6200, 7100, 4500, 15000),
-  ('Pototan Main Warehouse', 'Iloilo', 'Pototan', 80000, 10.9492, 122.6289, 21200, 8100, 5400, 4100, 4800, 3200, 9500)
+  ('Oton Main Warehouse', 'Iloilo', 'Oton', 150000, 10.6975, 122.4764, 0, 0, 0, 0, 0, 0, 0),
+  ('Pototan Main Warehouse', 'Iloilo', 'Pototan', 80000, 10.9492, 122.6289, 0, 0, 0, 0, 0, 0, 0)
 on conflict (name) do nothing;
 
 update public.warehouses
@@ -96,7 +101,7 @@ set current_stock = jsonb_build_object(
   'Laminated Sack', coalesce(laminated_sacks, 0),
   'RTEF', coalesce(rtef, 0)
 )
-where current_stock is null or current_stock = '{}'::jsonb;
+where current_stock is null;
 
 -- 2.3 TABLE: supply_sources (National Resource Centers & Distribution Hubs)
 create table if not exists public.supply_sources (
@@ -973,7 +978,10 @@ create table if not exists public.app_counters (
 );
 
 insert into public.app_counters (key, value)
-values ('batch_index', 0)
+values
+  ('batch_index', 0),
+  ('manifest_index', 0),
+  ('dr_index', 0)
 on conflict (key) do nothing;
 
 update public.app_counters
@@ -982,6 +990,20 @@ set value = greatest(value, (
   from public.incoming_manifests
 ))
 where key = 'batch_index';
+
+update public.app_counters
+set value = greatest(value, (
+  select coalesce(max((regexp_match(manifest_number, 'INC-\d{4}-(\d+)'))[1]::int), 0)
+  from public.incoming_manifests
+))
+where key = 'manifest_index';
+
+update public.app_counters
+set value = greatest(value, (
+  select coalesce(max((regexp_match(dr_number, 'DR-\d{4}-(\d+)'))[1]::int), 0)
+  from public.outgoing_requests
+))
+where key = 'dr_index';
 
 -- ==============================================================================
 -- 10. REALTIME REPLICATION CONFIGURATION

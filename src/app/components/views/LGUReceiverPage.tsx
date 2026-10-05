@@ -25,8 +25,8 @@ import L from 'leaflet';
 
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import { authApi, type UserProfile } from '../../services/authApi';
-import { backendApi, type TruckLiveLocation } from '../../services/backendApi';
-import { findPanayLgu, normalizeLguName } from '../../data/panayLguDirectory';
+import { backendApi, type TruckLiveLocation, type LguRecord } from '../../services/backendApi';
+import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
@@ -34,6 +34,7 @@ import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 interface LGUReceiverPageProps {
   profile: UserProfile;
   releases: OutgoingRelease[];
+  lgusList?: LguRecord[];
   onAccept: (drNumber: string, actorRole?: any, actorLguMunicipality?: string) => Promise<{ ok: boolean; message: string }>;
   onSignOut: () => void;
 }
@@ -190,10 +191,29 @@ function MapController({
   return null;
 }
 
-export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUReceiverPageProps) {
+export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignOut }: LGUReceiverPageProps) {
   // LGU municipality is strictly assigned by Central Admin from the database profile
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
+
+  // Authoritative LGU list from Supabase
+  const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
+
+  useEffect(() => {
+    if (lgusList && lgusList.length > 0) {
+      setDbLgus(lgusList);
+      return;
+    }
+    let isMounted = true;
+    backendApi.getLgus().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setDbLgus(data);
+      }
+    }).catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [lgusList]);
 
   // Optimistic tracking for accepted packages so they immediately leave the incoming view upon scan
   const [locallyAcceptedDrs, setLocallyAcceptedDrs] = useState<string[]>([]);
@@ -203,8 +223,8 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
 
   const canonicalUserLgu = useMemo(() => {
     if (!effectiveLguName) return null;
-    return findPanayLgu(effectiveLguName);
-  }, [effectiveLguName]);
+    return findMatchingLgu(dbLgus, effectiveLguName);
+  }, [dbLgus, effectiveLguName]);
 
   const targetMuni = (canonicalUserLgu ? canonicalUserLgu.municipality : effectiveLguName).toLowerCase();
   const lguDisplayName = canonicalUserLgu
@@ -217,21 +237,21 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
   const getReleaseDestinationMuni = (r: OutgoingRelease): string | null => {
     // 1. Direct municipality field if present
     if (r.municipality && typeof r.municipality === 'string' && r.municipality.trim()) {
-      const match = findPanayLgu(r.municipality, r.province);
+      const match = findMatchingLgu(dbLgus, r.municipality, r.province);
       if (match) return match.municipality.toLowerCase();
       const raw = normalizeLguName(r.municipality);
       if (raw) return raw;
     }
     // 2. LGU Name field (e.g. "Sigma Municipal Hall" -> "sigma")
     if (r.lguName && typeof r.lguName === 'string' && r.lguName.trim()) {
-      const match = findPanayLgu(r.lguName, r.province);
+      const match = findMatchingLgu(dbLgus, r.lguName, r.province);
       if (match) return match.municipality.toLowerCase();
       const raw = normalizeLguName(r.lguName);
       if (raw) return raw;
     }
     // 3. Destination Address (strictly matching known municipality)
     if (r.destinationAddress && typeof r.destinationAddress === 'string' && r.destinationAddress.trim()) {
-      const match = findPanayLgu(r.destinationAddress, r.province);
+      const match = findMatchingLgu(dbLgus, r.destinationAddress, r.province);
       if (match) return match.municipality.toLowerCase();
     }
     return null;
@@ -337,15 +357,15 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
   const lguInfo = useMemo(() => {
     if (canonicalUserLgu) return canonicalUserLgu;
     if (currentRelease?.municipality) {
-      const match = findPanayLgu(currentRelease.municipality, currentRelease.province);
+      const match = findMatchingLgu(dbLgus, currentRelease.municipality, currentRelease.province);
       if (match) return match;
     }
-    if (effectiveLguName) return findPanayLgu(effectiveLguName);
+    if (effectiveLguName) return findMatchingLgu(dbLgus, effectiveLguName);
     return undefined;
-  }, [canonicalUserLgu, currentRelease, effectiveLguName]);
+  }, [canonicalUserLgu, currentRelease, dbLgus, effectiveLguName]);
 
   const lguFacilityName = useMemo(() => {
-    return lguInfo?.defaultFacility || (effectiveLguName ? `${effectiveLguName} Municipal Hall / Terminal` : 'LGU Terminal');
+    return lguInfo?.lguName || (effectiveLguName ? `${effectiveLguName} Municipal Hall / Evacuation Center` : 'LGU Terminal');
   }, [lguInfo, effectiveLguName]);
 
   const lguDestinationCoords = useMemo<[number, number] | null>(() => {
@@ -356,9 +376,9 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
         return [parts[0], parts[1]];
       }
     }
-    // 2. Look up municipality from Panay LGU Directory
-    if (lguInfo) {
-      return [lguInfo.lat, lguInfo.lng];
+    // 2. Look up municipality from database LGUs
+    if (lguInfo && typeof lguInfo.latitude === 'number' && typeof lguInfo.longitude === 'number') {
+      return [lguInfo.latitude, lguInfo.longitude];
     }
     return null;
   }, [currentRelease, lguInfo]);
@@ -420,8 +440,8 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
       const reports = await backendApi.getLguPriorityReports(effectiveLguName);
       const matched = reports.find(
         (r) =>
-          (r.municipality && findPanayLgu(r.municipality)?.municipality.toLowerCase() === targetMuni) ||
-          (r.lguName && findPanayLgu(r.lguName)?.municipality.toLowerCase() === targetMuni) ||
+          (r.municipality && findMatchingLgu(dbLgus, r.municipality)?.municipality.toLowerCase() === targetMuni) ||
+          (r.lguName && findMatchingLgu(dbLgus, r.lguName)?.municipality.toLowerCase() === targetMuni) ||
           (r.municipality && r.municipality.toLowerCase() === targetMuni) ||
           (r.lguName && r.lguName.toLowerCase().includes(targetMuni))
       );
@@ -571,14 +591,16 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
     try {
       let drNumber = '';
       let category = 'Relief Goods';
-      let quantity = 100;
+      let quantity = 0;
       let rawTo = '';
 
       try {
         const parsed = JSON.parse(rawPayload);
         drNumber = parsed.drNumber || '';
         category = parsed.category || currentRelease?.fnfiCategory || 'Relief Goods';
-        quantity = Number(parsed.quantity || currentRelease?.amountApproved || currentRelease?.amountRequested || 100);
+        if (parsed.quantity !== undefined && parsed.quantity !== null && Number(parsed.quantity) > 0) {
+          quantity = Number(parsed.quantity);
+        }
         rawTo = parsed.to || '';
       } catch {
         if (rawPayload.trim().toUpperCase().startsWith('DR-')) {
@@ -598,10 +620,16 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
 
       if (matchingRelease) {
         category = matchingRelease.fnfiCategory || category;
-        quantity = Number(matchingRelease.amountApproved || matchingRelease.amountRequested || quantity);
+        if (!quantity || quantity <= 0) {
+          quantity = Number(matchingRelease.amountApproved || matchingRelease.amountRequested || 0);
+        }
         if (!rawTo) {
           rawTo = matchingRelease.destinationAddress || matchingRelease.lguName || matchingRelease.municipality || '';
         }
+      }
+
+      if (!quantity || isNaN(quantity) || quantity <= 0) {
+        throw new Error(`Unable to determine verified shipment quantity for ${canonicalDrNumber}. QR payload and registered release record are missing a valid positive quantity.`);
       }
 
       // Check if already accepted
@@ -631,17 +659,17 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
       if (effectiveLguName) {
         const destMuni =
           (matchingRelease && getReleaseDestinationMuni(matchingRelease)) ||
-          (rawTo && (findPanayLgu(rawTo)?.municipality.toLowerCase() || normalizeLguName(rawTo))) ||
+          (rawTo && (findMatchingLgu(dbLgus, rawTo)?.municipality.toLowerCase() || normalizeLguName(rawTo))) ||
           '';
 
         if (destMuni && targetMuni && destMuni !== targetMuni) {
-          const designatedName = findPanayLgu(destMuni)?.municipality || destMuni || 'another municipality';
+          const designatedName = findMatchingLgu(dbLgus, destMuni)?.municipality || destMuni || 'another municipality';
           throw new Error(`Mismatched Destination: Shipment ${canonicalDrNumber} is designated for ${designatedName}, not ${canonicalUserLgu?.municipality || effectiveLguName}.`);
         }
       }
 
-      // Resolve authoritative municipality name from directory
-      const authoritativeLgu = (rawTo && findPanayLgu(rawTo)) || (matchingRelease?.municipality ? findPanayLgu(matchingRelease.municipality) : undefined) || canonicalUserLgu;
+      // Resolve authoritative municipality name from database
+      const authoritativeLgu = (rawTo && findMatchingLgu(dbLgus, rawTo)) || (matchingRelease?.municipality ? findMatchingLgu(dbLgus, matchingRelease.municipality) : undefined) || canonicalUserLgu;
       const finalMuni = authoritativeLgu?.municipality || canonicalUserLgu?.municipality || effectiveLguName || 'LGU';
 
       // Capture background GPS location silently for audit log (backend only)

@@ -17,9 +17,9 @@ import {
   ListOrdered
 } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
-import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord } from '../../services/backendApi';
+import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord, type LguRecord } from '../../services/backendApi';
 import { authApi, type UserProfile } from '../../services/authApi';
-import { findPanayLgu } from '../../data/panayLguDirectory';
+import { findMatchingLgu } from '../../lib/lguMatching';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';
@@ -88,20 +88,6 @@ const WAREHOUSE_COORDS: Record<string, [number, number]> = {
   'oton warehouse': [10.6912, 122.4728],
   'dswd pototan warehouse': [10.9435, 122.6369],
   'pototan warehouse': [10.9435, 122.6369]
-};
-
-const LGU_COORDS: Record<string, [number, number]> = {
-  leon: [10.787, 122.3892],
-  miagao: [10.6445, 122.2367],
-  'barotac nuevo': [10.894, 122.7042],
-  'iloilo city': [10.7202, 122.5621],
-  oton: [10.6931, 122.4738],
-  pototan: [10.9435, 122.6369],
-  'san miguel': [10.78, 122.4658],
-  'santa barbara': [10.8231, 122.5341],
-  passi: [11.1078, 122.6419],
-  sara: [11.257, 123.0147],
-  dumangas: [10.825, 122.7136]
 };
 
 const ADMIN_MAX_ACCEPTED_ACCURACY_METERS = 120;
@@ -185,7 +171,8 @@ const toTruckRoute = (
   outgoingReleasesList: OutgoingRelease[],
   priorityMap: Record<string, number> = {},
   heldMap: Record<string, boolean> = {},
-  profiles: UserProfile[] = []
+  profiles: UserProfile[] = [],
+  lgus: LguRecord[] = []
 ): TruckRoute => {
   const matchingProfile = profiles.find((p) =>
     (p.truckId && p.truckId.trim().toUpperCase() === location.truck_id.trim().toUpperCase()) ||
@@ -268,11 +255,11 @@ const toTruckRoute = (
       }
     }
 
-    // 2. Directory lookup fallback if exact GPS is not pinned
+    // 2. Database lookup fallback if exact GPS is not pinned
     if (!coords) {
-      const lguLookup = findPanayLgu(pkg.municipality || pkg.lgu_name || destText, pkg.province);
-      if (lguLookup) {
-        coords = [lguLookup.lat, lguLookup.lng];
+      const lguLookup = findMatchingLgu(lgus, pkg.municipality || pkg.lgu_name || destText, pkg.province);
+      if (lguLookup && typeof lguLookup.latitude === 'number' && typeof lguLookup.longitude === 'number') {
+        coords = [lguLookup.latitude, lguLookup.longitude];
       }
     }
 
@@ -705,7 +692,13 @@ function EmptyTracker() {
   );
 }
 
-export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesList?: OutgoingRelease[] }) {
+export function TruckTracking({
+  outgoingReleasesList = [],
+  lgusList
+}: {
+  outgoingReleasesList?: OutgoingRelease[];
+  lgusList?: LguRecord[];
+}) {
   const [liveLocations, setLiveLocations] = useState<Record<string, TruckLiveLocation>>({});
   const [releases, setReleases] = useState<ReceiverReleaseRecord[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
@@ -714,6 +707,25 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
   const [packagePriorities, setPackagePriorities] = useState<Record<string, number>>({});
   const [heldPackages, setHeldPackages] = useState<Record<string, boolean>>({});
   const mapRef = useRef<L.Map | null>(null);
+
+  // Authoritative LGU list from Supabase
+  const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
+
+  useEffect(() => {
+    if (lgusList && lgusList.length > 0) {
+      setDbLgus(lgusList);
+      return;
+    }
+    let isMounted = true;
+    backendApi.getLgus().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setDbLgus(data);
+      }
+    }).catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [lgusList]);
 
   useEffect(() => {
     authApi.getAllProfiles().then(setProfiles).catch(() => {});
@@ -806,8 +818,8 @@ export function TruckTracking({ outgoingReleasesList = [] }: { outgoingReleasesL
     .filter(isActiveReceiverLocation)
     .filter((loc) => !isLguReceiverId(loc.truck_id))
     .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
-    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles)),
-    [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles]);
+    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles, dbLgus)),
+    [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles, dbLgus]);
 
   useEffect(() => {
     if (!liveTruckRoutes.length) {

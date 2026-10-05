@@ -66,7 +66,7 @@ const defaultFormData: ReleaseForm = {
     deliveryStatus: 'Allocating',
     incidentCode: '',
     destinationAddress: '',
-    receiverGps: '10.6415, 122.2352'
+    receiverGps: ''
 };
 
 const cleanBuildingName = (val?: string): string => {
@@ -126,24 +126,16 @@ export function AddReleaseModal({
 
   const categoryOptions = useMemo(() => {
     if (kitTypesList && kitTypesList.length > 0) {
-      return kitTypesList.map(k => k.name);
+      return kitTypesList.filter(k => k.isActive !== false).map(k => k.name);
     }
-    return [
-      'Family Food Pack',
-      'Hygiene Kit',
-      'Sleeping Kit',
-      'Kitchen Kit',
-      'Family Kit',
-      'Laminated Sacks',
-      'Ready-to-Eat Food (RTEF)'
-    ];
+    return [];
   }, [kitTypesList]);
 
   const warehouseOptions = useMemo(() => {
     if (warehousesList && warehousesList.length > 0) {
-      return warehousesList.map(w => w.name);
+      return warehousesList.filter(w => w.isActive !== false).map(w => w.name);
     }
-    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+    return [];
   }, [warehousesList]);
 
   const [selectedProvince, setSelectedProvince] = useState(provinces[0] || 'Iloilo');
@@ -155,7 +147,7 @@ export function AddReleaseModal({
       const parts = initialData.receiverGps.split(',').map(s => parseFloat(s.trim()));
       if (parts.length === 2 && !isNaN(parts[0])) return parts[0];
     }
-    return 10.6415;
+    return 10.7202;
   });
 
   const [pinLng, setPinLng] = useState<number>(() => {
@@ -163,7 +155,7 @@ export function AddReleaseModal({
       const parts = initialData.receiverGps.split(',').map(s => parseFloat(s.trim()));
       if (parts.length === 2 && !isNaN(parts[1])) return parts[1];
     }
-    return 122.2352;
+    return 122.5621;
   });
 
   useEffect(() => {
@@ -449,6 +441,7 @@ export function AddReleaseModal({
               lguDestination={formData.lguName}
               onLguDestinationChange={(name) => handleChange('lguName', name)}
               onLocationChange={handleLocationChange}
+              lgusList={availableLgus}
             />
             {(errors.municipality || errors.province) && (
               <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, Marker, TileLayer, Polygon, useMap, useMapEvents } from 'react-leaflet';
 import { Crosshair, MapPin, Search, Loader2, Info, AlertTriangle } from 'lucide-react';
+import { backendApi, type LguRecord } from '../../services/backendApi';
 import {
-  findPanayLgu,
-  PANAY_LGUS,
-  PANAY_PROVINCES,
-  PANAY_MUNICIPALITIES_BY_PROVINCE
-} from '../../data/panayLguDirectory';
+  findMatchingLgu,
+  extractProvinces,
+  groupMunicipalitiesByProvince,
+  REGIONAL_PROVINCES
+} from '../../lib/lguMatching';
 import {
   isPointInProvince,
   getInvertedMaskPositions,
@@ -39,6 +40,7 @@ interface LocationPickerMapProps {
   municipality?: string;
   lguDestination?: string;
   onLguDestinationChange?: (name: string) => void;
+  lgusList?: LguRecord[];
 }
 
 // Custom high-visibility delivery pin marker
@@ -125,15 +127,38 @@ export function LocationPickerMap({
   province = 'Iloilo',
   municipality = '',
   lguDestination = '',
-  onLguDestinationChange
+  onLguDestinationChange,
+  lgusList
 }: LocationPickerMapProps) {
-  // Structured Panay Island address components
+  // Authoritative LGU list from Supabase
+  const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
+
+  useEffect(() => {
+    if (lgusList && lgusList.length > 0) {
+      setDbLgus(lgusList);
+      return;
+    }
+    let isMounted = true;
+    backendApi.getLgus().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setDbLgus(data);
+      }
+    }).catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [lgusList]);
+
+  const provinces = useMemo(() => extractProvinces(dbLgus), [dbLgus]);
+  const municipalitiesByProvince = useMemo(() => groupMunicipalitiesByProvince(dbLgus), [dbLgus]);
+
+  // Structured address components
   const [building, setBuilding] = useState(lguDestination || '');
   const [street, setStreet] = useState('');
   const [barangay, setBarangay] = useState('');
   const [district, setDistrict] = useState('NA');
   const [selectedProvince, setSelectedProvince] = useState<string>(
-    PANAY_PROVINCES.includes(province as any) ? province : 'Iloilo'
+    province || 'Iloilo'
   );
   const [selectedMunicipality, setSelectedMunicipality] = useState<string>(
     municipality || 'Oton'
@@ -156,7 +181,7 @@ export function LocationPickerMap({
     if (lguDestination !== undefined && lguDestination !== building) {
       setBuilding(lguDestination);
     }
-  }, [lguDestination]);
+  }, [lguDestination, building]);
 
   // Helper to compile structured address string
   const compileAddress = (
@@ -200,35 +225,35 @@ export function LocationPickerMap({
 
   // Sync province/municipality if passed from outside
   useEffect(() => {
-    if (province && PANAY_PROVINCES.includes(province as any) && province !== selectedProvince) {
+    if (province && province !== selectedProvince) {
       setSelectedProvince(province);
     }
-  }, [province]);
+  }, [province, selectedProvince]);
 
   useEffect(() => {
     if (municipality && municipality !== selectedMunicipality) {
       setSelectedMunicipality(municipality);
     }
-  }, [municipality]);
+  }, [municipality, selectedMunicipality]);
 
   const handleProvinceSelect = (newProv: string) => {
     setSelectedProvince(newProv);
     setBoundaryWarning(null);
-    const munList = PANAY_MUNICIPALITIES_BY_PROVINCE[newProv] || [];
+    const munList = municipalitiesByProvince[newProv] || [];
     const newMun = munList[0] || '';
     setSelectedMunicipality(newMun);
-    const lgu = findPanayLgu(newMun, newProv);
-    const newLat = lgu?.lat || validLat;
-    const newLng = lgu?.lng || validLng;
+    const lgu = findMatchingLgu(dbLgus, newMun, newProv);
+    const newLat = lgu?.latitude || validLat;
+    const newLng = lgu?.longitude || validLng;
     updateAddressFields(building, street, barangay, district, newMun, newProv, newLat, newLng);
   };
 
   const handleMunicipalitySelect = (newMun: string) => {
     setSelectedMunicipality(newMun);
     setBoundaryWarning(null);
-    const lgu = findPanayLgu(newMun, selectedProvince);
-    const newLat = lgu?.lat || validLat;
-    const newLng = lgu?.lng || validLng;
+    const lgu = findMatchingLgu(dbLgus, newMun, selectedProvince);
+    const newLat = lgu?.latitude || validLat;
+    const newLng = lgu?.longitude || validLng;
     updateAddressFields(building, street, barangay, district, newMun, selectedProvince, newLat, newLng);
   };
 
@@ -267,16 +292,16 @@ export function LocationPickerMap({
     try {
       const results: SearchResultItem[] = [];
 
-      // 1. Check local Panay directory matches
-      const localMatches: SearchResultItem[] = PANAY_LGUS.filter((lgu) =>
-        lgu.municipality.toLowerCase().includes(query.toLowerCase()) ||
-        lgu.defaultFacility.toLowerCase().includes(query.toLowerCase()) ||
-        lgu.province.toLowerCase().includes(query.toLowerCase())
+      // 1. Check local database matches
+      const localMatches: SearchResultItem[] = dbLgus.filter((lgu) =>
+        (lgu.municipality || '').toLowerCase().includes(query.toLowerCase()) ||
+        (lgu.lguName || '').toLowerCase().includes(query.toLowerCase()) ||
+        (lgu.province || '').toLowerCase().includes(query.toLowerCase())
       ).map((lgu) => ({
-        label: `${lgu.defaultFacility}, ${lgu.municipality}, ${lgu.province}`,
-        lat: lgu.lat,
-        lng: lgu.lng,
-        building: lgu.defaultFacility,
+        label: `${lgu.lguName || lgu.municipality}, ${lgu.municipality}, ${lgu.province}`,
+        lat: lgu.latitude,
+        lng: lgu.longitude,
+        building: lgu.lguName || `${lgu.municipality} Municipal Hall`,
         street: '',
         barangay: '',
         district: 'NA',
@@ -372,13 +397,15 @@ export function LocationPickerMap({
 
       setSearchResults(combined.slice(0, 8));
     } catch {
-      const localMatches: SearchResultItem[] = PANAY_LGUS.filter((lgu) =>
-        lgu.municipality.toLowerCase().includes(query.toLowerCase())
+      const localMatches: SearchResultItem[] = dbLgus.filter((lgu) =>
+        (lgu.municipality || '').toLowerCase().includes(query.toLowerCase()) ||
+        (lgu.lguName || '').toLowerCase().includes(query.toLowerCase()) ||
+        (lgu.province || '').toLowerCase().includes(query.toLowerCase())
       ).map((lgu) => ({
-        label: `${lgu.defaultFacility} (${lgu.municipality}, ${lgu.province})`,
-        lat: lgu.lat,
-        lng: lgu.lng,
-        building: lgu.defaultFacility,
+        label: `${lgu.lguName || lgu.municipality} (${lgu.municipality}, ${lgu.province})`,
+        lat: lgu.latitude,
+        lng: lgu.longitude,
+        building: lgu.lguName || `${lgu.municipality} Municipal Hall`,
         street: '',
         barangay: '',
         district: 'NA',
@@ -394,14 +421,14 @@ export function LocationPickerMap({
   const selectSearchResult = (item: SearchResultItem) => {
     let matchedProv = selectedProvince;
     if (item.prov) {
-      const foundProv = PANAY_PROVINCES.find((p) => item.prov?.toLowerCase().includes(p.toLowerCase()));
+      const foundProv = provinces.find((p) => item.prov?.toLowerCase().includes(p.toLowerCase()));
       if (foundProv) matchedProv = foundProv;
     }
     setSelectedProvince(matchedProv);
 
     let matchedMuni = selectedMunicipality;
     if (item.muni) {
-      const muniList = PANAY_MUNICIPALITIES_BY_PROVINCE[matchedProv] || [];
+      const muniList = municipalitiesByProvince[matchedProv] || [];
       const foundMuni = muniList.find(
         (m) => item.muni?.toLowerCase().includes(m.toLowerCase()) || m.toLowerCase().includes(item.muni!.toLowerCase())
       );
@@ -444,8 +471,8 @@ export function LocationPickerMap({
   const resetToMunicipalityCenter = () => {
     setTargetZoom(14);
     setBoundaryWarning(null);
-    const lgu = findPanayLgu(selectedMunicipality || 'Oton', selectedProvince);
-    if (lgu) {
+    const lgu = findMatchingLgu(dbLgus, selectedMunicipality || 'Oton', selectedProvince);
+    if (lgu && typeof lgu.latitude === 'number' && typeof lgu.longitude === 'number') {
       updateAddressFields(
         building,
         street,
@@ -453,8 +480,8 @@ export function LocationPickerMap({
         district,
         lgu.municipality,
         lgu.province,
-        lgu.lat,
-        lgu.lng
+        lgu.latitude,
+        lgu.longitude
       );
     }
   };
@@ -574,7 +601,7 @@ export function LocationPickerMap({
               onChange={(e) => handleProvinceSelect(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
             >
-              {PANAY_PROVINCES.map((prov) => (
+              {provinces.map((prov) => (
                 <option key={prov} value={prov}>
                   {prov}
                 </option>
@@ -590,7 +617,7 @@ export function LocationPickerMap({
               onChange={(e) => handleMunicipalitySelect(e.target.value)}
               className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
             >
-              {(PANAY_MUNICIPALITIES_BY_PROVINCE[selectedProvince] || []).map((mun) => (
+              {(municipalitiesByProvince[selectedProvince] || []).map((mun) => (
                 <option key={mun} value={mun}>
                   {mun}
                 </option>

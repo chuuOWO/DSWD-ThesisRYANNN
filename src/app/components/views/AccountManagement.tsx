@@ -32,9 +32,9 @@ import {
   X
 } from 'lucide-react';
 import { authApi, type UserProfile } from '../../services/authApi';
-import { backendApi } from '../../services/backendApi';
+import { backendApi, type LguRecord } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
-import { PANAY_LGUS } from '../../data/panayLguDirectory';
+import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
 
@@ -75,48 +75,42 @@ export function getPendingIncomingToLgu(lguMunicipality: string, allReleases: Ou
  * Extracts strictly the municipality name from any raw string,
  * cleaning away facility descriptions (e.g. "Leon (Leon Municipal Office)" -> "Leon").
  */
-export function extractCleanMunicipality(rawName?: string | null): string {
+export function extractCleanMunicipality(rawName?: string | null, lgus: LguRecord[] = []): string {
   if (!rawName) return '';
   const trimmed = rawName.trim();
   if (!trimmed) return '';
 
-  // 1. Exact match with a Panay municipality
-  const exact = PANAY_LGUS.find(
-    (l) => (l.municipality || '').toLowerCase() === trimmed.toLowerCase()
-  );
-  if (exact) return exact.municipality;
+  // 1. Authoritative lookup from database LGU records if supplied
+  if (lgus && lgus.length > 0) {
+    const match = findMatchingLgu(lgus, trimmed);
+    if (match) return match.municipality;
+  }
 
-  // 2. Sort by length descending to match longer municipality names first (e.g. "San Jose de Buenavista")
-  const sorted = [...PANAY_LGUS].sort(
-    (a, b) => (b.municipality || '').length - (a.municipality || '').length
-  );
-  const starts = sorted.find((l) =>
-    trimmed.toLowerCase().startsWith((l.municipality || '').toLowerCase())
-  );
-  if (starts) return starts.municipality;
-
-  const includes = sorted.find((l) =>
-    trimmed.toLowerCase().includes((l.municipality || '').toLowerCase())
-  );
-  if (includes) return includes.municipality;
-
-  // 3. Fallback: strip parenthesis or facility suffixes
-  return trimmed
+  // 2. Strip common administrative noise prefixes and facility suffixes
+  const cleaned = trimmed
     .split('(')[0]
-    .replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '')
+    .replace(/^lgu\s+of\s+/i, '')
+    .replace(/^municipality\s+of\s+/i, '')
+    .replace(/^city\s+of\s+/i, '')
+    .replace(/^lgu\s+/i, '')
+    .replace(/\s+(municipal\s+hall|city\s+hall|drrm\s+office|drrmo|mdrrmo|cdrrmo|pdrrmo|evacuation\s+center|evacuation\s+gym|civic\s+center|terminal|gym|warehouse|office).*$/i, '')
     .trim();
+
+  return cleaned || trimmed;
 }
 
 interface MunicipalitySearchPickerProps {
   value: string;
   onChange: (municipality: string) => void;
   disabled?: boolean;
+  lgus?: LguRecord[];
 }
 
 function MunicipalitySearchPicker({
   value,
   onChange,
-  disabled = false
+  disabled = false,
+  lgus = []
 }: MunicipalitySearchPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -143,22 +137,19 @@ function MunicipalitySearchPicker({
 
   const matchedLgu = useMemo(() => {
     if (!value) return null;
-    return (
-      PANAY_LGUS.find(
-        (l) => (l.municipality || '').toLowerCase() === (value || '').toLowerCase()
-      ) ?? null
-    );
-  }, [value]);
+    return findMatchingLgu(lgus, value) ?? null;
+  }, [value, lgus]);
 
   const filteredLgus = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) {
-      return [...PANAY_LGUS].sort((a, b) => (a.municipality || '').localeCompare(b.municipality || ''));
+      return [...lgus].sort((a, b) => (a.municipality || '').localeCompare(b.municipality || ''));
     }
-    return PANAY_LGUS.filter(
+    return lgus.filter(
       (l) =>
         (l.municipality || '').toLowerCase().includes(q) ||
-        (l.province || '').toLowerCase().includes(q)
+        (l.province || '').toLowerCase().includes(q) ||
+        (l.lguName || '').toLowerCase().includes(q)
     ).sort((a, b) => {
       const aStarts = (a.municipality || '').toLowerCase().startsWith(q);
       const bStarts = (b.municipality || '').toLowerCase().startsWith(q);
@@ -166,7 +157,7 @@ function MunicipalitySearchPicker({
       if (!aStarts && bStarts) return 1;
       return (a.municipality || '').localeCompare(b.municipality || '');
     });
-  }, [query]);
+  }, [query, lgus]);
 
   if (value && !isEditing) {
     return (
@@ -300,12 +291,32 @@ function MunicipalitySearchPicker({
 interface AccountManagementProps {
   currentAdminEmail?: string;
   releases?: OutgoingRelease[];
+  lgusList?: LguRecord[];
 }
 
-export function AccountManagement({ currentAdminEmail, releases: propsReleases }: AccountManagementProps) {
+export function AccountManagement({ currentAdminEmail, releases: propsReleases, lgusList }: AccountManagementProps) {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dbReleases, setDbReleases] = useState<OutgoingRelease[]>([]);
+
+  // Authoritative LGU list from Supabase
+  const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
+
+  useEffect(() => {
+    if (lgusList && lgusList.length > 0) {
+      setDbLgus(lgusList);
+      return;
+    }
+    let isMounted = true;
+    backendApi.getLgus().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setDbLgus(data);
+      }
+    }).catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, [lgusList]);
 
   useEffect(() => {
     if (!propsReleases || propsReleases.length === 0) {
@@ -1410,9 +1421,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
 
                   <div className="flex items-center gap-3 flex-wrap pt-1">
                     <MunicipalitySearchPicker
-                      value={assignments[selectedProfile.id] ?? extractCleanMunicipality(selectedProfile.lguName)}
+                      value={assignments[selectedProfile.id] ?? extractCleanMunicipality(selectedProfile.lguName, dbLgus)}
                       onChange={(muni) => handleLguChange(selectedProfile.id, muni)}
                       disabled={savingUserId === selectedProfile.id || isAssignmentLocked}
+                      lgus={dbLgus}
                     />
 
                     <button
