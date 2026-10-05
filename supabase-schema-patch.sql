@@ -200,6 +200,7 @@ alter table public.lgus add column if not exists urgency_score integer default 0
 alter table public.lgus add column if not exists priority_color text default 'green';
 alter table public.lgus add column if not exists recommendation text default '';
 alter table public.lgus add column if not exists last_reported_at timestamptz default now();
+alter table public.lgus add column if not exists current_stock jsonb default '{}'::jsonb;
 alter table public.lgus add column if not exists created_at timestamptz default now();
 alter table public.lgus add column if not exists updated_at timestamptz default now();
 
@@ -1328,6 +1329,18 @@ create policy "Allow profile update"
   )
   with check (
     auth.uid() = id or
+    public.current_user_role() = 'dswd_admin' or
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'dswd_admin'
+    )
+  );
+
+drop policy if exists "Allow profile delete" on public.profiles;
+create policy "Allow profile delete"
+  on public.profiles for delete
+  to authenticated
+  using (
     public.current_user_role() = 'dswd_admin' or
     exists (
       select 1 from public.profiles

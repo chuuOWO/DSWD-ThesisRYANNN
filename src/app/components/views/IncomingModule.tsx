@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
@@ -23,16 +23,6 @@ interface IncomingModuleProps {
   inventoryState: InventoryState;
   currentRole: UserRole;
 }
-
-const FNFI_CATEGORIES = [
-  'Hygiene Kit',
-  'Food Pack',
-  'Sleeping Kit',
-  'Kitchen Kit',
-  'Family Kit',
-  'Laminated Sack',
-  'RTEF'
-];
 
 const statusStyles: Record<IncomingStatus, string> = {
   Draft: 'bg-gray-100 text-gray-700',
@@ -102,14 +92,26 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const [actionModal, setActionModal] = useState<IncomingActionModalState | null>(null);
 
   const destinationOptions = useMemo(() => {
-    if (warehousesList.length > 0) return warehousesList.map(w => w.name);
-    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
-  }, [warehousesList]);
+    const set = new Set<string>();
+    warehousesList?.forEach(w => {
+      if (w.name?.trim()) set.add(w.name.trim());
+    });
+    incomingGoodsList.forEach(item => {
+      if (item.destination?.trim()) set.add(item.destination.trim());
+    });
+    return Array.from(set).sort();
+  }, [warehousesList, incomingGoodsList]);
 
   const categoryOptions = useMemo(() => {
-    if (kitTypesList.length > 0) return kitTypesList.map(k => k.name);
-    return FNFI_CATEGORIES;
-  }, [kitTypesList]);
+    const set = new Set<string>();
+    kitTypesList?.forEach(k => {
+      if (k.name?.trim()) set.add(k.name.trim());
+    });
+    incomingGoodsList.forEach(item => {
+      if (item.fnfiCategory?.trim()) set.add(item.fnfiCategory.trim());
+    });
+    return Array.from(set).sort();
+  }, [kitTypesList, incomingGoodsList]);
 
   const handleAddGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
     addIncomingGoods(newGoods);
@@ -205,6 +207,14 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     return matchesSearch && matchesWarehouse && matchesCategory;
   });
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
+  const totalPages = Math.max(1, Math.ceil(filteredGoods.length / pageSize));
+  const paginatedGoods = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredGoods.slice(start, start + pageSize);
+  }, [filteredGoods, currentPage, pageSize]);
+
   const postedCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
   const pendingCount = incomingGoodsList.filter(item => item.status === 'Pending Verification').length;
   const warehouseTotalQty = incomingGoodsList
@@ -289,7 +299,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               type="text"
               placeholder="Search ID, batch record, category, source..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault();
               }}
@@ -299,7 +312,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
           <select
             value={selectedWarehouse}
-            onChange={(e) => setSelectedWarehouse(e.target.value)}
+            onChange={(e) => {
+              setSelectedWarehouse(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           >
             <option value="All">All Destinations</option>
@@ -310,7 +326,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
           <select
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            onChange={(e) => {
+              setSelectedCategory(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
           >
             <option value="All">All Categories</option>
@@ -320,7 +339,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="max-h-[560px] overflow-auto">
+        <div className="max-h-[380px] overflow-auto">
           <table className="w-full min-w-[1200px]">
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
@@ -333,7 +352,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredGoods.map((item) => (
+              {paginatedGoods.map((item) => (
                 <tr key={item.id} className="hover:bg-gray-50 transition-colors align-top">
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-blue-600">{item.id}</p>
@@ -411,10 +430,48 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           </table>
         </div>
 
-        {filteredGoods.length === 0 && (
+        {filteredGoods.length === 0 ? (
           <div className="text-center py-12">
             <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500 font-medium">No incoming goods found</p>
+          </div>
+        ) : (
+          <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+            <div>
+              Showing{' '}
+              <span className="font-bold text-gray-900">
+                {filteredGoods.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}
+              </span>{' '}
+              to{' '}
+              <span className="font-bold text-gray-900">
+                {Math.min(currentPage * pageSize, filteredGoods.length)}
+              </span>{' '}
+              of <span className="font-bold text-gray-900">{filteredGoods.length}</span> incoming records
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
+              <span className="font-bold text-gray-800 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>

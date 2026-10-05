@@ -7,12 +7,15 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Copy,
   ExternalLink,
   Eye,
   EyeOff,
   Key,
+  Lock,
   MapPin,
   Phone,
   RefreshCw,
@@ -20,9 +23,11 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   Truck,
   User,
   UserCheck,
+  UserX,
   Users,
   X
 } from 'lucide-react';
@@ -331,41 +336,28 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
   const [assignments, setAssignments] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | 'dswd_admin' | 'receiver'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'pending'>('all');
+  const [activeDirectoryTab, setActiveDirectoryTab] = useState<'verified' | 'pending'>('verified');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
 
   // Selected profile for full inspection modal
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
   const [isWalletRevealed, setIsWalletRevealed] = useState(false);
+  const [isWorkIdRevealed, setIsWorkIdRevealed] = useState(false);
+  const [isIdRevealed, setIsIdRevealed] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Confirmation Modals for Decline and Delete
+  const [confirmDeclineUser, setConfirmDeclineUser] = useState<UserProfile | null>(null);
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<UserProfile | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   // 5-dot Comfy Loading Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalSubtitle, setModalSubtitle] = useState('');
-
-  // Blockchain Operator Authorization states
-  const [authStatusMap, setAuthStatusMap] = useState<Record<string, boolean>>({});
-  const [authorizingWallet, setAuthorizingWallet] = useState<string | null>(null);
-  const [blockchainNotice, setBlockchainNotice] = useState<{ type: 'success' | 'error'; message: string; txHash?: string } | null>(null);
-  const [customWalletInput, setCustomWalletInput] = useState('');
-  const [isAuthorizingCustom, setIsAuthorizingCustom] = useState(false);
-  const [isSepoliaStripOpen, setIsSepoliaStripOpen] = useState(false);
-
-  const checkBlockchainAuth = async (profilesList: UserProfile[]) => {
-    const status: Record<string, boolean> = {};
-    for (const p of profilesList) {
-      if (p.walletAddress) {
-        try {
-          status[p.walletAddress.toLowerCase()] = await blockchain.isOperatorAuthorized(p.walletAddress);
-        } catch {
-          status[p.walletAddress.toLowerCase()] = false;
-        }
-      }
-    }
-    setAuthStatusMap(status);
-  };
 
   const loadProfiles = async () => {
     setIsLoading(true);
@@ -377,7 +369,6 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
         map[p.id] = extractCleanMunicipality(p.lguName);
       });
       setAssignments(map);
-      void checkBlockchainAuth(data);
 
       // Keep selectedProfile in sync if open
       if (selectedProfile) {
@@ -399,48 +390,77 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
     return unsub;
   }, []);
 
-  const handleAuthorizeWallet = async (walletAddress: string) => {
-    setAuthorizingWallet(walletAddress);
-    setBlockchainNotice(null);
+  const handleExecuteDecline = async () => {
+    if (!confirmDeclineUser) return;
+    setIsProcessingAction(true);
     try {
-      const proof = await blockchain.authorizeOperator(walletAddress);
-      setAuthStatusMap((prev) => ({ ...prev, [walletAddress.toLowerCase()]: true }));
-      setBlockchainNotice({
+      await authApi.rejectProfile(confirmDeclineUser.id);
+      setToastMessage({
         type: 'success',
-        message: `Wallet ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)} authorized on Sepolia smart contract!`,
-        txHash: proof.hash
+        text: `Registration for ${confirmDeclineUser.fullName || confirmDeclineUser.email} has been declined and removed.`
       });
+      await loadProfiles();
+      if (selectedProfile && selectedProfile.id === confirmDeclineUser.id) {
+        setSelectedProfile(null);
+      }
+      setConfirmDeclineUser(null);
     } catch (err: any) {
-      setBlockchainNotice({
+      setToastMessage({
         type: 'error',
-        message: err?.message || 'Failed to authorize wallet on blockchain.'
+        text: err?.message || 'Failed to decline registration.'
       });
     } finally {
-      setAuthorizingWallet(null);
+      setIsProcessingAction(false);
     }
   };
 
-  const handleAuthorizeCustomWallet = async () => {
-    const addr = customWalletInput.trim();
-    if (!addr) return;
-    setIsAuthorizingCustom(true);
-    setBlockchainNotice(null);
-    try {
-      const proof = await blockchain.authorizeOperator(addr);
-      setAuthStatusMap((prev) => ({ ...prev, [addr.toLowerCase()]: true }));
-      setBlockchainNotice({
-        type: 'success',
-        message: `Wallet ${addr.slice(0, 6)}...${addr.slice(-4)} authorized on Sepolia smart contract!`,
-        txHash: proof.hash
-      });
-      setCustomWalletInput('');
-    } catch (err: any) {
-      setBlockchainNotice({
+  const handleRequestDelete = (user: UserProfile) => {
+    const isCurrentAdmin = Boolean(
+      currentAdminEmail &&
+      user.email &&
+      user.email.toLowerCase() === currentAdminEmail.toLowerCase()
+    );
+    if (isCurrentAdmin) {
+      setToastMessage({
         type: 'error',
-        message: err?.message || 'Failed to authorize custom wallet on blockchain.'
+        text: 'Action Denied: You cannot delete your own active administrator account.'
+      });
+      return;
+    }
+
+    const activePackages = getActiveCustodyPackages(user, effectiveReleases);
+    if (activePackages.length > 0) {
+      setToastMessage({
+        type: 'error',
+        text: `Cannot delete account: ${user.fullName || user.email} currently has ${activePackages.length} package(s) in active transit/custody (${activePackages.map(p => `#${p.drNumber}`).join(', ')}). Complete or transfer deliveries first.`
+      });
+      return;
+    }
+
+    setConfirmDeleteUser(user);
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!confirmDeleteUser) return;
+    setIsProcessingAction(true);
+    try {
+      await authApi.deleteProfile(confirmDeleteUser.id);
+      setToastMessage({
+        type: 'success',
+        text: `Account for ${confirmDeleteUser.fullName || confirmDeleteUser.email} has been deleted permanently.`
+      });
+      await loadProfiles();
+      if (selectedProfile && selectedProfile.id === confirmDeleteUser.id) {
+        setSelectedProfile(null);
+      }
+      setConfirmDeleteUser(null);
+    } catch (err: any) {
+      setToastMessage({
+        type: 'error',
+        text: err?.message || 'Failed to delete account.'
       });
     } finally {
-      setIsAuthorizingCustom(false);
+      setIsProcessingAction(false);
     }
   };
 
@@ -543,34 +563,6 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
     }
   };
 
-  const handleDeclineUser = async (user: UserProfile) => {
-    const activePackages = getActiveCustodyPackages(user, effectiveReleases);
-    if (activePackages.length > 0) {
-      setToastMessage({
-        type: 'error',
-        text: `Cannot decline account: ${user.fullName || user.email} currently has ${activePackages.length} package(s) in active transit.`
-      });
-      return;
-    }
-    if (!window.confirm(`Are you sure you want to decline registration for ${user.fullName || user.email}?`)) return;
-    try {
-      await authApi.rejectProfile(user.id);
-      setToastMessage({
-        type: 'success',
-        text: `Registration for ${user.fullName || user.email} has been declined.`
-      });
-      await loadProfiles();
-      if (selectedProfile && selectedProfile.id === user.id) {
-        setSelectedProfile((prev) => prev ? { ...prev, status: 'rejected' } : null);
-      }
-    } catch (err: any) {
-      setToastMessage({
-        type: 'error',
-        text: err?.message || 'Failed to decline registration.'
-      });
-    }
-  };
-
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(label);
@@ -581,6 +573,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
     const verifiedProfiles = profiles.filter((p) => p.status === 'verified');
     const total = profiles.length;
     const pending = profiles.filter((p) => p.status === 'pending').length;
+    const verified = verifiedProfiles.length;
     const admins = verifiedProfiles.filter((p) => p.role === 'dswd_admin').length;
     const lguReceivers = verifiedProfiles.filter(
       (p) => p.role === 'receiver' && extractCleanMunicipality(p.lguName)
@@ -588,7 +581,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
     const fieldReceivers = verifiedProfiles.filter(
       (p) => p.role === 'receiver' && !extractCleanMunicipality(p.lguName)
     ).length;
-    return { total, pending, admins, lguReceivers, fieldReceivers };
+    return { total, pending, verified, admins, lguReceivers, fieldReceivers };
   }, [profiles]);
 
   const filteredProfiles = useMemo(() => {
@@ -609,11 +602,17 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
         roleFilter === 'all' ? true : p.role === roleFilter;
 
       const matchStatus =
-        statusFilter === 'all' ? true : p.status === statusFilter;
+        activeDirectoryTab === 'verified' ? p.status === 'verified' : p.status === 'pending';
 
       return matchSearch && matchRole && matchStatus;
     });
-  }, [profiles, searchQuery, roleFilter, statusFilter]);
+  }, [profiles, searchQuery, roleFilter, activeDirectoryTab]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProfiles.length / pageSize));
+  const paginatedProfiles = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredProfiles.slice(start, start + pageSize);
+  }, [filteredProfiles, currentPage, pageSize]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -637,15 +636,6 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => setIsSepoliaStripOpen((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-50 shadow-2xs transition cursor-pointer"
-          >
-            <Key className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Smart Contract Auth</span>
-          </button>
-
           <button
             type="button"
             onClick={loadProfiles}
@@ -744,62 +734,50 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
         </div>
       </div>
 
-      {/* Collapsible Sepolia Blockchain Authorization Strip */}
-      {isSepoliaStripOpen && (
-        <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white rounded-2xl p-4 shadow-sm space-y-3 animate-in fade-in duration-200">
-          <div className="flex items-center justify-between">
-            <h4 className="font-extrabold text-xs flex items-center gap-2 text-white">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              Sepolia Smart Contract Operator Authorization
-            </h4>
-            <button
-              type="button"
-              onClick={() => setIsSepoliaStripOpen(false)}
-              className="text-gray-400 hover:text-white cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <p className="text-[11px] text-blue-200/80">
-            Authorize receiver wallets to sign physical cargo handovers and update custody tokens on Ethereum Sepolia.
-          </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <input
-              type="text"
-              placeholder="0x Wallet Address"
-              value={customWalletInput}
-              onChange={(e) => setCustomWalletInput(e.target.value)}
-              className="px-3 py-2 rounded-xl text-xs bg-white/10 border border-white/20 text-white placeholder-blue-300/40 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400 flex-1 min-w-[240px]"
-            />
-            <button
-              type="button"
-              onClick={handleAuthorizeCustomWallet}
-              disabled={isAuthorizingCustom || !customWalletInput.trim()}
-              className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Key className="w-3.5 h-3.5" />
-              {isAuthorizingCustom ? 'Authorizing...' : 'Authorize on Sepolia'}
-            </button>
-          </div>
-          {blockchainNotice && (
-            <div className={`p-2.5 rounded-xl text-xs flex items-center justify-between gap-2 ${
-              blockchainNotice.type === 'success' ? 'bg-emerald-900/60 border border-emerald-500 text-emerald-200' : 'bg-red-900/60 border border-red-500 text-red-200'
-            }`}>
-              <span>{blockchainNotice.message}</span>
-              {blockchainNotice.txHash && (
-                <a
-                  href={`https://sepolia.etherscan.io/tx/${blockchainNotice.txHash}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline font-mono text-[10px] text-emerald-300 hover:text-white"
-                >
-                  View TX
-                </a>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Two Clear Primary Directory Tabs: Verified Personnel vs Pending Verifications */}
+      <div className="flex items-center gap-3 border-b border-gray-200 pb-2">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveDirectoryTab('verified');
+            setCurrentPage(1);
+          }}
+          className={`px-5 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeDirectoryTab === 'verified'
+              ? 'bg-[#10069f] text-white shadow-md shadow-blue-950/20'
+              : 'bg-white text-gray-600 hover:text-gray-900 border border-gray-200'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          <span>Verified Personnel</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            activeDirectoryTab === 'verified' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-700'
+          }`}>
+            {stats.verified}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveDirectoryTab('pending');
+            setCurrentPage(1);
+          }}
+          className={`px-5 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeDirectoryTab === 'pending'
+              ? 'bg-amber-600 text-white shadow-md shadow-amber-900/20'
+              : 'bg-white text-gray-600 hover:text-gray-900 border border-gray-200'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>Pending Verifications</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            activeDirectoryTab === 'pending' ? 'bg-white/25 text-white' : stats.pending > 0 ? 'bg-amber-100 text-amber-800 animate-pulse' : 'bg-gray-100 text-gray-700'
+          }`}>
+            {stats.pending}
+          </span>
+        </button>
+      </div>
 
       {/* Filters & Search Bar */}
       <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-2xs flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
@@ -809,7 +787,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
             type="text"
             placeholder="Search personnel by name, email, employee ID, phone, or municipality..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setCurrentPage(1);
+            }}
             className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#10069f] focus:border-transparent transition"
           />
         </div>
@@ -819,7 +800,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
           <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
             <button
               type="button"
-              onClick={() => setRoleFilter('all')}
+              onClick={() => {
+                setRoleFilter('all');
+                setCurrentPage(1);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                 roleFilter === 'all' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -828,7 +812,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
             </button>
             <button
               type="button"
-              onClick={() => setRoleFilter('dswd_admin')}
+              onClick={() => {
+                setRoleFilter('dswd_admin');
+                setCurrentPage(1);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                 roleFilter === 'dswd_admin' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -837,7 +824,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
             </button>
             <button
               type="button"
-              onClick={() => setRoleFilter('receiver')}
+              onClick={() => {
+                setRoleFilter('receiver');
+                setCurrentPage(1);
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                 roleFilter === 'receiver' ? 'bg-white text-blue-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
               }`}
@@ -845,45 +835,16 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
               Receivers
             </button>
           </div>
-
-          {/* Status Filters */}
-          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setStatusFilter('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'all' ? 'bg-white text-gray-900 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              All Status
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('verified')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'verified' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Verified
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('pending')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                statusFilter === 'pending' ? 'bg-white text-amber-700 shadow-2xs' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Pending ({stats.pending})
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Clean Uncluttered User Accounts Table */}
+      {/* Clean Uncluttered User Accounts Table (5 Rows Viewable Per Frame) */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-2xs overflow-hidden">
         <div className="px-6 py-3.5 border-b border-gray-200 bg-gray-50/75 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h3 className="font-extrabold text-xs text-gray-900 uppercase tracking-wider">Personnel Directory</h3>
+            <h3 className="font-extrabold text-xs text-gray-900 uppercase tracking-wider">
+              {activeDirectoryTab === 'verified' ? 'Verified Personnel' : 'Pending Registrations'}
+            </h3>
             <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-black">
               {filteredProfiles.length}
             </span>
@@ -894,96 +855,49 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
         {filteredProfiles.length === 0 ? (
           <div className="p-12 text-center">
             <Users className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-            <p className="font-bold text-xs text-gray-700">No matching personnel records found</p>
+            <p className="font-bold text-xs text-gray-700">
+              {activeDirectoryTab === 'verified' ? 'No verified personnel found' : 'No pending registrations awaiting review'}
+            </p>
             <p className="text-[11px] text-gray-400 mt-0.5">Try adjusting your search query or filters.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50/50 text-[10px] font-black text-gray-500 uppercase tracking-wider">
-                  <th className="px-6 py-3">Personnel Identity & ID</th>
-                  <th className="px-6 py-3">Designation & Role</th>
-                  <th className="px-6 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 text-xs">
-                {filteredProfiles.map((profile) => {
-                  const isCurrentAdmin =
-                    Boolean(currentAdminEmail &&
-                    profile.email &&
-                    profile.email.toLowerCase() === currentAdminEmail.toLowerCase());
-                  const cleanLgu = extractCleanMunicipality(profile.lguName);
-                  const isLgu = profile.role === 'receiver' && Boolean(cleanLgu.trim());
-                  const isPending = profile.status === 'pending';
+          <div>
+            <div className="max-h-[380px] overflow-y-auto">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200 text-[10px] font-black text-gray-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="px-6 py-3">Personnel Identity & Credentials</th>
+                    <th className="px-6 py-3">Designation & Role</th>
+                    <th className="px-6 py-3">Status</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-xs">
+                  {paginatedProfiles.map((profile) => {
+                    const isCurrentAdmin =
+                      Boolean(currentAdminEmail &&
+                      profile.email &&
+                      profile.email.toLowerCase() === currentAdminEmail.toLowerCase());
+                    const cleanLgu = extractCleanMunicipality(profile.lguName);
+                    const isLgu = profile.role === 'receiver' && Boolean(cleanLgu.trim());
+                    const isPending = profile.status === 'pending';
 
-                  return (
-                    <tr
-                      key={profile.id}
-                      onClick={() => {
-                        setSelectedProfile(profile);
-                        setIsWalletRevealed(false);
-                      }}
-                      className="hover:bg-blue-50/40 transition-colors cursor-pointer"
-                    >
-                      {/* 1. Name & ID */}
-                      <td className="px-6 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs flex-shrink-0 ${
-                              profile.role === 'dswd_admin'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : isLgu
-                                ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                : 'bg-purple-100 text-purple-800 border border-purple-200'
-                            }`}
-                          >
-                            {profile.fullName
-                              ? profile.fullName.slice(0, 2).toUpperCase()
-                              : profile.email.slice(0, 2).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-bold text-gray-900 leading-tight flex items-center gap-1.5 truncate">
-                              <span>{profile.fullName || 'DSWD Officer'}</span>
-                              {isCurrentAdmin && (
-                                <span className="px-1.5 py-0.2 rounded bg-gray-200 text-gray-700 text-[9px] font-black uppercase">
-                                  You
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-[11px] text-gray-500 font-mono truncate mt-0.5">
-                              {profile.email}
-                            </p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="font-mono text-[9.5px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                                ID: {profile.id.slice(0, 8)}...
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  copyToClipboard(profile.id, profile.id);
-                                }}
-                                className="text-gray-400 hover:text-gray-700 transition"
-                                title="Copy Full ID"
-                              >
-                                {copiedId === profile.id ? (
-                                  <Check className="w-2.5 h-2.5 text-green-600" />
-                                ) : (
-                                  <Copy className="w-2.5 h-2.5" />
-                                )}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* 2. Role & Designation */}
-                      <td className="px-6 py-3.5">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    return (
+                      <tr
+                        key={profile.id}
+                        onClick={() => {
+                          setSelectedProfile(profile);
+                          setIsWalletRevealed(false);
+                          setIsWorkIdRevealed(false);
+                          setIsIdRevealed(false);
+                        }}
+                        className="hover:bg-blue-50/40 transition-colors cursor-pointer"
+                      >
+                        {/* 1. Name & Masked ID */}
+                        <td className="px-6 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs flex-shrink-0 ${
                                 profile.role === 'dswd_admin'
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                   : isLgu
@@ -991,73 +905,212 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
                                   : 'bg-purple-100 text-purple-800 border border-purple-200'
                               }`}
                             >
-                              {profile.role === 'dswd_admin' ? (
-                                <>
-                                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                                  DSWD Admin
-                                </>
-                              ) : isLgu ? (
-                                <>
-                                  <Building2 className="w-3 h-3 text-indigo-600" />
-                                  LGU Receiver
-                                </>
-                              ) : (
-                                <>
-                                  <Truck className="w-3 h-3 text-purple-600" />
-                                  Receiver
-                                </>
-                              )}
-                            </span>
-
-                            {/* Active Custody Indicator */}
-                            {profile.role === 'receiver' && (() => {
-                              const activeCount = getActiveCustodyPackages(profile, effectiveReleases).length;
-                              if (activeCount === 0) return null;
-                              return (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wide bg-amber-100 text-amber-900 border border-amber-300">
-                                  <Clock className="w-2.5 h-2.5 text-amber-700" />
-                                  In Transit ({activeCount})
-                                </span>
-                              );
-                            })()}
-                          </div>
-                          <p className="text-[11px] text-gray-600 font-medium">
-                            {profile.jobPosition === 'Trucker' ? 'Receiver' : (profile.jobPosition || (isLgu ? `${cleanLgu} Focal` : profile.truckId ? `Code: ${profile.truckId}` : 'Regional Staff'))}
-                          </p>
-                        </div>
-                      </td>
-
-                      {/* 3. Verification Status (With Warning If Pending) */}
-                      <td className="px-6 py-3.5">
-                        {isPending ? (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-[11px] font-bold shadow-2xs">
-                            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
-                            <span>Awaiting Verification</span>
-                          </div>
-                        ) : profile.status === 'rejected' ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 text-[10px] font-bold border border-red-200">
-                            <X className="w-3 h-3" />
-                            Declined
-                          </span>
-                        ) : (
-                          <div className="space-y-0.5">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold border border-green-200">
-                              <CheckCircle2 className="w-3 h-3 text-green-600" />
-                              Verified
-                            </span>
-                            {!profile.walletAddress && (
-                              <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
-                                <AlertTriangle className="w-2.5 h-2.5" /> No Wallet
+                              {profile.fullName
+                                ? profile.fullName.slice(0, 2).toUpperCase()
+                                : profile.email.slice(0, 2).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-bold text-gray-900 leading-tight flex items-center gap-1.5 truncate">
+                                <span>{profile.fullName || 'DSWD Officer'}</span>
+                                {isCurrentAdmin && (
+                                  <span className="px-1.5 py-0.2 rounded bg-gray-200 text-gray-700 text-[9px] font-black uppercase">
+                                    You
+                                  </span>
+                                )}
                               </p>
+                              <p className="text-[11px] text-gray-500 font-mono truncate mt-0.5">
+                                {profile.email}
+                              </p>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="font-mono text-[9.5px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                  ID: {profile.id.slice(0, 8)}...
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyToClipboard(profile.id, profile.id);
+                                  }}
+                                  className="text-gray-400 hover:text-gray-700 transition"
+                                  title="Copy Full ID"
+                                >
+                                  {copiedId === profile.id ? (
+                                    <Check className="w-2.5 h-2.5 text-green-600" />
+                                  ) : (
+                                    <Copy className="w-2.5 h-2.5" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* 2. Role & Designation */}
+                        <td className="px-6 py-3.5">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                  profile.role === 'dswd_admin'
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                    : isLgu
+                                    ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                    : 'bg-purple-100 text-purple-800 border border-purple-200'
+                                }`}
+                              >
+                                {profile.role === 'dswd_admin' ? (
+                                  <>
+                                    <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                    DSWD Admin
+                                  </>
+                                ) : isLgu ? (
+                                  <>
+                                    <Building2 className="w-3 h-3 text-indigo-600" />
+                                    LGU Receiver
+                                  </>
+                                ) : (
+                                  <>
+                                    <Truck className="w-3 h-3 text-purple-600" />
+                                    Receiver
+                                  </>
+                                )}
+                              </span>
+
+                              {/* Active Custody Indicator */}
+                              {profile.role === 'receiver' && (() => {
+                                const activeCount = getActiveCustodyPackages(profile, effectiveReleases).length;
+                                if (activeCount === 0) return null;
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wide bg-amber-100 text-amber-900 border border-amber-300">
+                                    <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                    In Transit ({activeCount})
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                            <p className="text-[11px] text-gray-600 font-medium">
+                              {profile.jobPosition === 'Trucker' ? 'Receiver' : (profile.jobPosition || (isLgu ? `${cleanLgu} Focal` : profile.truckId ? `Code: ${profile.truckId}` : 'Regional Staff'))}
+                            </p>
+                          </div>
+                        </td>
+
+                        {/* 3. Verification Status */}
+                        <td className="px-6 py-3.5">
+                          {isPending ? (
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-[11px] font-bold shadow-2xs">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse flex-shrink-0" />
+                              <span>Awaiting Review</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-green-100 text-green-800 text-[10px] font-bold border border-green-200">
+                                <CheckCircle2 className="w-3 h-3 text-green-600" />
+                                Verified
+                              </span>
+                              {!profile.walletAddress && (
+                                <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
+                                  <AlertTriangle className="w-2.5 h-2.5" /> No Wallet
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* 4. Action Buttons (Pending vs Approved) */}
+                        <td className="px-6 py-3.5 text-right">
+                          <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                            {isPending ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerifyUser(profile)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs active:scale-95 cursor-pointer flex items-center gap-1"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Approve
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeclineUser(profile)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[11px] font-bold transition active:scale-95 cursor-pointer flex items-center gap-1"
+                                >
+                                  <UserX className="w-3 h-3" />
+                                  Decline
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedProfile(profile);
+                                    setIsWalletRevealed(false);
+                                    setIsWorkIdRevealed(false);
+                                    setIsIdRevealed(false);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#10069f] text-[11px] font-bold transition active:scale-95 cursor-pointer"
+                                >
+                                  Inspect
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRequestDelete(profile)}
+                                  disabled={isCurrentAdmin}
+                                  className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold transition active:scale-95 disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                                  title={isCurrentAdmin ? 'Cannot delete your own account' : 'Delete Account'}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  Delete
+                                </button>
+                              </>
                             )}
                           </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 5-Item Pagination Controls */}
+            <div className="px-6 py-3.5 border-t border-gray-200 bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+              <div>
+                Showing{' '}
+                <span className="font-bold text-gray-900">
+                  {filteredProfiles.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}
+                </span>{' '}
+                to{' '}
+                <span className="font-bold text-gray-900">
+                  {Math.min(currentPage * pageSize, filteredProfiles.length)}
+                </span>{' '}
+                of <span className="font-bold text-gray-900">{filteredProfiles.length}</span> {activeDirectoryTab === 'verified' ? 'personnel' : 'pending registrations'}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  Previous
+                </button>
+                <span className="font-bold text-gray-800 px-2">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -1101,14 +1154,26 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
               </button>
             </div>
 
-            {/* User ID Section (Prominently displayed for all accounts including Admins) */}
+            {/* User ID Section (Masked behind Eye Button) */}
             <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
-                  {selectedProfile.role === 'dswd_admin' ? 'DSWD Administrator System ID' : 'Account System ID'}
-                </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-wider">
+                    {selectedProfile.role === 'dswd_admin' ? 'DSWD Administrator System ID' : 'Account System ID'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsIdRevealed((prev) => !prev)}
+                    className="text-gray-500 hover:text-gray-800 transition cursor-pointer"
+                    title={isIdRevealed ? 'Mask ID' : 'Reveal ID'}
+                  >
+                    {isIdRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-blue-600" />}
+                  </button>
+                </div>
                 <p className="font-mono text-xs font-bold text-gray-800 break-all select-all mt-0.5">
-                  {selectedProfile.id}
+                  {isIdRevealed
+                    ? selectedProfile.id
+                    : `${selectedProfile.id.slice(0, 8)}••••••••••••••••••••••••`}
                 </p>
               </div>
               <button
@@ -1130,19 +1195,50 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
               </button>
             </div>
 
-            {/* Official Work ID Photo Viewer */}
+            {/* Official Work / Government ID Photo Viewer (Masked by default with Eye Toggle) */}
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-gray-700">
-                Official Work / Government ID Credentials
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-gray-700">
+                  Official Work / Government ID Credentials
+                </label>
+                {selectedProfile.workIdUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setIsWorkIdRevealed((prev) => !prev)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#10069f] text-[11px] font-bold transition cursor-pointer"
+                  >
+                    {isWorkIdRevealed ? (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5 text-gray-500" />
+                        <span>Hide Document</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Reveal Document</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
               {selectedProfile.workIdUrl ? (
                 <div className="p-3 rounded-2xl border border-gray-200 bg-slate-50 flex flex-col sm:flex-row items-center gap-4">
-                  <div className="relative aspect-4/3 w-48 max-w-full rounded-xl overflow-hidden border border-gray-300 shadow-sm bg-black/5 flex-shrink-0">
+                  <div className="relative aspect-4/3 w-48 max-w-full rounded-xl overflow-hidden border border-gray-300 shadow-sm bg-black/5 flex-shrink-0 flex items-center justify-center">
                     <img
                       src={selectedProfile.workIdUrl}
                       alt="Work ID Document"
-                      className="w-full h-full object-cover"
+                      className={`w-full h-full object-cover transition duration-300 ${
+                        isWorkIdRevealed ? 'blur-none' : 'blur-xl select-none pointer-events-none'
+                      }`}
                     />
+                    {!isWorkIdRevealed && (
+                      <div className="absolute inset-0 bg-black/40 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center text-white">
+                        <Lock className="w-6 h-6 text-amber-400 mb-1" />
+                        <span className="text-[10px] font-bold leading-tight">Official ID Masked</span>
+                        <span className="text-[8.5px] text-white/80 mt-0.5">Click Reveal to inspect</span>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1 text-xs text-gray-600">
                     <div className="flex items-center gap-1.5 text-emerald-800 font-bold">
@@ -1152,14 +1248,16 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
                     <p className="text-[11px] text-gray-500">
                       Uploaded during registration for identity verification and administrative approval.
                     </p>
-                    <a
-                      href={selectedProfile.workIdUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-[#10069f] hover:underline pt-1"
-                    >
-                      Open Full Size <ExternalLink className="w-3 h-3" />
-                    </a>
+                    {isWorkIdRevealed && (
+                      <a
+                        href={selectedProfile.workIdUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#10069f] hover:underline pt-1"
+                      >
+                        Open Full Size <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -1238,36 +1336,14 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between gap-2">
-                    {authStatusMap[selectedProfile.walletAddress.toLowerCase()] ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                        Authorized on Sepolia Smart Contract
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                          Pending On-Chain Auth
-                        </span>
-                        <button
-                          type="button"
-                          disabled={authorizingWallet === selectedProfile.walletAddress}
-                          onClick={() => handleAuthorizeWallet(selectedProfile.walletAddress!)}
-                          className="px-2.5 py-1 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-[10px] font-bold transition disabled:opacity-50 cursor-pointer flex items-center gap-1"
-                        >
-                          <Key className="w-3 h-3" />
-                          {authorizingWallet === selectedProfile.walletAddress ? 'Authorizing...' : 'Authorize Operator'}
-                        </button>
-                      </div>
-                    )}
-
+                  <div className="flex items-center justify-end">
                     <a
                       href={`https://sepolia.etherscan.io/address/${selectedProfile.walletAddress}`}
                       target="_blank"
                       rel="noreferrer"
                       className="text-[11px] text-blue-700 hover:underline inline-flex items-center gap-1 font-semibold"
                     >
-                      Etherscan <ExternalLink className="w-2.5 h-2.5" />
+                      View on Etherscan <ExternalLink className="w-2.5 h-2.5" />
                     </a>
                   </div>
                 </div>
@@ -1296,7 +1372,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
                     </label>
                     {isAssignmentLocked && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                        <AlertTriangle className="w-3 h-3 text-amber-700" />
+                        <AlertTriangle className="w-3 text-amber-700" />
                         Assignment Locked
                       </span>
                     )}
@@ -1353,7 +1429,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
               );
             })()}
 
-            {/* Verification / Approval Actions */}
+            {/* Verification / Approval / Deletion Actions */}
             <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
               <div className="text-xs text-gray-500">
                 <span>Status: </span>
@@ -1373,22 +1449,107 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeclineUser(selectedProfile)}
-                      className="px-4 py-2.5 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold transition active:scale-95 cursor-pointer"
+                      onClick={() => setConfirmDeclineUser(selectedProfile)}
+                      className="px-4 py-2.5 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold transition active:scale-95 cursor-pointer flex items-center gap-1.5"
                     >
-                      Decline
+                      <UserX className="w-4 h-4" />
+                      Decline Registration
                     </button>
                   </>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProfile(null)}
-                    className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold transition cursor-pointer"
-                  >
-                    Close
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleRequestDelete(selectedProfile)}
+                      className="px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition active:scale-95 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete Account
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProfile(null)}
+                      className="px-4 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold transition cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Decline Registration */}
+      {confirmDeclineUser && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-700 flex items-center justify-center mx-auto">
+              <UserX className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-black text-gray-900">Decline Registration?</h3>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Are you sure you want to decline registration for{' '}
+                <strong className="text-gray-900">{confirmDeclineUser.fullName || confirmDeclineUser.email}</strong>?
+                This will remove their profile record from the database.
+              </p>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeclineUser(null)}
+                disabled={isProcessingAction}
+                className="flex-1 py-2.5 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteDecline}
+                disabled={isProcessingAction}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white transition shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingAction ? 'Declining...' : 'Confirm Decline'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Delete Verified Account */}
+      {confirmDeleteUser && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-700 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-black text-gray-900">Permanently Delete Account?</h3>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Are you sure you want to permanently delete account for{' '}
+                <strong className="text-gray-900">{confirmDeleteUser.fullName || confirmDeleteUser.email}</strong>?
+                This will remove their identity and system credentials completely. This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteUser(null)}
+                disabled={isProcessingAction}
+                className="flex-1 py-2.5 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteDelete}
+                disabled={isProcessingAction}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-xs font-bold text-white transition shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingAction ? 'Deleting...' : 'Confirm Delete'}
+              </button>
             </div>
           </div>
         </div>

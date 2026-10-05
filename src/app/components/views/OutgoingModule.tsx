@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { CheckCircle, Edit, Loader2, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { CheckCircle, ChevronLeft, ChevronRight, Edit, Loader2, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { SuccessModal } from '../modals/SuccessModal';
@@ -226,6 +226,14 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     return matchesSearch && matchesWarehouse && matchesStatus;
   });
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
+  const totalPages = Math.max(1, Math.ceil(filteredReleases.length / pageSize));
+  const paginatedReleases = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredReleases.slice(start, start + pageSize);
+  }, [filteredReleases, currentPage, pageSize]);
+
   const allocatingCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Allocating').length;
   const approvedCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Approved').length;
   const activeReleaseCount = outgoingReleasesList.filter(r => ['Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus)).length;
@@ -301,7 +309,10 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               type="text"
               placeholder="Search DR, LGU, batch record, release record..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault();
               }}
@@ -311,7 +322,10 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
           <select
             value={selectedWarehouse}
-            onChange={(e) => setSelectedWarehouse(e.target.value)}
+            onChange={(e) => {
+              setSelectedWarehouse(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
           >
             <option value="All">All Warehouses</option>
@@ -322,7 +336,10 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
           <select
             value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
+            onChange={(e) => {
+              setSelectedStatus(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
           >
             <option value="All">All Statuses</option>
@@ -332,9 +349,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
-        <div className="max-h-[560px] overflow-auto">
+        <div className="max-h-[380px] overflow-auto">
           <table className="w-full min-w-[1300px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Release</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
@@ -345,7 +362,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredReleases.map((release) => (
+              {paginatedReleases.map((release) => (
                 <tr key={release.drNumber} className="hover:bg-gray-50 transition-colors align-top">
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-green-700">{release.drNumber}</p>
@@ -394,13 +411,15 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setQrModalRelease(release)}
-                        className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition shadow-xs"
-                        title="View & Print Delivery Receipt QR Code"
-                      >
-                        <QrCode className="w-3.5 h-3.5" /> QR Code
-                      </button>
+                      {!['Draft', 'Allocating'].includes(release.deliveryStatus) && (
+                        <button
+                          onClick={() => setQrModalRelease(release)}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition shadow-xs cursor-pointer"
+                          title="View & Print Delivery Receipt QR Code"
+                        >
+                          <QrCode className="w-3.5 h-3.5" /> QR Code
+                        </button>
+                      )}
                       {editableStatuses.includes(release.deliveryStatus) && (
                         <button
                           onClick={() => {
@@ -451,10 +470,48 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           </table>
         </div>
 
-        {filteredReleases.length === 0 && (
+        {filteredReleases.length === 0 ? (
           <div className="text-center py-12">
             <TruckIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500 font-medium">No outgoing releases found</p>
+          </div>
+        ) : (
+          <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+            <div>
+              Showing{' '}
+              <span className="font-bold text-gray-900">
+                {filteredReleases.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}
+              </span>{' '}
+              to{' '}
+              <span className="font-bold text-gray-900">
+                {Math.min(currentPage * pageSize, filteredReleases.length)}
+              </span>{' '}
+              of <span className="font-bold text-gray-900">{filteredReleases.length}</span> releases
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
+              <span className="font-bold text-gray-800 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </div>

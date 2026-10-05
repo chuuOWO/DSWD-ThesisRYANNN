@@ -383,18 +383,15 @@ const emptyInventoryItem = (category: string): InventoryItem => ({
 });
 
 const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: KitTypeRecord[]): InventoryItem[] => {
-  const categoryNames = kitTypes.length > 0
-    ? kitTypes.map(k => k.name)
-    : [
-        'Family Food Pack',
-        'Hygiene Kit',
-        'Sleeping Kit',
-        'Kitchen Kit',
-        'Family Kit',
-        'Laminated Sacks',
-        'Ready-to-Eat Food (RTEF)'
-      ];
+  const categorySet = new Set<string>();
+  kitTypes.forEach(k => { if (k.name) categorySet.add(k.name.trim()); });
+  warehouses.forEach(wh => {
+    if (wh.currentStock) {
+      Object.keys(wh.currentStock).forEach(cat => categorySet.add(cat.trim()));
+    }
+  });
 
+  const categoryNames = Array.from(categorySet);
   const itemsMap = new Map<string, InventoryItem>();
 
   categoryNames.forEach(category => {

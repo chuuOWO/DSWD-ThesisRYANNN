@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw } from 'lucide-react';
+import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 
@@ -27,22 +27,27 @@ interface InventoryItem {
   expiringItems: number;
 }
 
-const FNFI_CATEGORIES = [
-  'Hygiene Kit',
-  'Food Pack',
-  'Sleeping Kit',
-  'Kitchen Kit',
-  'Family Kit',
-  'Laminated Sack',
-  'RTEF'
-];
-
 export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps) {
   const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList } = inventoryState;
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Dynamic categories gathered from inventory, incoming, and outgoing releases without fallbacks
+  const dynamicCategories = useMemo(() => {
+    const set = new Set<string>();
+    inventory.forEach((i) => {
+      if (i.category?.trim()) set.add(i.category.trim());
+    });
+    incomingGoodsList.forEach((i) => {
+      if (i.fnfiCategory?.trim()) set.add(i.fnfiCategory.trim());
+    });
+    outgoingReleasesList.forEach((o) => {
+      if (o.fnfiCategory?.trim()) set.add(o.fnfiCategory.trim());
+    });
+    return Array.from(set).sort();
+  }, [inventory, incomingGoodsList, outgoingReleasesList]);
 
   // Dynamically compute live LGU warehouse stock from accepted deliveries and LGU reports (no static mock zeros)
   const lguWarehouseData = useMemo(() => {
@@ -51,15 +56,11 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     const ensureLgu = (name: string) => {
       const trimmed = name.trim();
       if (!map.has(trimmed)) {
-        map.set(trimmed, {
-          'Hygiene Kit': 0,
-          'Food Pack': 0,
-          'Sleeping Kit': 0,
-          'Kitchen Kit': 0,
-          'Family Kit': 0,
-          'Laminated Sack': 0,
-          'RTEF': 0
+        const init: Record<string, number> = {};
+        dynamicCategories.forEach((cat) => {
+          init[cat] = 0;
         });
+        map.set(trimmed, init);
       }
       return map.get(trimmed)!;
     };
@@ -72,8 +73,8 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       const record = ensureLgu(lgu);
       const qty = release.amountApproved || release.amountRequested || 0;
       const cat = release.fnfiCategory;
-      if (cat && cat in record) {
-        record[cat] += qty;
+      if (cat) {
+        record[cat] = (record[cat] || 0) + qty;
       }
     });
 
@@ -82,16 +83,16 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       const raw = report.municipality || report.lguName || 'Reported LGU';
       const lgu = raw.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim() || raw;
       const record = ensureLgu(lgu);
-      record['Food Pack'] = Math.max(record['Food Pack'], report.foodPacks || 0);
-      record['Hygiene Kit'] = Math.max(record['Hygiene Kit'], report.hygieneKits || 0);
-      record['Family Kit'] = Math.max(record['Family Kit'], report.familyKits || 0);
+      if ('Food Pack' in record || dynamicCategories.includes('Food Pack')) record['Food Pack'] = Math.max(record['Food Pack'] || 0, report.foodPacks || 0);
+      if ('Hygiene Kit' in record || dynamicCategories.includes('Hygiene Kit')) record['Hygiene Kit'] = Math.max(record['Hygiene Kit'] || 0, report.hygieneKits || 0);
+      if ('Family Kit' in record || dynamicCategories.includes('Family Kit')) record['Family Kit'] = Math.max(record['Family Kit'] || 0, report.familyKits || 0);
     });
 
     return Array.from(map.entries()).map(([warehouse, stock]) => ({
       warehouse,
       ...stock
     }));
-  }, [outgoingReleasesList, lguPriorityReports]);
+  }, [outgoingReleasesList, lguPriorityReports, dynamicCategories]);
 
 
   const releaseStatuses = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'];
@@ -122,7 +123,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   });
 
   // Calculate LGU totals per category
-  const lguTotals = FNFI_CATEGORIES.reduce((acc, category) => {
+  const lguTotals = dynamicCategories.reduce((acc, category) => {
     const total = lguWarehouseData.reduce((sum, lgu) => {
       const val = (lgu as Record<string, any>)[category];
       return sum + (typeof val === 'number' ? val : 0);
@@ -143,6 +144,14 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     return matchesCategory;
   });
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 5;
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, currentPage, pageSize]);
+
   const warehouseATotal = inventory.reduce((sum, item) => sum + item.warehouseA, 0);
   const warehouseBTotal = inventory.reduce((sum, item) => sum + item.warehouseB, 0);
   const totalMainWarehouse = warehouseATotal + warehouseBTotal;
@@ -153,7 +162,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const totalReleased = displayData.reduce((sum, item) => sum + item.released, 0);
   const totalExpiring = displayData.reduce((sum, item) => sum + item.expiringItems, 0);
 
-  const chartData = FNFI_CATEGORIES.map(category => {
+  const chartData = dynamicCategories.map(category => {
     const inventoryItem = inventory.find(item => item.category === category);
     return {
       name: category,
@@ -290,18 +299,24 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <select
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            onChange={(e) => {
+              setSelectedCategory(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
           >
             <option>All Categories</option>
-            {FNFI_CATEGORIES.map(cat => (
+            {dynamicCategories.map(cat => (
               <option key={cat}>{cat}</option>
             ))}
           </select>
 
           <select
             value={selectedWarehouseType}
-            onChange={(e) => setSelectedWarehouseType(e.target.value)}
+            onChange={(e) => {
+              setSelectedWarehouseType(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
           >
             <option value="All">All Warehouses</option>
@@ -311,7 +326,10 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
 
           <select
             value={selectedWarehouse}
-            onChange={(e) => setSelectedWarehouse(e.target.value)}
+            onChange={(e) => {
+              setSelectedWarehouse(e.target.value);
+              setCurrentPage(1);
+            }}
             className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium"
           >
             <option>All Specific Warehouses</option>
@@ -354,9 +372,9 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
           <h3 className="text-lg font-bold text-gray-900">Detailed Inventory</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-h-[340px] overflow-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">FNFI Category</th>
                 {(selectedWarehouseType === 'All' || selectedWarehouseType === 'Main') && (
@@ -379,7 +397,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredData.map((item) => {
+              {paginatedData.map((item) => {
                 const displayTotal = selectedWarehouseType === 'Main' ? item.totalStock :
                                     selectedWarehouseType === 'LGU' ? item.lguTotal :
                                     item.grandTotal;
@@ -451,6 +469,51 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
             </tbody>
           </table>
         </div>
+
+        {filteredData.length === 0 ? (
+          <div className="text-center py-12">
+            <Package className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+            <p className="text-gray-500 font-medium">No inventory records found</p>
+          </div>
+        ) : (
+          <div className="px-6 py-3 border-t border-gray-200 bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+            <div>
+              Showing{' '}
+              <span className="font-bold text-gray-900">
+                {filteredData.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}
+              </span>{' '}
+              to{' '}
+              <span className="font-bold text-gray-900">
+                {Math.min(currentPage * pageSize, filteredData.length)}
+              </span>{' '}
+              of <span className="font-bold text-gray-900">{filteredData.length}</span> categories
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
+              <span className="font-bold text-gray-800 px-2">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

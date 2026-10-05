@@ -339,36 +339,38 @@ export function MasterDataView() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {kitTypes.map((kit) => (
-              <div key={kit.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
-                      kit.category === 'Food Item' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
-                    }`}>
-                      {kit.category}
-                    </span>
-                    <h3 className="text-sm font-bold text-gray-900 mt-1">{kit.name}</h3>
+          <div className="max-h-[380px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {kitTypes.map((kit) => (
+                <div key={kit.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
+                        kit.category === 'Food Item' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                      }`}>
+                        {kit.category}
+                      </span>
+                      <h3 className="text-sm font-bold text-gray-900 mt-1">{kit.name}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKit(kit.id)}
+                      className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                      title="Remove kit type"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteKit(kit.id)}
-                    className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                    title="Remove kit type"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <p className="text-xs text-gray-600 leading-relaxed">{kit.description}</p>
+                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
+                    <span>Unit: <strong className="text-gray-800">{kit.unitType}</strong></span>
+                    <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                      <ShieldCheck size={12} /> Active FNFI
+                    </span>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-600 leading-relaxed">{kit.description}</p>
-                <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
-                  <span>Unit: <strong className="text-gray-800">{kit.unitType}</strong></span>
-                  <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                    <ShieldCheck size={12} /> Active FNFI
-                  </span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -391,31 +393,33 @@ export function MasterDataView() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {sources.map((src) => (
-              <div key={src.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="inline-block px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[10px] font-bold">
-                      {src.facilityType}
-                    </span>
-                    <h3 className="text-sm font-bold text-gray-900 mt-1">{src.name}</h3>
+          <div className="max-h-[380px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sources.map((src) => (
+                <div key={src.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="inline-block px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[10px] font-bold">
+                        {src.facilityType}
+                      </span>
+                      <h3 className="text-sm font-bold text-gray-900 mt-1">{src.name}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSource(src.id)}
+                      className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                      title="Remove source"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSource(src.id)}
-                    className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                    title="Remove source"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div className="text-xs text-gray-600 space-y-0.5">
+                    <p>Region: <strong className="text-gray-800">{src.region}</strong></p>
+                    <p>Location: <span className="text-gray-700">{src.location}</span></p>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-600 space-y-0.5">
-                  <p>Region: <strong className="text-gray-800">{src.region}</strong></p>
-                  <p>Location: <span className="text-gray-700">{src.location}</span></p>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -478,7 +482,7 @@ export function MasterDataView() {
           </div>
 
           {/* LGUs Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[520px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[380px] overflow-y-auto pr-1">
             {filteredLgus.map((lgu: any) => (
               <div key={lgu.id || lgu.municipality} className="p-3.5 rounded-xl border border-gray-200 bg-white shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -517,24 +521,26 @@ export function MasterDataView() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {warehouses.map((wh) => (
-              <div key={wh.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-gray-900">{wh.name}</h3>
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                    Active Storage
-                  </span>
+          <div className="max-h-[380px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {warehouses.map((wh) => (
+                <div key={wh.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-gray-900">{wh.name}</h3>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                      Active Storage
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <p>Location: <strong>{wh.municipality}, {wh.province}</strong></p>
+                    <p>Holding Capacity: <strong>{wh.capacityPacks.toLocaleString()} food packs</strong></p>
+                    <p className="font-mono text-[11px] text-gray-500">
+                      GPS Coordinates: {wh.latitude.toFixed(4)}, {wh.longitude.toFixed(4)}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-600 space-y-1">
-                  <p>Location: <strong>{wh.municipality}, {wh.province}</strong></p>
-                  <p>Holding Capacity: <strong>{wh.capacityPacks.toLocaleString()} food packs</strong></p>
-                  <p className="font-mono text-[11px] text-gray-500">
-                    GPS Coordinates: {wh.latitude.toFixed(4)}, {wh.longitude.toFixed(4)}
-                  </p>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       )}

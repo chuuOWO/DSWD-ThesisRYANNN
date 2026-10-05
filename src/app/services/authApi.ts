@@ -89,11 +89,23 @@ export const authApi = {
 
   async getProfile(userId: string): Promise<UserProfile | null> {
     try {
-      const { data } = await supabase
+      let { data } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
+
+      if (!data) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user?.email) {
+          const res = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('email', userData.user.email)
+            .maybeSingle();
+          data = res.data;
+        }
+      }
 
       if (data) {
         const mapped = mapProfile(data);
@@ -105,38 +117,25 @@ export const authApi = {
         }
         return mapped;
       }
-    } catch {
-      // Ignore if profiles table is not used
-    }
-
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData?.user;
-    if (user && user.id === userId) {
-      const fName = user.user_metadata?.first_name ? String(user.user_metadata.first_name) : null;
-      const lName = user.user_metadata?.last_name ? String(user.user_metadata.last_name) : null;
-      const computedName = (fName || lName) ? `${fName || ''} ${lName || ''}`.trim() : '';
-
-      return {
-        id: user.id,
-        officialId: user.user_metadata?.official_id || null,
-        email: user.email ?? '',
-        fullName: user.user_metadata?.full_name || computedName || user.email?.split('@')[0] || 'DSWD Officer',
-        firstName: fName,
-        lastName: lName,
-        phoneNumber: user.user_metadata?.phone_number || null,
-        jobPosition: user.user_metadata?.job_position || null,
-        workIdUrl: user.user_metadata?.work_id_url || null,
-        role: normalizeRole(user.user_metadata?.role),
-        truckId: user.user_metadata?.truck_id || null,
-        lguName: null,
-        walletAddress: user.user_metadata?.wallet_address || null,
-        avatarUrl: user.user_metadata?.avatar_url || null,
-        createdAt: user.created_at,
-        status: normalizeStatus(user.user_metadata?.status)
-      };
+    } catch (err) {
+      console.warn('getProfile error:', err);
     }
 
     return null;
+  },
+
+  async checkProfileStatusByEmail(email: string): Promise<AccountStatus | null> {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('status')
+        .ilike('email', email.trim())
+        .maybeSingle();
+      if (!data) return null;
+      return normalizeStatus(data.status);
+    } catch {
+      return null;
+    }
   },
 
   async signIn(email: string, password: string) {
@@ -268,9 +267,18 @@ export const authApi = {
   async rejectProfile(userId: string) {
     const { error } = await supabase
       .from('profiles')
-      .update({ status: 'rejected' })
+      .delete()
       .eq('id', userId);
-    if (error) throw new Error(`Failed to reject profile: ${error.message}`);
+    if (error) throw new Error(`Failed to decline profile: ${error.message}`);
+    return { ok: true };
+  },
+
+  async deleteProfile(userId: string) {
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', userId);
+    if (error) throw new Error(`Failed to delete account: ${error.message}`);
     return { ok: true };
   },
 

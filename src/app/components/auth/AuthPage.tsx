@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -7,6 +7,7 @@ import {
   EyeOff,
   Mail,
   Phone,
+  RefreshCw,
   Upload,
   Wallet,
   X
@@ -14,6 +15,7 @@ import {
 import { authApi, UserRole } from '../../services/authApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
+import { supabase } from '../../lib/supabase';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { sanitizeTextOnly } from '../../lib/inputValidation';
 import dswdLogo from '../../../imports/dswdlogo.png';
@@ -45,7 +47,7 @@ export function AuthPage() {
   const [mobileScreen, setMobileScreen] = useState<'landpage' | 'login' | 'signup' | 'awaiting_verification'>('landpage');
   const [desktopMode, setDesktopMode] = useState<'login' | 'signup' | 'awaiting_verification'>('login');
 
-  const [role, setRole] = useState<UserRole>('dswd_admin');
+  const role: UserRole = 'receiver';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -60,6 +62,71 @@ export function AuthPage() {
   const [submittedEmail, setSubmittedEmail] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  // Status check states for awaiting_verification
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [statusCheckFeedback, setStatusCheckFeedback] = useState<string | null>(null);
+
+  const handleCheckStatus = async () => {
+    const targetEmail = submittedEmail || email;
+    if (!targetEmail) return;
+    setIsCheckingStatus(true);
+    setStatusCheckFeedback(null);
+    try {
+      const status = await authApi.checkProfileStatusByEmail(targetEmail);
+      if (status === 'verified') {
+        setStatusCheckFeedback('Account is approved! Redirecting to login...');
+        setTimeout(() => {
+          setEmail(targetEmail);
+          setDesktopMode('login');
+          setMobileScreen('login');
+        }, 1200);
+      } else if (status === 'rejected') {
+        setStatusCheckFeedback('Registration was declined. Please contact your administrator.');
+      } else {
+        setStatusCheckFeedback('Account is currently awaiting administrator review and approval.');
+      }
+    } catch {
+      setStatusCheckFeedback('Unable to check verification status. Please verify your connection.');
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  // Real-time Supabase status listener
+  useEffect(() => {
+    const targetEmail = submittedEmail || email;
+    if (!targetEmail || (desktopMode !== 'awaiting_verification' && mobileScreen !== 'awaiting_verification')) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(`profile-status-${targetEmail.trim().toLowerCase()}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `email=eq.${targetEmail.trim().toLowerCase()}`
+        },
+        (payload) => {
+          if (payload.new && (payload.new as any).status === 'verified') {
+            setStatusCheckFeedback('Account approved! Redirecting to login...');
+            setTimeout(() => {
+              setEmail(targetEmail);
+              setDesktopMode('login');
+              setMobileScreen('login');
+            }, 1200);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [submittedEmail, email, desktopMode, mobileScreen]);
 
   // Work ID Image Upload Handler (reads, resizes, and base64 encodes)
   const handleWorkIdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -332,36 +399,6 @@ export function AuthPage() {
                     </div>
                   )}
 
-                  {/* Role Switcher */}
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Role
-                    </label>
-                    <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
-                      <button
-                        type="button"
-                        onClick={() => setRole('dswd_admin')}
-                        className={`py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                          role === 'dswd_admin'
-                            ? 'bg-[#10069f] text-white shadow-sm'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        DSWD Admin
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setRole('receiver')}
-                        className={`py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                          role === 'receiver'
-                            ? 'bg-[#10069f] text-white shadow-sm'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        Receiver / LGU
-                      </button>
-                    </div>
-                  </div>
 
                   {/* Names (2 Columns) */}
                   <div className="grid grid-cols-2 gap-2.5">
@@ -582,7 +619,7 @@ export function AuthPage() {
 
               {/* DESKTOP MODE: AWAITING VERIFICATION */}
               {desktopMode === 'awaiting_verification' && (
-                <div className="mt-8 space-y-5 text-center">
+                <div className="mt-8 space-y-4 text-center">
                   <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto ring-8 ring-amber-100/50">
                     <Clock className="w-8 h-8 animate-pulse" />
                   </div>
@@ -602,7 +639,27 @@ export function AuthPage() {
                     </div>
                   )}
 
-                  <div className="pt-4">
+                  {statusCheckFeedback && (
+                    <div className={`p-2.5 rounded-xl text-xs font-semibold ${
+                      statusCheckFeedback.includes('approved') || statusCheckFeedback.includes('verified')
+                        ? 'bg-green-50 text-green-800 border border-green-200'
+                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                    }`}>
+                      {statusCheckFeedback}
+                    </div>
+                  )}
+
+                  <div className="pt-2 space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleCheckStatus}
+                      disabled={isCheckingStatus}
+                      className="w-full py-3 rounded-2xl bg-white border-2 border-[#10069f] text-[#10069f] hover:bg-blue-50 font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                      <span>{isCheckingStatus ? 'Checking Status...' : 'Check Verification Status'}</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => {
@@ -610,7 +667,7 @@ export function AuthPage() {
                         setPassword('');
                         setDesktopMode('login');
                       }}
-                      className="w-full py-3.5 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-sm shadow-lg shadow-blue-900/30 transition-all hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
+                      className="w-full py-3 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-xs shadow-md shadow-blue-900/20 transition-all hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
                     >
                       Back to Login
                     </button>
@@ -908,36 +965,6 @@ export function AuthPage() {
                   </div>
                 )}
 
-                {/* Role Toggle */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Role
-                  </label>
-                  <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
-                    <button
-                      type="button"
-                      onClick={() => setRole('dswd_admin')}
-                      className={`py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                        role === 'dswd_admin'
-                          ? 'bg-[#10069f] text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      DSWD Admin
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRole('receiver')}
-                      className={`py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                        role === 'receiver'
-                          ? 'bg-[#10069f] text-white shadow-sm'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      Receiver / LGU
-                    </button>
-                  </div>
-                </div>
 
                 {/* First and Last Name */}
                 <div className="grid grid-cols-2 gap-2">
@@ -1212,9 +1239,29 @@ export function AuthPage() {
                     <span>{submittedEmail}</span>
                   </div>
                 )}
+
+                {statusCheckFeedback && (
+                  <div className={`p-2.5 rounded-xl text-xs font-semibold ${
+                    statusCheckFeedback.includes('approved') || statusCheckFeedback.includes('verified')
+                      ? 'bg-green-50 text-green-800 border border-green-200'
+                      : 'bg-amber-50 text-amber-800 border border-amber-200'
+                  }`}>
+                    {statusCheckFeedback}
+                  </div>
+                )}
               </div>
 
-              <div>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleCheckStatus}
+                  disabled={isCheckingStatus}
+                  className="w-full py-3.5 rounded-2xl bg-white border-2 border-[#10069f] text-[#10069f] hover:bg-blue-50 font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingStatus ? 'Checking Status...' : 'Check Verification Status'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {

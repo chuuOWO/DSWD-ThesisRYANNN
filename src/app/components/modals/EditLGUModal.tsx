@@ -7,29 +7,29 @@ interface EditLGUModalProps {
   lgu: LGUDelivery;
   onClose: () => void;
   onSubmit: (data: LGUDelivery) => void | Promise<void>;
+  availableCategories?: string[];
 }
 
 const PROVINCES = ['Iloilo', 'Antique', 'Capiz', 'Aklan', 'Guimaras', 'Negros Occidental'];
-const FNFI_CATEGORIES = ['Hygiene Kit', 'Food Pack', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sack', 'RTEF'] as const;
 
-export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
+export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] }: EditLGUModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState<LGUDelivery>({
     ...lgu,
     latitude: lgu.latitude ?? 10.7870,
     longitude: lgu.longitude ?? 122.3892,
-    currentStock: lgu.currentStock || {
-      'Hygiene Kit': 0,
-      'Food Pack': 0,
-      'Sleeping Kit': 0,
-      'Kitchen Kit': 0,
-      'Family Kit': 0,
-      'Laminated Sack': 0,
-      'RTEF': 0
-    }
+    currentStock: lgu.currentStock || {}
   });
   const [errors, setErrors] = useState<Partial<Record<keyof LGUDelivery, string>>>({});
+
+  const categoriesToRender = useMemo(() => {
+    const set = new Set<string>(availableCategories);
+    if (formData.currentStock) {
+      Object.keys(formData.currentStock).forEach(k => set.add(k));
+    }
+    return Array.from(set).sort();
+  }, [availableCategories, formData.currentStock]);
 
   const handleChange = (field: keyof LGUDelivery, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -49,11 +49,11 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
     }
   };
 
-  const handleStockChange = (category: typeof FNFI_CATEGORIES[number], value: number) => {
+  const handleStockChange = (category: string, value: number) => {
     setFormData(prev => ({
       ...prev,
       currentStock: {
-        ...prev.currentStock!,
+        ...(prev.currentStock || {}),
         [category]: value
       }
     }));
@@ -278,7 +278,7 @@ export function EditLGUModal({ lgu, onClose, onSubmit }: EditLGUModalProps) {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="font-bold text-blue-900 text-sm mb-3">Current Stock at LGU</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {FNFI_CATEGORIES.map(category => (
+              {categoriesToRender.map(category => (
                 <div key={category}>
                   <label className="block text-xs font-bold text-blue-700 mb-2">
                     {category}

@@ -691,7 +691,7 @@ export function LGUReceiverPage({ profile, releases, onAccept, onSignOut }: LGUR
         subtitle={`Updating ${effectiveLguName || 'LGU'} warehouse inventory in Supabase...`}
       />
 
-      <section className="mx-auto flex h-screen w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
+      <section className="mx-auto flex h-[100dvh] max-h-[100dvh] w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
         {/* Header matching ReceiverPage */}
         <header className="z-10 flex items-center justify-between bg-[#2500ba] px-5 py-3.5 text-white shadow-sm">
           <div className="flex items-center gap-3">

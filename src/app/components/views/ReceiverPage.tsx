@@ -1410,7 +1410,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
 
   return (
     <main className="min-h-screen bg-[#e7e6ea] p-0 text-[#15132d] sm:p-5 flex items-center justify-center font-sans">
-      <section className="mx-auto flex h-screen w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
+      <section className="mx-auto flex h-[100dvh] max-h-[100dvh] w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
         
         <header className="z-10 flex items-center justify-between bg-[#2500ba] px-5 py-3.5 text-white shadow-sm">
           <div className="flex items-center gap-3">
@@ -1739,7 +1739,7 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
           )}
 
           {/* Recenter & Fit Route Floating Buttons */}
-          <div className="absolute bottom-24 right-4 z-10 flex flex-col gap-2">
+          <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-2">
             {destinationPosition && isValidCoordinate(destinationPosition) && (
               <button
                 type="button"
@@ -1760,23 +1760,6 @@ function ReceiverPageContent({ profile, onSignOut }: ReceiverPageProps) {
             >
               <LocateFixed size={18} />
             </button>
-          </div>
-
-          {/* Bottom Action Sheet (Always ready to scan anything) */}
-          <div className="absolute bottom-3 left-4 right-4 z-10 rounded-xl bg-white p-3 shadow-md border border-gray-100">
-            <div className="mb-2 flex justify-between text-[9px] text-gray-500">
-              <span>{isInTransit ? `${activePackages.length} package${activePackages.length > 1 ? 's' : ''} in custody` : 'Map Live • Standby'}</span>
-              <span className={`font-bold ${isInTransit ? 'text-emerald-600' : 'text-[#2500ba]'}`}>
-                {isInTransit ? 'DASHBOARD TRACKING ON' : 'LOCAL GPS ONLY'}
-              </span>
-            </div>
-
-            {location && (
-              <p className="text-[9px] font-mono text-gray-400">
-                {formatCoordinate(location.latitude)}, {formatCoordinate(location.longitude)}
-                {location.accuracy ? ` (±${Math.round(location.accuracy)}m)` : ''}
-              </p>
-            )}
           </div>
 
           {/* 5 Dots Smooth Loading Screens */}

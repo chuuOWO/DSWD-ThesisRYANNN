@@ -19,15 +19,7 @@ export interface LGUDelivery {
   remarks?: string;
   latitude?: number;
   longitude?: number;
-  currentStock?: {
-    'Hygiene Kit': number;
-    'Food Pack': number;
-    'Sleeping Kit': number;
-    'Kitchen Kit': number;
-    'Family Kit': number;
-    'Laminated Sack': number;
-    'RTEF': number;
-  };
+  currentStock?: Record<string, number>;
 }
 
 interface RecentActivity {
@@ -39,26 +31,6 @@ interface RecentActivity {
   date: string;
   status: string;
 }
-
-const FNFI_CATEGORIES = [
-  'Hygiene Kit',
-  'Food Pack',
-  'Sleeping Kit',
-  'Kitchen Kit',
-  'Family Kit',
-  'Laminated Sack',
-  'RTEF'
-];
-
-const EMPTY_STOCK: NonNullable<LGUDelivery['currentStock']> = {
-  'Hygiene Kit': 0,
-  'Food Pack': 0,
-  'Sleeping Kit': 0,
-  'Kitchen Kit': 0,
-  'Family Kit': 0,
-  'Laminated Sack': 0,
-  'RTEF': 0
-};
 
 interface LGUMonitoringProps {
   inventoryState?: {
@@ -80,7 +52,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 12;
+  const pageSize = 5;
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
@@ -110,23 +82,22 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       const pending = lguReleases.filter((r) => ['Allocating', 'Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length;
       const lastDate = lguReleases[0]?.dateAllocated || (report ? report.reportedAt?.slice(0, 10) : 'N/A');
 
-      const stock: NonNullable<LGUDelivery['currentStock']> = {
-        ...EMPTY_STOCK,
+      const stock: Record<string, number> = {
         ...(lgu.currentStock || {})
       };
 
-      // Accumulate accepted relief packages
+      // Accumulate accepted relief packages dynamically for all categories
       lguReleases.forEach((r) => {
-        if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory in stock) {
-          (stock as Record<string, number>)[r.fnfiCategory] += (r.amountApproved || r.amountRequested || 0);
+        if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory) {
+          stock[r.fnfiCategory] = (stock[r.fnfiCategory] || 0) + (r.amountApproved || r.amountRequested || 0);
         }
       });
 
       // Override/augment from official LGU inventory reports
       if (report) {
-        stock['Food Pack'] = Math.max(stock['Food Pack'], report.foodPacks || 0);
-        stock['Hygiene Kit'] = Math.max(stock['Hygiene Kit'], report.hygieneKits || 0);
-        stock['Family Kit'] = Math.max(stock['Family Kit'], report.familyKits || 0);
+        if (report.foodPacks) stock['Food Pack'] = Math.max(stock['Food Pack'] || 0, report.foodPacks);
+        if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(stock['Hygiene Kit'] || 0, report.hygieneKits);
+        if (report.familyKits) stock['Family Kit'] = Math.max(stock['Family Kit'] || 0, report.familyKits);
       }
 
       lguEntriesMap.set(lgu.id, {
@@ -164,11 +135,11 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   }, [inventoryState?.provincesList, baseLguList]);
 
   const categoryOptions = useMemo(() => {
-    if (inventoryState?.kitTypesList && inventoryState.kitTypesList.length > 0) {
-      return inventoryState.kitTypesList.map(k => k.name);
-    }
-    return FNFI_CATEGORIES;
-  }, [inventoryState?.kitTypesList]);
+    const set = new Set<string>();
+    (inventoryState?.kitTypesList ?? []).forEach(k => { if (k.name) set.add(k.name.trim()); });
+    (inventoryState?.outgoingReleasesList ?? []).forEach(r => { if (r.fnfiCategory) set.add(r.fnfiCategory.trim()); });
+    return Array.from(set).sort();
+  }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList]);
 
 
   const handleEditLGU = async (updatedLGU: LGUDelivery) => {
@@ -223,7 +194,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                              (lgu?.province || '').toLowerCase() === (selectedProvinceTab || '').toLowerCase();
 
       const matchesCategory = selectedCategory === 'All' ||
-                             (lgu?.currentStock && (lgu.currentStock[selectedCategory as keyof typeof lgu.currentStock] || 0) > 0);
+                             (lgu?.currentStock && (lgu.currentStock[selectedCategory] || 0) > 0);
 
       return matchesSearch && matchesProvince && matchesCategory;
     });
@@ -715,6 +686,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       {showEditModal && selectedLGU && (
         <EditLGUModal
           lgu={selectedLGU}
+          availableCategories={categoryOptions}
           onClose={() => {
             setShowEditModal(false);
             setSelectedLGU(null);
