@@ -965,7 +965,52 @@ language sql
 security definer
 stable
 as $$
-  select role from public.profiles where id = auth.uid()
+  select lower(trim(coalesce(role, ''))) from public.profiles where id = auth.uid()
+$$;
+
+-- Secure admin verification RPC (bypasses client-side RLS limitations)
+create or replace function public.admin_verify_profile(target_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) then
+    raise exception 'Unauthorized: Only DSWD administrators can verify accounts.';
+  end if;
+
+  update public.profiles
+  set status = 'verified'
+  where id = target_user_id;
+
+  return true;
+end;
+$$;
+
+-- Secure admin profile deletion / rejection RPC
+create or replace function public.admin_delete_profile(target_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) then
+    raise exception 'Unauthorized: Only DSWD administrators can delete accounts.';
+  end if;
+
+  delete from public.profiles
+  where id = target_user_id;
+
+  return true;
+end;
 $$;
 
 -- ==============================================================================
@@ -1343,18 +1388,18 @@ create policy "Allow profile update"
   to authenticated
   using (
     auth.uid() = id or
-    public.current_user_role() = 'dswd_admin' or
+    public.current_user_role() in ('dswd_admin', 'admin') or
     exists (
       select 1 from public.profiles
-      where id = auth.uid() and role = 'dswd_admin'
+      where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
     )
   )
   with check (
     auth.uid() = id or
-    public.current_user_role() = 'dswd_admin' or
+    public.current_user_role() in ('dswd_admin', 'admin') or
     exists (
       select 1 from public.profiles
-      where id = auth.uid() and role = 'dswd_admin'
+      where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
     )
   );
 
@@ -1363,10 +1408,10 @@ create policy "Allow profile delete"
   on public.profiles for delete
   to authenticated
   using (
-    public.current_user_role() = 'dswd_admin' or
+    public.current_user_role() in ('dswd_admin', 'admin') or
     exists (
       select 1 from public.profiles
-      where id = auth.uid() and role = 'dswd_admin'
+      where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
     )
   );
 
