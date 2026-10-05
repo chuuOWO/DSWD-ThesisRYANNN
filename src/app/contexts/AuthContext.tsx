@@ -39,7 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
-    await loadProfile(session);
+    const { data } = await supabase.auth.getSession();
+    setSession(data.session);
+    await loadProfile(data.session);
   };
 
   useEffect(() => {
