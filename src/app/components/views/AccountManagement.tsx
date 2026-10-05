@@ -312,7 +312,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases }
       backendApi.getReceiverReleases().then((rows) => {
         setDbReleases(rows.map(r => ({
           drNumber: r.dr_number,
-          dateAllocated: r.created_at || '',
+          dateAllocated: r.date_allocated || r.created_at || '',
           lguName: r.lgu_name || '',
           province: r.province || '',
           municipality: r.municipality || '',

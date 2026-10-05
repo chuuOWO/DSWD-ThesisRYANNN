@@ -236,6 +236,7 @@ export interface TruckLiveLocation {
 export interface ReceiverReleaseRecord {
   dr_number: string;
   date_allocated?: string | null;
+  created_at?: string | null;
   lgu_name?: string | null;
   province?: string | null;
   municipality?: string | null;
