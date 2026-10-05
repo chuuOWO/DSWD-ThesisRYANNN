@@ -257,60 +257,19 @@ export const authApi = {
   },
 
   async verifyProfile(userId: string) {
-    // 1. Try secure RPC function if available (bypasses client RLS limitations)
-    try {
-      const { data: rpcSuccess, error: rpcError } = await supabase.rpc('admin_verify_profile', { target_user_id: userId });
-      if (!rpcError && rpcSuccess === true) {
-        return { ok: true };
-      }
-    } catch {}
-
-    // 2. Direct table update with select verification
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ status: 'verified' })
-      .eq('id', userId)
-      .select('id, status');
-
+    const { error } = await supabase.rpc('admin_verify_profile', { target_user_id: userId });
     if (error) throw new Error(`Failed to verify profile: ${error.message}`);
-    if (!data || data.length === 0) {
-      throw new Error('Database denied update: Your account might not have admin permissions in Supabase profiles, or the admin RLS policy is not applied.');
-    }
     return { ok: true };
   },
 
   async rejectProfile(userId: string) {
-    try {
-      const { data: rpcSuccess, error: rpcError } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
-      if (!rpcError && rpcSuccess === true) {
-        return { ok: true };
-      }
-    } catch {}
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', userId)
-      .select('id');
-
+    const { error } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
     if (error) throw new Error(`Failed to decline profile: ${error.message}`);
     return { ok: true };
   },
 
   async deleteProfile(userId: string) {
-    try {
-      const { data: rpcSuccess, error: rpcError } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
-      if (!rpcError && rpcSuccess === true) {
-        return { ok: true };
-      }
-    } catch {}
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', userId)
-      .select('id');
-
+    const { error } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
     if (error) throw new Error(`Failed to delete account: ${error.message}`);
     return { ok: true };
   },
