@@ -62,7 +62,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5;
+  const pageSize = 12;
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
@@ -81,22 +81,24 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     const lguEntriesMap = new Map<string, LGUDelivery>();
 
     masterLgus.forEach((lgu) => {
+      if (!lgu) return;
       const muni = lgu.municipality || '';
       const muniLower = muni.toLowerCase();
       const lguReleases = releases.filter((r) => {
-        const target = (r?.lguName || '').toLowerCase();
-        const m = (r?.municipality || '').toLowerCase();
-        return (r?.lguId && r.lguId === lgu.id) || (muniLower && target.includes(muniLower)) || (muniLower && m === muniLower);
+        if (!r) return false;
+        const target = (r.lguName || '').toLowerCase();
+        const m = (r.municipality || '').toLowerCase();
+        return (r.lguId && r.lguId === lgu.id) || (muniLower && target.includes(muniLower)) || (muniLower && m === muniLower);
       });
 
       // Filter incoming goods that were stocked directly to this LGU
       const lguIncomingDirect = incomingGoods.filter((inc) => {
-        if (inc.destinationType !== 'LGU') return false;
+        if (!inc || inc.destinationType !== 'LGU') return false;
         const dest = (inc.destination || '').toLowerCase();
         return dest === muniLower || (muniLower && dest.includes(muniLower));
       });
 
-      const totalReleased = lguReleases.reduce((sum, r) => sum + (r.amountApproved || r.amountRequested || 0), 0);
+      const totalReleased = lguReleases.reduce((sum, r) => sum + (Number(r.amountApproved) || Number(r.amountRequested) || 0), 0);
       const deliveryCount = lguReleases.length;
       const completed = lguReleases.filter((r) => ['Delivered', 'Accepted'].includes(r.deliveryStatus)).length;
       const pending = lguReleases.filter((r) => ['Allocating', 'Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length;
@@ -104,42 +106,44 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
       // Baseline stock from Supabase master table public.lgus
       const stock: Record<string, number> = {
-        ...(lgu.currentStock || {})
+        ...(lgu.currentStock && typeof lgu.currentStock === 'object' ? lgu.currentStock : {})
       };
 
       // Populate known kit categories from record columns if not in json map
-      if (lgu.foodPacks && !stock['Food Pack']) stock['Food Pack'] = lgu.foodPacks;
-      if (lgu.hygieneKits && !stock['Hygiene Kit']) stock['Hygiene Kit'] = lgu.hygieneKits;
-      if (lgu.familyKits && !stock['Family Kit']) stock['Family Kit'] = lgu.familyKits;
-      if (lgu.sleepingKits && !stock['Sleeping Kit']) stock['Sleeping Kit'] = lgu.sleepingKits;
-      if (lgu.kitchenKits && !stock['Kitchen Kit']) stock['Kitchen Kit'] = lgu.kitchenKits;
-      if (lgu.laminatedSacks && !stock['Laminated Sacks']) stock['Laminated Sacks'] = lgu.laminatedSacks;
-      if (lgu.rtef && !stock['Ready-to-Eat Food']) stock['Ready-to-Eat Food'] = lgu.rtef;
+      if (lgu.foodPacks && !stock['Food Pack']) stock['Food Pack'] = Number(lgu.foodPacks);
+      if (lgu.hygieneKits && !stock['Hygiene Kit']) stock['Hygiene Kit'] = Number(lgu.hygieneKits);
+      if (lgu.familyKits && !stock['Family Kit']) stock['Family Kit'] = Number(lgu.familyKits);
+      if (lgu.sleepingKits && !stock['Sleeping Kit']) stock['Sleeping Kit'] = Number(lgu.sleepingKits);
+      if (lgu.kitchenKits && !stock['Kitchen Kit']) stock['Kitchen Kit'] = Number(lgu.kitchenKits);
+      if (lgu.laminatedSacks && !stock['Laminated Sacks']) stock['Laminated Sacks'] = Number(lgu.laminatedSacks);
+      if (lgu.rtef && !stock['Ready-to-Eat Food']) stock['Ready-to-Eat Food'] = Number(lgu.rtef);
 
       // Track verified arrivals from completed deliveries and direct incoming goods
       const arrivalsMap: Record<string, number> = {};
       lguReleases.forEach((r) => {
+        if (!r) return;
         if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory) {
-          arrivalsMap[r.fnfiCategory] = (arrivalsMap[r.fnfiCategory] || 0) + (r.amountApproved || r.amountRequested || 0);
+          arrivalsMap[r.fnfiCategory] = (arrivalsMap[r.fnfiCategory] || 0) + (Number(r.amountApproved) || Number(r.amountRequested) || 0);
         }
       });
       lguIncomingDirect.forEach((inc) => {
-        if (inc.fnfiCategory && inc.quantity > 0) {
-          arrivalsMap[inc.fnfiCategory] = (arrivalsMap[inc.fnfiCategory] || 0) + inc.quantity;
+        if (!inc) return;
+        if (inc.fnfiCategory && Number(inc.quantity) > 0) {
+          arrivalsMap[inc.fnfiCategory] = (arrivalsMap[inc.fnfiCategory] || 0) + Number(inc.quantity);
         }
       });
 
       // Synchronize: taking the maximum between the DB balance and completed arrivals
       // guarantees immediate visibility of newly completed deliveries/incoming stock while avoiding double-counting
       Object.entries(arrivalsMap).forEach(([cat, arrivalQty]) => {
-        stock[cat] = Math.max(stock[cat] || 0, arrivalQty);
+        stock[cat] = Math.max(Number(stock[cat]) || 0, arrivalQty);
       });
 
       // Override/augment from official LGU inventory priority reports if higher
       if (report) {
-        if (report.foodPacks) stock['Food Pack'] = Math.max(stock['Food Pack'] || 0, report.foodPacks);
-        if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(stock['Hygiene Kit'] || 0, report.hygieneKits);
-        if (report.familyKits) stock['Family Kit'] = Math.max(stock['Family Kit'] || 0, report.familyKits);
+        if (report.foodPacks) stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(report.foodPacks));
+        if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(report.hygieneKits));
+        if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
       }
 
       lguEntriesMap.set(lgu.id, {
@@ -263,8 +267,8 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
     return baseLguList
       .map((lgu) => {
-        const foodStock = lgu.currentStock?.['Food Pack'] || 0;
-        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + v, 0) : 0;
+        const foodStock = Number(lgu.currentStock?.['Food Pack']) || 0;
+        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + (Number(v) || 0), 0) : 0;
         const pending = lgu.pendingDeliveries;
         const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodStock / 10) + (pending * 5))));
         const priorityColor = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
@@ -556,7 +560,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
                     </div>
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                      {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()} Items Total
+                      {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} Items Total
                     </span>
                   </div>
 
@@ -653,7 +657,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <div className="space-y-1">
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-sm text-purple-700">
-                            {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()}
+                            {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()}
                           </span>
                           <span className="text-[10px] text-gray-400 font-medium">items</span>
                         </div>

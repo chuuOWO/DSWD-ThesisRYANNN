@@ -280,7 +280,7 @@ export function EditLGUModal({
                 <span>On-Hand Inventory (Locked & Automated)</span>
               </div>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                {Object.values(formData.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()} Total Items
+                {Object.values(formData.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} Total Items
               </span>
             </div>
 

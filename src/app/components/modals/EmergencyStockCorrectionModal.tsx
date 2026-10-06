@@ -32,6 +32,12 @@ export function EmergencyStockCorrectionModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (initialLguId) {
+      setSelectedLguId(initialLguId);
+    }
+  }, [initialLguId]);
+
   const activeLgu = useMemo(() => {
     return lgusList.find(l => l.id === selectedLguId) || lgusList[0] || null;
   }, [lgusList, selectedLguId]);
@@ -197,7 +203,7 @@ export function EmergencyStockCorrectionModal({
                 Adjust On-Hand Stock Counts
               </label>
               <span className="text-[11px] text-gray-500">
-                Current total: {activeLgu ? Object.values(activeLgu.currentStock || {}).reduce((s, v) => s + v, 0).toLocaleString() : 0} items
+                Current total: {activeLgu ? Object.values(activeLgu.currentStock || {}).reduce((s, v) => s + (Number(v) || 0), 0).toLocaleString() : 0} items
               </span>
             </div>
 
