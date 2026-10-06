@@ -98,6 +98,15 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         return dest === muniLower || (muniLower && dest.includes(muniLower));
       });
 
+      const report = reports.find((rep) => {
+        if (!rep) return false;
+        if (rep.lguId && lgu.id && rep.lguId === lgu.id) return true;
+        const repMuni = (rep.municipality || '').toLowerCase();
+        if (muniLower && repMuni === muniLower) return true;
+        const repName = (rep.lguName || '').toLowerCase();
+        return Boolean(muniLower && repName.includes(muniLower));
+      });
+
       const totalReleased = lguReleases.reduce((sum, r) => sum + (Number(r.amountApproved) || Number(r.amountRequested) || 0), 0);
       const deliveryCount = lguReleases.length;
       const completed = lguReleases.filter((r) => ['Delivered', 'Accepted'].includes(r.deliveryStatus)).length;
@@ -146,11 +155,12 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
       }
 
-      lguEntriesMap.set(lgu.id, {
-        id: lgu.id,
+      const lguId = lgu.id || lgu.municipality || `lgu-${Math.random()}`;
+      lguEntriesMap.set(lguId, {
+        id: lguId,
         lguName: lgu.lguName || `${muni} Municipal Office`,
         municipality: muni,
-        province: lgu.province,
+        province: lgu.province || 'Iloilo',
         totalItemsReleased: totalReleased,
         deliveryCount,
         completedDeliveries: completed,
@@ -171,20 +181,23 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   // Province list with counts
   const provinceOptions = useMemo(() => {
     if (inventoryState?.provincesList && inventoryState.provincesList.length > 0) {
-      return inventoryState.provincesList.map(p => p.name).sort();
+      return inventoryState.provincesList
+        .map(p => p?.name?.trim())
+        .filter((name): name is string => Boolean(name))
+        .sort();
     }
     const set = new Set<string>();
     baseLguList.forEach(l => {
-      if (l.province) set.add(l.province);
+      if (l?.province) set.add(l.province.trim());
     });
     return Array.from(set).sort();
   }, [inventoryState?.provincesList, baseLguList]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
-    (inventoryState?.kitTypesList ?? []).forEach(k => { if (k.name) set.add(k.name.trim()); });
-    (inventoryState?.outgoingReleasesList ?? []).forEach(r => { if (r.fnfiCategory) set.add(r.fnfiCategory.trim()); });
-    (inventoryState?.incomingGoodsList ?? []).forEach(g => { if (g.fnfiCategory) set.add(g.fnfiCategory.trim()); });
+    (inventoryState?.kitTypesList ?? []).forEach(k => { if (k?.name) set.add(k.name.trim()); });
+    (inventoryState?.outgoingReleasesList ?? []).forEach(r => { if (r?.fnfiCategory) set.add(r.fnfiCategory.trim()); });
+    (inventoryState?.incomingGoodsList ?? []).forEach(g => { if (g?.fnfiCategory) set.add(g.fnfiCategory.trim()); });
     if (set.size === 0) {
       DEFAULT_KIT_NAMES.forEach(c => set.add(c));
     }
@@ -221,14 +234,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   // Recent activity dynamically populated from live outgoing releases
   const recentActivity = useMemo<RecentActivity[]>(() => {
     const releases = inventoryState?.outgoingReleasesList ?? [];
-    return releases.slice(0, 8).map((release, idx) => ({
+    return releases.filter(Boolean).slice(0, 8).map((release, idx) => ({
       id: release.drNumber || `OUT-${idx + 1}`,
-      lguName: release.lguName || `${release.municipality} LGU`,
+      lguName: release.lguName || `${release.municipality || 'LGU'} Office`,
       municipality: release.municipality || 'Panay',
-      fnfiCategory: release.fnfiCategory,
-      quantity: release.amountApproved || release.amountRequested || 0,
+      fnfiCategory: release.fnfiCategory || 'Relief Goods',
+      quantity: Number(release.amountApproved) || Number(release.amountRequested) || 0,
       date: release.dateAllocated || 'Recent',
-      status: release.deliveryStatus
+      status: release.deliveryStatus || 'Pending'
     }));
   }, [inventoryState?.outgoingReleasesList]);
 
@@ -244,7 +257,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                              (lgu?.province || '').toLowerCase() === (selectedProvinceTab || '').toLowerCase();
 
       const matchesCategory = selectedCategory === 'All' ||
-                             (lgu?.currentStock && (lgu.currentStock[selectedCategory] || 0) > 0);
+                             (lgu?.currentStock && (Number(lgu.currentStock[selectedCategory]) || 0) > 0);
 
       return matchesSearch && matchesProvince && matchesCategory;
     });
@@ -257,30 +270,46 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   }, [filteredLGUs, currentPage, pageSize]);
 
   const totalLGUs = baseLguList.length;
-  const totalItemsReleased = baseLguList.reduce((sum, lgu) => sum + lgu.totalItemsReleased, 0);
-  const totalDeliveries = baseLguList.reduce((sum, lgu) => sum + lgu.deliveryCount, 0);
-  const totalCompleted = baseLguList.reduce((sum, lgu) => sum + lgu.completedDeliveries, 0);
+  const totalItemsReleased = baseLguList.reduce((sum, lgu) => sum + (Number(lgu?.totalItemsReleased) || 0), 0);
+  const totalDeliveries = baseLguList.reduce((sum, lgu) => sum + (Number(lgu?.deliveryCount) || 0), 0);
+  const totalCompleted = baseLguList.reduce((sum, lgu) => sum + (Number(lgu?.completedDeliveries) || 0), 0);
   const overallCompletionRate = totalDeliveries > 0 ? Math.round((totalCompleted / totalDeliveries) * 100) : 0;
 
   const dynamicPriorities = useMemo(() => {
-    if (priorityReports.length > 0) return priorityReports.slice(0, 5);
+    if (priorityReports.length > 0) {
+      return priorityReports.slice(0, 5).map(rep => ({
+        id: rep?.id || `REP-${rep?.municipality || 'LGU'}`,
+        municipality: rep?.municipality || 'LGU',
+        province: rep?.province || '',
+        lguName: rep?.lguName || `${rep?.municipality || 'LGU'} Municipal Office`,
+        reportedAt: rep?.reportedAt || 'Recent',
+        foodPacks: Number(rep?.foodPacks) || 0,
+        hygieneKits: Number(rep?.hygieneKits) || 0,
+        familyKits: Number(rep?.familyKits) || 0,
+        affectedFamilies: Number(rep?.affectedFamilies) || 0,
+        damageIndex: Number(rep?.damageIndex) || 0,
+        urgencyScore: Number(rep?.urgencyScore) || 50,
+        priorityColor: (rep?.priorityColor || 'Yellow') as 'Red' | 'Yellow' | 'Green',
+        recommendation: rep?.recommendation || 'Regular monitoring.'
+      }));
+    }
 
     return baseLguList
       .map((lgu) => {
-        const foodStock = Number(lgu.currentStock?.['Food Pack']) || 0;
-        const totalStock = lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + (Number(v) || 0), 0) : 0;
-        const pending = lgu.pendingDeliveries;
+        const foodStock = Number(lgu?.currentStock?.['Food Pack']) || 0;
+        const totalStock = lgu?.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + (Number(v) || 0), 0) : 0;
+        const pending = Number(lgu?.pendingDeliveries) || 0;
         const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodStock / 10) + (pending * 5))));
         const priorityColor = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
         return {
-          id: `DYNAMIC-${lgu.municipality}`,
-          municipality: lgu.municipality,
-          province: lgu.province,
-          lguName: lgu.lguName,
-          reportedAt: lgu.lastDeliveryDate || 'Recent',
+          id: `DYNAMIC-${lgu?.municipality || lgu?.id || Math.random()}`,
+          municipality: lgu?.municipality || 'LGU',
+          province: lgu?.province || '',
+          lguName: lgu?.lguName || `${lgu?.municipality || 'LGU'} Municipal Office`,
+          reportedAt: lgu?.lastDeliveryDate || 'Recent',
           foodPacks: foodStock,
-          hygieneKits: lgu.currentStock?.['Hygiene Kit'] || 0,
-          familyKits: lgu.currentStock?.['Family Kit'] || 0,
+          hygieneKits: Number(lgu?.currentStock?.['Hygiene Kit']) || 0,
+          familyKits: Number(lgu?.currentStock?.['Family Kit']) || 0,
           affectedFamilies: Math.max(100, 350 - totalStock),
           damageIndex: urgencyScore,
           urgencyScore,
@@ -567,15 +596,15 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                   {/* Category Breakdown Chips */}
                   <div className="grid grid-cols-2 gap-1.5">
                     {Object.entries(lgu.currentStock || {})
-                      .filter(([_, qty]) => qty > 0)
+                      .filter(([_, qty]) => Number(qty) > 0)
                       .slice(0, 4)
                       .map(([category, qty]) => (
                         <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
                           <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
-                          <p className="text-xs font-bold text-purple-900 mt-0.5">{qty.toLocaleString()}</p>
+                          <p className="text-xs font-bold text-purple-900 mt-0.5">{(Number(qty) || 0).toLocaleString()}</p>
                         </div>
                       ))}
-                    {Object.values(lgu.currentStock || {}).every(v => v === 0) && (
+                    {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
                       <div className="col-span-2 text-center py-2 text-[11px] text-purple-600 font-medium italic">
                         No relief stock recorded on-hand
                       </div>
@@ -663,14 +692,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                         </div>
                         <div className="flex flex-wrap gap-1 max-w-xs">
                           {Object.entries(lgu.currentStock || {})
-                            .filter(([_, qty]) => qty > 0)
+                            .filter(([_, qty]) => Number(qty) > 0)
                             .slice(0, 3)
                             .map(([cat, qty]) => (
                               <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
-                                {cat}: {qty.toLocaleString()}
+                                {cat}: {(Number(qty) || 0).toLocaleString()}
                               </span>
                             ))}
-                          {Object.values(lgu.currentStock || {}).every(v => v === 0) && (
+                          {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
                             <span className="text-[10px] text-gray-400 italic">0 in stock</span>
                           )}
                         </div>
@@ -856,3 +885,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     </div>
   );
 }
+
+export default LGUMonitoring;
+

@@ -16,7 +16,7 @@ const DashboardView = lazy(() => import('./components/views/DashboardView').then
 const IncomingModule = lazy(() => import('./components/views/IncomingModule').then(m => ({ default: m.IncomingModule })));
 const OutgoingModule = lazy(() => import('./components/views/OutgoingModule').then(m => ({ default: m.OutgoingModule })));
 const InventoryMonitoring = lazy(() => import('./components/views/InventoryMonitoring').then(m => ({ default: m.InventoryMonitoring })));
-const LGUMonitoring = lazy(() => import('./components/views/LGUMonitoring').then(m => ({ default: m.LGUMonitoring })));
+const LGUMonitoring = lazy(() => import('./components/views/LGUMonitoring').then(m => ({ default: m.LGUMonitoring || m.default })));
 const TruckTracking = lazy(() => import('./components/views/TruckTracking').then(m => ({ default: m.TruckTracking })));
 const ReceiverPage = lazy(() => import('./components/views/ReceiverPage').then(m => ({ default: m.ReceiverPage })));
 const LGUReceiverPage = lazy(() => import('./components/views/LGUReceiverPage').then(m => ({ default: m.LGUReceiverPage })));
