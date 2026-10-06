@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
+import type { LguRecord } from '../../services/backendApi';
 
 interface InventoryState {
   inventory: { category: string; warehouseA: number; warehouseB: number }[];
   incomingGoodsList: { fnfiCategory: string; expirationDate: string; quantity: number; status: string }[];
   outgoingReleasesList: { fnfiCategory: string; amountApproved: number; amountRequested: number; deliveryStatus: string; lguName?: string; municipality?: string }[];
   lguPriorityReports: { lguName: string; municipality?: string; foodPacks: number; hygieneKits: number; familyKits: number }[];
+  lgusList?: LguRecord[];
   addStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => void;
   deductStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => boolean;
   getAvailableStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse') => number;
@@ -28,7 +30,7 @@ interface InventoryItem {
 }
 
 export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps) {
-  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList } = inventoryState;
+  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [] } = inventoryState;
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
@@ -46,30 +48,56 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     outgoingReleasesList.forEach((o) => {
       if (o.fnfiCategory?.trim()) set.add(o.fnfiCategory.trim());
     });
+    lgusList.forEach((lgu) => {
+      Object.keys(lgu.currentStock ?? {}).forEach((category) => {
+        if (category.trim()) set.add(category.trim());
+      });
+    });
     return Array.from(set).sort();
-  }, [inventory, incomingGoodsList, outgoingReleasesList]);
+  }, [inventory, incomingGoodsList, outgoingReleasesList, lgusList]);
 
   // Dynamically compute live LGU warehouse stock from accepted deliveries and LGU reports (no static mock zeros)
   const lguWarehouseData = useMemo(() => {
     const map = new Map<string, Record<string, number>>();
 
-    const ensureLgu = (name: string) => {
+    const cleanLguName = (name: string) => (
+      name.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim() || name.trim()
+    );
+
+    const ensureLgu = (name: string, baseStock?: Record<string, number>) => {
       const trimmed = name.trim();
       if (!map.has(trimmed)) {
         const init: Record<string, number> = {};
         dynamicCategories.forEach((cat) => {
           init[cat] = 0;
         });
+        Object.entries(baseStock ?? {}).forEach(([category, value]) => {
+          init[category] = Number(value) || 0;
+        });
         map.set(trimmed, init);
       }
       return map.get(trimmed)!;
     };
 
+    // 0. Start with every LGU from the Supabase master directory, even with zero stock.
+    lgusList.forEach((lgu) => {
+      ensureLgu(cleanLguName(lgu.municipality || lgu.lguName), {
+        'Food Pack': lgu.foodPacks || 0,
+        'Hygiene Kit': lgu.hygieneKits || 0,
+        'Sleeping Kit': lgu.sleepingKits || 0,
+        'Kitchen Kit': lgu.kitchenKits || 0,
+        'Family Kit': lgu.familyKits || 0,
+        'Laminated Sack': lgu.laminatedSacks || 0,
+        RTEF: lgu.rtef || 0,
+        ...(lgu.currentStock ?? {})
+      });
+    });
+
     // 1. Accumulate accepted/delivered goods to each LGU from outgoing requests
     outgoingReleasesList.forEach((release) => {
       if (!['Delivered', 'Accepted'].includes(release.deliveryStatus)) return;
       const raw = release.municipality || release.lguName || 'General LGU';
-      const lgu = raw.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim() || raw;
+      const lgu = cleanLguName(raw);
       const record = ensureLgu(lgu);
       const qty = release.amountApproved || release.amountRequested || 0;
       const cat = release.fnfiCategory;
@@ -81,7 +109,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     // 2. Merge LGU reported inventory counts
     lguPriorityReports.forEach((report) => {
       const raw = report.municipality || report.lguName || 'Reported LGU';
-      const lgu = raw.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim() || raw;
+      const lgu = cleanLguName(raw);
       const record = ensureLgu(lgu);
       if ('Food Pack' in record || dynamicCategories.includes('Food Pack')) record['Food Pack'] = Math.max(record['Food Pack'] || 0, report.foodPacks || 0);
       if ('Hygiene Kit' in record || dynamicCategories.includes('Hygiene Kit')) record['Hygiene Kit'] = Math.max(record['Hygiene Kit'] || 0, report.hygieneKits || 0);
@@ -92,7 +120,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       warehouse,
       ...stock
     }));
-  }, [outgoingReleasesList, lguPriorityReports, dynamicCategories]);
+  }, [outgoingReleasesList, lguPriorityReports, lgusList, dynamicCategories]);
 
 
   const releaseStatuses = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'];
@@ -136,12 +164,30 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const combinedData = displayData.map(item => ({
     ...item,
     lguTotal: lguTotals[item.category] || 0,
-    grandTotal: item.totalStock + (lguTotals[item.category] || 0)
+    grandTotal: item.totalStock + (lguTotals[item.category] || 0),
+    selectedWarehouseStock: (() => {
+      if (selectedWarehouse === 'Oton Main Warehouse') return item.warehouseA;
+      if (selectedWarehouse === 'Pototan Main Warehouse') return item.warehouseB;
+      if (selectedWarehouse !== 'All Specific Warehouses') {
+        const lguRecord = lguWarehouseData.find((lgu) => lgu.warehouse === selectedWarehouse);
+        const value = lguRecord ? (lguRecord as Record<string, number | string>)[item.category] : 0;
+        return typeof value === 'number' ? value : 0;
+      }
+      return null;
+    })()
   }));
 
   const filteredData = combinedData.filter(item => {
     const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-    return matchesCategory;
+    if (!matchesCategory) return false;
+
+    if (selectedWarehouse === 'All Specific Warehouses') return true;
+    if (selectedWarehouse === 'Oton Main Warehouse') return item.warehouseA > 0;
+    if (selectedWarehouse === 'Pototan Main Warehouse') return item.warehouseB > 0;
+
+    const lguRecord = lguWarehouseData.find((lgu) => lgu.warehouse === selectedWarehouse);
+    const value = lguRecord ? (lguRecord as Record<string, number | string>)[item.category] : 0;
+    return Number(value) > 0;
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -156,7 +202,11 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const warehouseBTotal = inventory.reduce((sum, item) => sum + item.warehouseB, 0);
   const totalMainWarehouse = warehouseATotal + warehouseBTotal;
   const totalLGUWarehouse = Object.values(lguTotals).reduce((sum, val) => sum + val, 0);
-  const totalAvailable = selectedWarehouseType === 'Main' ? totalMainWarehouse :
+  const selectedSpecificTotal = combinedData.reduce((sum, item) => (
+    sum + (typeof item.selectedWarehouseStock === 'number' ? item.selectedWarehouseStock : 0)
+  ), 0);
+  const totalAvailable = selectedWarehouse !== 'All Specific Warehouses' ? selectedSpecificTotal :
+                         selectedWarehouseType === 'Main' ? totalMainWarehouse :
                          selectedWarehouseType === 'LGU' ? totalLGUWarehouse :
                          totalMainWarehouse + totalLGUWarehouse;
   const totalReleased = displayData.reduce((sum, item) => sum + item.released, 0);
@@ -164,10 +214,16 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
 
   const chartData = dynamicCategories.map(category => {
     const inventoryItem = inventory.find(item => item.category === category);
+    const lguTotal = lguWarehouseData.reduce((sum, lgu) => {
+      const value = (lgu as Record<string, number | string>)[category];
+      return sum + (typeof value === 'number' ? value : 0);
+    }, 0);
+
     return {
       name: category,
       'Oton Main Warehouse': inventoryItem?.warehouseA || 0,
-      'Pototan Main Warehouse': inventoryItem?.warehouseB || 0
+      'Pototan Main Warehouse': inventoryItem?.warehouseB || 0,
+      'All LGUs': lguTotal
     };
   });
 
@@ -335,6 +391,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
             <option>All Specific Warehouses</option>
             <option>Oton Main Warehouse</option>
             <option>Pototan Main Warehouse</option>
+            <option disabled>-- LGU Warehouses --</option>
             {lguWarehouseData.map(lgu => (
               <option key={lgu.warehouse}>{lgu.warehouse}</option>
             ))}
@@ -362,6 +419,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
               <Legend wrapperStyle={{ fontSize: 14, fontWeight: 600 }} />
               <Bar dataKey="Oton Main Warehouse" fill="#22c55e" radius={[4, 4, 0, 0]} />
               <Bar dataKey="Pototan Main Warehouse" fill="#a855f7" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="All LGUs" fill="#4f46e5" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -401,8 +459,13 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                 const displayTotal = selectedWarehouseType === 'Main' ? item.totalStock :
                                     selectedWarehouseType === 'LGU' ? item.lguTotal :
                                     item.grandTotal;
-                const stockPercentage = displayTotal > 0 ? Math.round((item.available / displayTotal) * 100) : 0;
-                const isLowStock = item.available < 500;
+                const displayAvailable = typeof item.selectedWarehouseStock === 'number'
+                  ? item.selectedWarehouseStock
+                  : selectedWarehouseType === 'LGU'
+                  ? item.lguTotal
+                  : item.available;
+                const stockPercentage = displayTotal > 0 ? Math.round((displayAvailable / displayTotal) * 100) : 0;
+                const isLowStock = displayAvailable < 500;
 
                 return (
                   <tr key={item.category} className="hover:bg-gray-50 transition-colors">
@@ -437,7 +500,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                     </td>
                     <td className="px-6 py-4 text-right">
                       <span className={`text-sm font-bold ${isLowStock ? 'text-red-600' : 'text-blue-600'}`}>
-                        {item.available.toLocaleString()}
+                        {displayAvailable.toLocaleString()}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">

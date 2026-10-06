@@ -202,7 +202,7 @@ alter table public.lgus add column if not exists laminated_sacks integer not nul
 alter table public.lgus add column if not exists rtef integer not null default 0;
 alter table public.lgus add column if not exists current_stock jsonb default '{}'::jsonb;
 alter table public.lgus add column if not exists urgency_score integer default 0;
-alter table public.lgus add column if not exists priority_color text default 'green';
+alter table public.lgus add column if not exists priority_color text default 'Green';
 alter table public.lgus add column if not exists recommendation text default '';
 alter table public.lgus add column if not exists last_reported_at timestamptz default now();
 alter table public.lgus add column if not exists current_stock jsonb default '{}'::jsonb;
@@ -211,6 +211,11 @@ alter table public.lgus add column if not exists updated_at timestamptz default 
 
 create index if not exists lgus_province_municipality_idx on public.lgus (province, municipality);
 create index if not exists lgus_is_active_idx on public.lgus (is_active);
+
+alter table public.lgus alter column priority_color set default 'Green';
+update public.lgus
+set priority_color = 'Green'
+where lower(coalesce(priority_color, '')) = 'green';
 
 -- Seed all 101 Panay Island and Guimaras municipalities
 insert into public.lgus (municipality, province, lgu_name, latitude, longitude) values
@@ -642,6 +647,159 @@ where not exists (
   where lower(trim(r.municipality)) = lower(trim(l.municipality))
     and lower(trim(r.province)) = lower(trim(l.province))
 );
+
+-- Keep the LGU master directory synchronized with latest inventory reports.
+-- This powers LGU Monitoring, dashboard prioritization, and inventory LGU filters.
+create or replace function public.recalculate_lgu_priority(
+  food_packs_input integer,
+  affected_families_input integer,
+  damage_index_input integer
+)
+returns table (
+  urgency_score integer,
+  priority_color text,
+  recommendation text
+)
+language plpgsql
+immutable
+as $$
+declare
+  stock_score integer;
+  demand_score integer;
+  damage_score integer;
+  score integer;
+  color text;
+begin
+  stock_score := case
+    when coalesce(food_packs_input, 0) < 150 then 45
+    when coalesce(food_packs_input, 0) < 300 then 25
+    else 8
+  end;
+  demand_score := least(35, round(coalesce(affected_families_input, 0)::numeric / 30)::integer);
+  damage_score := round(coalesce(damage_index_input, 0)::numeric * 0.2)::integer;
+  score := least(100, greatest(0, stock_score + demand_score + damage_score));
+  color := case
+    when score >= 75 then 'Red'
+    when score >= 50 then 'Yellow'
+    else 'Green'
+  end;
+
+  return query select
+    score,
+    color,
+    case
+      when color = 'Red' then 'Immediate restocking and dispatch recommended.'
+      when color = 'Yellow' then 'Prepare allocation; monitor within 24 hours.'
+      else 'Sufficient stock; continue monitoring.'
+    end;
+end;
+$$;
+
+create or replace function public.sync_lgu_inventory_report_to_lgus()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+declare
+  target_lgu_id uuid;
+  computed record;
+begin
+  if new.lgu_id is null then
+    select id into target_lgu_id
+    from public.lgus
+    where lower(trim(municipality)) = lower(trim(new.municipality))
+      and lower(trim(province)) = lower(trim(coalesce(new.province, province)))
+    limit 1;
+  else
+    target_lgu_id := new.lgu_id;
+  end if;
+
+  select * into computed
+  from public.recalculate_lgu_priority(
+    coalesce(new.food_packs, 0),
+    coalesce(new.affected_families, 0),
+    coalesce(new.damage_index, 0)
+  );
+
+  new.urgency_score := coalesce(nullif(new.urgency_score, 0), computed.urgency_score);
+  new.priority_color := case
+    when new.priority_color in ('Red', 'Yellow', 'Green') then new.priority_color
+    else computed.priority_color
+  end;
+  new.recommendation := coalesce(nullif(new.recommendation, ''), computed.recommendation);
+  new.lgu_id := target_lgu_id;
+
+  if target_lgu_id is not null then
+    update public.lgus
+    set
+      food_packs = coalesce(new.food_packs, 0),
+      hygiene_kits = coalesce(new.hygiene_kits, 0),
+      family_kits = coalesce(new.family_kits, 0),
+      affected_families = coalesce(new.affected_families, 0),
+      damage_index = coalesce(new.damage_index, 0),
+      urgency_score = new.urgency_score,
+      priority_color = new.priority_color,
+      recommendation = new.recommendation,
+      current_stock = coalesce(current_stock, '{}'::jsonb) || jsonb_build_object(
+        'Food Pack', coalesce(new.food_packs, 0),
+        'Hygiene Kit', coalesce(new.hygiene_kits, 0),
+        'Family Kit', coalesce(new.family_kits, 0)
+      ),
+      last_reported_at = coalesce(new.reported_at, now()),
+      updated_at = now()
+    where id = target_lgu_id;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_lgu_inventory_report_sync on public.lgu_inventory_reports;
+create trigger on_lgu_inventory_report_sync
+before insert or update on public.lgu_inventory_reports
+for each row execute function public.sync_lgu_inventory_report_to_lgus();
+
+with latest_reports as (
+  select distinct on (coalesce(rpt.lgu_id, l.id))
+    coalesce(rpt.lgu_id, l.id) as target_lgu_id,
+    rpt.food_packs,
+    rpt.hygiene_kits,
+    rpt.family_kits,
+    rpt.affected_families,
+    rpt.damage_index,
+    rpt.reported_at
+  from public.lgu_inventory_reports rpt
+  left join public.lgus l on lower(trim(rpt.municipality)) = lower(trim(l.municipality))
+  order by coalesce(rpt.lgu_id, l.id), rpt.reported_at desc
+),
+computed_reports as (
+  select
+    lr.*,
+    calc.urgency_score,
+    calc.priority_color,
+    calc.recommendation
+  from latest_reports lr
+  cross join lateral public.recalculate_lgu_priority(lr.food_packs, lr.affected_families, lr.damage_index) calc
+)
+update public.lgus l
+set
+  food_packs = coalesce(cr.food_packs, 0),
+  hygiene_kits = coalesce(cr.hygiene_kits, 0),
+  family_kits = coalesce(cr.family_kits, 0),
+  affected_families = coalesce(cr.affected_families, 0),
+  damage_index = coalesce(cr.damage_index, 0),
+  urgency_score = cr.urgency_score,
+  priority_color = cr.priority_color,
+  recommendation = cr.recommendation,
+  current_stock = coalesce(l.current_stock, '{}'::jsonb) || jsonb_build_object(
+    'Food Pack', coalesce(cr.food_packs, 0),
+    'Hygiene Kit', coalesce(cr.hygiene_kits, 0),
+    'Family Kit', coalesce(cr.family_kits, 0)
+  ),
+  last_reported_at = cr.reported_at,
+  updated_at = now()
+from computed_reports cr
+where l.id = cr.target_lgu_id;
 
 -- ==============================================================================
 -- 6. TABLE: truck_live_locations (Real-Time GPS Fleet Tracking & Navigation)

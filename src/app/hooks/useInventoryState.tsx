@@ -350,36 +350,55 @@ export const deduplicateLguPriorityReports = (reports: LGUPriorityReport[], lgus
   return Array.from(map.values()).sort((a, b) => b.urgencyScore - a.urgencyScore);
 };
 
-const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => ({
-  drNumber: row.dr_number ?? row.id,
-  dateAllocated: row.date_allocated ?? '',
-  lguId: row.lgu_id ?? undefined,
-  lguName: row.lgu_name ?? '',
-  province: row.province ?? '',
-  municipality: row.municipality ?? '',
-  fnfiCategory: row.category ?? '',
-  amountRequested: row.amount_requested ?? 0,
-  amountApproved: row.amount_approved ?? 0,
-  warehouseSource: row.warehouse_source ?? '',
-  deliveryMode: row.delivery_mode ?? '',
-  deliveryStatus: isOutgoingStatus(row.delivery_status) ? row.delivery_status : 'Allocating',
-  incidentCode: row.incident_code ?? '',
-  allocatedBatches: (row.allocated_batches ?? []).flatMap(entry => {
-    if (!entry?.batchTokenId || !entry.quantity) return [];
-    return [{ batchTokenId: entry.batchTokenId, quantity: entry.quantity }];
-  }),
-  handoverContractId: row.handover_contract_id ?? undefined,
-  adminSignature: row.tx_hash ?? row.admin_signature ?? undefined,
-  senderSignature: row.sender_signature ?? undefined,
-  receiverSignature: row.receiver_signature ?? undefined,
-  senderGps: row.sender_gps ?? undefined,
-  receiverGps: row.receiver_gps ?? undefined,
-  destinationAddress: row.destination_address ?? undefined,
-  assignedTruckId: row.assigned_truck_id ?? undefined,
-  assigned_truck_id: row.assigned_truck_id ?? undefined,
-  blockchainTxHash: row.tx_hash ?? undefined,
-  auditTrail: []
-});
+const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
+  const rawBatches = Array.isArray(row.allocated_batches)
+    ? row.allocated_batches
+    : typeof row.allocated_batches === 'string'
+    ? (() => {
+        try {
+          const parsed = JSON.parse(row.allocated_batches);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })()
+    : [];
+
+  const allocatedBatches: BatchAllocation[] = rawBatches.flatMap((entry: any) => {
+    const tokenId = entry?.batchTokenId || entry?.batch_token_id;
+    const qty = Number(entry?.quantity ?? 0);
+    if (!tokenId || qty <= 0) return [];
+    return [{ batchTokenId: String(tokenId), quantity: qty }];
+  });
+
+  return {
+    drNumber: row.dr_number ?? row.id,
+    dateAllocated: row.date_allocated ?? '',
+    lguId: row.lgu_id ?? undefined,
+    lguName: row.lgu_name ?? '',
+    province: row.province ?? '',
+    municipality: row.municipality ?? '',
+    fnfiCategory: row.category ?? '',
+    amountRequested: Number(row.amount_requested ?? 0),
+    amountApproved: Number(row.amount_approved ?? 0),
+    warehouseSource: row.warehouse_source ?? '',
+    deliveryMode: row.delivery_mode ?? '',
+    deliveryStatus: isOutgoingStatus(row.delivery_status) ? row.delivery_status : 'Allocating',
+    incidentCode: row.incident_code ?? '',
+    allocatedBatches,
+    handoverContractId: row.handover_contract_id ?? undefined,
+    adminSignature: row.tx_hash ?? row.admin_signature ?? undefined,
+    senderSignature: row.sender_signature ?? undefined,
+    receiverSignature: row.receiver_signature ?? undefined,
+    senderGps: row.sender_gps ?? undefined,
+    receiverGps: row.receiver_gps ?? undefined,
+    destinationAddress: row.destination_address ?? undefined,
+    assignedTruckId: row.assigned_truck_id ?? undefined,
+    assigned_truck_id: row.assigned_truck_id ?? undefined,
+    blockchainTxHash: row.tx_hash ?? undefined,
+    auditTrail: []
+  };
+};
 
 const mapDiscrepancyReport = (row: DiscrepancyReportRow): DiscrepancyReport => ({
   id: row.id,
@@ -419,14 +438,17 @@ const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: Ki
     warehouses.forEach((wh, idx) => {
       let stock = 0;
       const catLower = category.toLowerCase();
-      if (catLower.includes('food pack')) stock = wh.foodPacks;
-      else if (catLower.includes('hygiene')) stock = wh.hygieneKits;
-      else if (catLower.includes('sleeping')) stock = wh.sleepingKits;
-      else if (catLower.includes('kitchen')) stock = wh.kitchenKits;
-      else if (catLower.includes('family kit')) stock = wh.familyKits;
-      else if (catLower.includes('sack')) stock = wh.laminatedSacks;
-      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) stock = wh.rtef;
-      else if (wh.currentStock && wh.currentStock[category] !== undefined) stock = wh.currentStock[category];
+      if (catLower.includes('food pack')) stock = Number(wh.foodPacks ?? 0);
+      else if (catLower.includes('hygiene')) stock = Number(wh.hygieneKits ?? 0);
+      else if (catLower.includes('sleeping')) stock = Number(wh.sleepingKits ?? 0);
+      else if (catLower.includes('kitchen')) stock = Number(wh.kitchenKits ?? 0);
+      else if (catLower.includes('family kit')) stock = Number(wh.familyKits ?? 0);
+      else if (catLower.includes('sack')) stock = Number(wh.laminatedSacks ?? 0);
+      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) stock = Number(wh.rtef ?? 0);
+      else if (wh.currentStock && wh.currentStock[category] !== undefined) stock = Number(wh.currentStock[category] ?? 0);
+      else stock = 0;
+
+      if (!Number.isFinite(stock)) stock = 0;
 
       warehouseBreakdown[wh.name] = stock;
       totalStock += stock;
@@ -437,9 +459,9 @@ const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: Ki
 
     itemsMap.set(category, {
       category,
-      warehouseA,
-      warehouseB,
-      totalStock,
+      warehouseA: Number(warehouseA || 0),
+      warehouseB: Number(warehouseB || 0),
+      totalStock: Number(totalStock || 0),
       warehouseBreakdown
     });
   });

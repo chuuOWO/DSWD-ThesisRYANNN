@@ -110,7 +110,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       correctionNote: undefined
     });
     setShowReleaseModal(false);
-    showResult(`Release allocation for ${newRelease.municipality} (${newRelease.amountRequested.toLocaleString()} ${newRelease.fnfiCategory}) created successfully.`);
+    showResult(`Release allocation for ${newRelease.municipality || 'LGU'} (${(newRelease.amountRequested ?? 0).toLocaleString()} ${newRelease.fnfiCategory}) created successfully.`);
   };
 
   const handleEditRelease = (updatedRelease: ReleaseForm) => {
@@ -211,14 +211,16 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     }
   };
 
-  const filteredReleases = outgoingReleasesList.filter(release => {
+  const filteredReleases = (outgoingReleasesList || []).filter(release => {
+    if (!release) return false;
+    const batches = Array.isArray(release.allocatedBatches) ? release.allocatedBatches : [];
     const matchesSearch =
       (release.lguName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.municipality || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.fnfiCategory || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.drNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.handoverContractId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (release.allocatedBatches || []).map(batch => batch?.batchTokenId || '').join(' ').toLowerCase().includes(searchTerm.toLowerCase());
+      batches.map(batch => batch?.batchTokenId || '').join(' ').toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesWarehouse = selectedWarehouse === 'All' || release.warehouseSource === selectedWarehouse;
     const matchesStatus = selectedStatus === 'All' || release.deliveryStatus === selectedStatus;
@@ -234,11 +236,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     return filteredReleases.slice(start, start + pageSize);
   }, [filteredReleases, currentPage, pageSize]);
 
-  const allocatingCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Allocating').length;
-  const approvedCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Approved').length;
-  const activeReleaseCount = outgoingReleasesList.filter(r => ['Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus)).length;
-  const acceptedCount = outgoingReleasesList.filter(r => r.deliveryStatus === 'Accepted' || r.deliveryStatus === 'Distributed').length;
-  const outgoingDiscrepancies = discrepancyReports.filter(report => report.reportType === 'Outgoing');
+  const allocatingCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus === 'Allocating').length;
+  const approvedCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus === 'Approved').length;
+  const activeReleaseCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus && ['Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus)).length;
+  const acceptedCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus && (r.deliveryStatus === 'Accepted' || r.deliveryStatus === 'Distributed')).length;
+  const outgoingDiscrepancies = (discrepancyReports || []).filter(report => report.reportType === 'Outgoing');
 
   return (
     <div className="space-y-6">
@@ -366,24 +368,24 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                 <tr key={release.drNumber} className="hover:bg-gray-50 transition-colors align-top">
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-green-700">{release.drNumber}</p>
-                    <p className="text-xs text-gray-500">Allocated: {release.dateAllocated}</p>
-                    <p className="text-xs text-gray-500">Mode: {release.deliveryMode}</p>
-                    <p className="text-xs text-gray-500">Source: {release.warehouseSource}</p>
+                    <p className="text-xs text-gray-500">Allocated: {release.dateAllocated || '-'}</p>
+                    <p className="text-xs text-gray-500">Mode: {release.deliveryMode || '-'}</p>
+                    <p className="text-xs text-gray-500">Source: {release.warehouseSource || '-'}</p>
                   </td>
                   <td className="px-4 py-4">
-                    <p className="font-bold text-sm text-gray-900">{release.lguName}</p>
-                    <p className="text-xs text-gray-600 flex items-center gap-1 mt-1"><MapPin className="w-3 h-3" /> {release.municipality}, {release.province}</p>
+                    <p className="font-bold text-sm text-gray-900">{release.lguName || 'LGU'}</p>
+                    <p className="text-xs text-gray-600 flex items-center gap-1 mt-1"><MapPin className="w-3 h-3" /> {release.municipality || '-'}, {release.province || '-'}</p>
                   </td>
                   <td className="px-4 py-4">
-                    <p className="font-bold text-sm text-gray-900">{release.fnfiCategory}</p>
-                    <p className="text-sm text-gray-700">Requested: {release.amountRequested.toLocaleString()} kits</p>
-                    <p className="text-sm text-green-700 font-semibold">Approved: {release.amountApproved ? `${release.amountApproved.toLocaleString()} kits` : '-'}</p>
+                    <p className="font-bold text-sm text-gray-900">{release.fnfiCategory || 'Relief Goods'}</p>
+                    <p className="text-sm text-gray-700">Requested: {(release.amountRequested ?? 0).toLocaleString()} kits</p>
+                    <p className="text-sm text-green-700 font-semibold">Approved: {release.amountApproved ? `${(release.amountApproved).toLocaleString()} kits` : '-'}</p>
                     {release.incidentCode && release.incidentCode.toLowerCase() !== 'none' && (
                       <p className="text-xs text-gray-500 mt-0.5">Remarks: {release.incidentCode}</p>
                     )}
                   </td>
                   <td className="px-4 py-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[release.deliveryStatus]}`}>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[release.deliveryStatus] || 'bg-gray-100 text-gray-700'}`}>
                       {release.deliveryStatus}
                     </span>
                     <div className="mt-2 space-y-1 text-xs text-gray-600">
@@ -398,11 +400,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     {release.correctionNote && <p className="text-xs text-red-700 mt-2">Correction: {release.correctionNote}</p>}
                   </td>
                   <td className="px-4 py-4 max-w-xs">
-                    {release.allocatedBatches.length > 0 ? (
+                    {(Array.isArray(release.allocatedBatches) && release.allocatedBatches.length > 0) ? (
                       <div className="flex flex-wrap gap-1 mb-2">
                         {release.allocatedBatches.map(batch => (
-                          <span key={batch.batchTokenId} className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-bold">
-                            {batch.batchTokenId} ({batch.quantity})
+                          <span key={batch?.batchTokenId || Math.random()} className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-bold">
+                            {batch?.batchTokenId || 'Batch'} ({batch?.quantity ?? 0})
                           </span>
                         ))}
                       </div>
@@ -519,11 +521,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm">
         <h3 className="text-lg font-bold text-gray-900 mb-3">Available Warehouse Stock Snapshot</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {inventory.map(item => (
+          {(inventory || []).map(item => (
             <div key={item.category} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
               <p className="font-bold text-sm text-gray-900">{item.category}</p>
-              <p className="text-xs text-gray-600 mt-1">Oton: {item.warehouseA.toLocaleString()}</p>
-              <p className="text-xs text-gray-600">Pototan: {item.warehouseB.toLocaleString()}</p>
+              <p className="text-xs text-gray-600 mt-1">Oton: {(item.warehouseA ?? 0).toLocaleString()}</p>
+              <p className="text-xs text-gray-600">Pototan: {(item.warehouseB ?? 0).toLocaleString()}</p>
             </div>
           ))}
         </div>
@@ -598,7 +600,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             fnfiCategory: editingRelease.fnfiCategory,
             amountRequested: editingRelease.amountRequested,
             amountApproved: editingRelease.amountApproved,
-            sourceType: (warehousesList.some(w => w.name.toLowerCase() === editingRelease.warehouseSource.toLowerCase()) || ['Oton Main Warehouse', 'Pototan Main Warehouse'].includes(editingRelease.warehouseSource)) ? 'Warehouse' : 'LGU',
+            sourceType: (warehousesList.some(w => (w?.name || '').toLowerCase() === (editingRelease.warehouseSource || '').toLowerCase()) || ['Oton Main Warehouse', 'Pototan Main Warehouse'].includes(editingRelease.warehouseSource || '')) ? 'Warehouse' : 'LGU',
             warehouseSource: editingRelease.warehouseSource,
             deliveryMode: editingRelease.deliveryMode,
             deliveryStatus: editingRelease.deliveryStatus,
@@ -632,7 +634,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-2">Amount Requested</label>
                 <div className="px-4 py-3 bg-gray-100 rounded-lg">
-                  <span className="text-lg font-bold text-gray-900">{selectedRelease.amountRequested.toLocaleString()} kits</span>
+                  <span className="text-lg font-bold text-gray-900">{(selectedRelease.amountRequested ?? 0).toLocaleString()} kits</span>
                 </div>
               </div>
 

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle, ChevronDown, ClipboardCheck, FileSignature, MapPin, Package, TrendingUp, TruckIcon } from 'lucide-react';
 import type { DiscrepancyReport, IncomingGoods, InventoryItem, LGUPriorityReport, OutgoingRelease } from '../../hooks/useInventoryState';
+import type { LguRecord } from '../../services/backendApi';
 
 interface DashboardState {
   inventory: InventoryItem[];
   incomingGoodsList: IncomingGoods[];
   outgoingReleasesList: OutgoingRelease[];
   lguPriorityReports: LGUPriorityReport[];
+  lgusList?: LguRecord[];
   discrepancyReports: DiscrepancyReport[];
 }
 
@@ -22,14 +24,55 @@ const priorityClasses = {
 };
 
 export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps) {
-  const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports, discrepancyReports } = inventoryState;
+  const { inventory, incomingGoodsList, outgoingReleasesList, lguPriorityReports, lgusList = [], discrepancyReports } = inventoryState;
   const [showWarehouseOverview, setShowWarehouseOverview] = useState(false);
+
+  const effectiveLguPriorities = (() => {
+    const reportMap = new Map<string, LGUPriorityReport>();
+    lguPriorityReports.forEach((report) => {
+      const key = (report.municipality || report.lguName).trim().toLowerCase();
+      if (key) reportMap.set(key, report);
+    });
+
+    const fromMaster = lgusList.map((lgu) => {
+      const key = lgu.municipality.trim().toLowerCase();
+      const report = reportMap.get(key);
+      const foodPacks = report?.foodPacks ?? lgu.foodPacks ?? lgu.currentStock?.['Food Pack'] ?? 0;
+      const affectedFamilies = report?.affectedFamilies ?? lgu.affectedFamilies ?? 0;
+      const damageIndex = report?.damageIndex ?? lgu.damageIndex ?? 0;
+      const baseUrgency = report?.urgencyScore ?? lgu.urgencyScore ?? 0;
+      const computedUrgency = baseUrgency || Math.min(100, Math.max(10, Math.round((foodPacks < 150 ? 45 : foodPacks < 300 ? 25 : 8) + Math.min(35, affectedFamilies / 30) + damageIndex * 0.2)));
+      const priorityColor = report?.priorityColor ?? lgu.priorityColor ?? (computedUrgency >= 75 ? 'Red' : computedUrgency >= 50 ? 'Yellow' : 'Green');
+
+      return {
+        id: report?.id ?? lgu.id,
+        municipality: lgu.municipality,
+        province: lgu.province,
+        lguName: lgu.lguName,
+        reportedAt: report?.reportedAt ?? lgu.lastReportedAt ?? lgu.updatedAt ?? lgu.createdAt ?? '',
+        foodPacks,
+        hygieneKits: report?.hygieneKits ?? lgu.hygieneKits ?? lgu.currentStock?.['Hygiene Kit'] ?? 0,
+        familyKits: report?.familyKits ?? lgu.familyKits ?? lgu.currentStock?.['Family Kit'] ?? 0,
+        affectedFamilies,
+        damageIndex,
+        urgencyScore: computedUrgency,
+        priorityColor: priorityColor === 'Red' || priorityColor === 'Yellow' || priorityColor === 'Green' ? priorityColor : 'Green',
+        recommendation: report?.recommendation ?? lgu.recommendation ?? ''
+      } satisfies LGUPriorityReport;
+    });
+
+    if (fromMaster.length > 0) {
+      return fromMaster.sort((a, b) => b.urgencyScore - a.urgencyScore);
+    }
+
+    return [...lguPriorityReports].sort((a, b) => b.urgencyScore - a.urgencyScore);
+  })();
 
   const totalInventory = inventory.reduce((sum, item) => sum + (item.totalStock ?? (item.warehouseA + item.warehouseB)), 0);
   const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
   const releaseRecordCount = outgoingReleasesList.filter(item => item.handoverContractId).length;
   const gpsAcceptedCount = outgoingReleasesList.filter(item => item.receiverGps).length;
-  const urgentLGUs = lguPriorityReports.filter(report => report.priorityColor === 'Red');
+  const urgentLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Red');
   const activeReleases = outgoingReleasesList.filter(item => ['Released', 'In Transit', 'Correction Requested'].includes(item.deliveryStatus));
   const incomingForReview = incomingGoodsList.filter(item => item.status === 'Pending Verification').length;
 
@@ -188,7 +231,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
             </span>
           </div>
           <div className="space-y-3 max-h-[460px] overflow-y-auto pr-2">
-            {lguPriorityReports.map(report => (
+            {effectiveLguPriorities.map(report => (
               <div key={report.id} className="flex items-center justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
                 <div>
                   <p className="font-bold text-sm text-gray-900">{report.municipality}</p>
@@ -201,6 +244,12 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
                 </div>
               </div>
             ))}
+            {effectiveLguPriorities.length === 0 && (
+              <div className="p-4 bg-gray-50 rounded-lg border border-gray-100">
+                <p className="text-sm font-bold text-gray-900">No LGU priority records yet</p>
+                <p className="text-xs text-gray-600 mt-1">Add LGUs or LGU inventory reports to calculate stock-based prioritization.</p>
+              </div>
+            )}
           </div>
         </div>
 

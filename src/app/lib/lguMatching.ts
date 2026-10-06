@@ -1,4 +1,4 @@
-import type { LguRecord } from '../services/backendApi';
+import type { LguRecord, WarehouseRecord } from '../services/backendApi';
 
 /**
  * Standard operational provinces for Region VI (Western Visayas).
@@ -180,9 +180,59 @@ export const DEFAULT_KIT_TYPES = [
   { id: 'kit-7', name: 'RTEF', category: 'Food Item' as const, unitType: 'packs', description: 'Ready-to-Eat Food / pre-cooked retort pouch meals', isActive: true }
 ];
 
-export const DEFAULT_WAREHOUSES = [
-  { id: 'wh-oton', name: 'Oton Main Warehouse', municipality: 'Oton', province: 'Iloilo', region: 'Region VI (Western Visayas)', latitude: 10.6975, longitude: 122.4764, capacityPacks: 100000, currentStock: {}, isActive: true },
-  { id: 'wh-pototan', name: 'Pototan Main Warehouse', municipality: 'Pototan', province: 'Iloilo', region: 'Region VI (Western Visayas)', latitude: 10.9486, longitude: 122.6272, capacityPacks: 80000, currentStock: {}, isActive: true }
+export const DEFAULT_WAREHOUSES: WarehouseRecord[] = [
+  {
+    id: 'wh-oton',
+    name: 'Oton Main Warehouse',
+    municipality: 'Oton',
+    province: 'Iloilo',
+    latitude: 10.6975,
+    longitude: 122.4764,
+    capacityPacks: 100000,
+    foodPacks: 25000,
+    hygieneKits: 10000,
+    sleepingKits: 8000,
+    kitchenKits: 5000,
+    familyKits: 6000,
+    laminatedSacks: 4000,
+    rtef: 12000,
+    currentStock: {
+      'Food Pack': 25000,
+      'Hygiene Kit': 10000,
+      'Sleeping Kit': 8000,
+      'Kitchen Kit': 5000,
+      'Family Kit': 6000,
+      'Laminated Sack': 4000,
+      'RTEF': 12000
+    },
+    isActive: true
+  },
+  {
+    id: 'wh-pototan',
+    name: 'Pototan Main Warehouse',
+    municipality: 'Pototan',
+    province: 'Iloilo',
+    latitude: 10.9486,
+    longitude: 122.6272,
+    capacityPacks: 80000,
+    foodPacks: 18000,
+    hygieneKits: 7500,
+    sleepingKits: 6000,
+    kitchenKits: 4000,
+    familyKits: 4500,
+    laminatedSacks: 3000,
+    rtef: 9000,
+    currentStock: {
+      'Food Pack': 18000,
+      'Hygiene Kit': 7500,
+      'Sleeping Kit': 6000,
+      'Kitchen Kit': 4000,
+      'Family Kit': 4500,
+      'Laminated Sack': 3000,
+      'RTEF': 9000
+    },
+    isActive: true
+  }
 ];
 
 export const DEFAULT_SUPPLY_SOURCES = [
