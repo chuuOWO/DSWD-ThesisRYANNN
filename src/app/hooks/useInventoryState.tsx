@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   backendApi,
   type LguRecord,
@@ -520,6 +520,39 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   const [supplySourcesList, setSupplySourcesList] = useState<SupplySourceRecord[]>(DEFAULT_SUPPLY_SOURCES);
   const [kitTypesList, setKitTypesList] = useState<KitTypeRecord[]>(DEFAULT_KIT_TYPES);
   const [lgusList, setLgusList] = useState<LguRecord[]>(DEFAULT_PANAY_LGUS);
+
+  const [adminActionsEnabled, setAdminActionsEnabledState] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('dswd_admin_actions_enabled') === 'true';
+  });
+
+  const setAdminActionsEnabled = useCallback((enabled: boolean) => {
+    setAdminActionsEnabledState(enabled);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dswd_admin_actions_enabled', String(enabled));
+      window.dispatchEvent(new CustomEvent('dswd_admin_actions_changed', { detail: { enabled } }));
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'dswd_admin_actions_enabled') {
+        setAdminActionsEnabledState(e.newValue === 'true');
+      }
+    };
+    const handleCustomChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean }>;
+      if (customEvent.detail && typeof customEvent.detail.enabled === 'boolean') {
+        setAdminActionsEnabledState(customEvent.detail.enabled);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('dswd_admin_actions_changed', handleCustomChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('dswd_admin_actions_changed', handleCustomChange);
+    };
+  }, []);
 
   // Inventory is derived from the authoritative warehouses table
   useEffect(() => {
@@ -1375,6 +1408,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     receiverAcceptWithGps,
     requestOutgoingCorrection,
     submitLGUInventoryReport,
-    integrationMode
+    integrationMode,
+    adminActionsEnabled,
+    setAdminActionsEnabled
   };
 }

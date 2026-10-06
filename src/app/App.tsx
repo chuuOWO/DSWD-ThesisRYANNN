@@ -279,6 +279,8 @@ export default function App() {
         onClose={() => setIsProfileModalOpen(false)}
         profile={activeProfile}
         onSignOut={requestSignOut}
+        adminActionsEnabled={inventoryState.adminActionsEnabled}
+        onToggleAdminActions={inventoryState.setAdminActionsEnabled}
       />
 
       <ConfirmLogoutModal

@@ -42,11 +42,13 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: UserProfile;
-  initialTab?: 'profile' | 'metamask' | 'data';
+  initialTab?: 'profile' | 'metamask' | 'data' | 'admin';
   onSignOut?: () => void;
+  adminActionsEnabled?: boolean;
+  onToggleAdminActions?: (enabled: boolean) => void;
 }
 
-type SettingsTab = 'profile' | 'metamask' | 'data';
+type SettingsTab = 'profile' | 'metamask' | 'data' | 'admin';
 type MasterDataSubTab = 'kits' | 'sources' | 'warehouses' | 'provinces' | 'lgus';
 
 export function SettingsModal({
@@ -54,10 +56,40 @@ export function SettingsModal({
   onClose,
   profile,
   initialTab = 'profile',
-  onSignOut
+  onSignOut,
+  adminActionsEnabled: adminActionsEnabledProp,
+  onToggleAdminActions
 }: SettingsModalProps) {
   const { refreshProfile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+
+  // Administrative Actions State
+  const [internalAdminActions, setInternalAdminActions] = useState<boolean>(() => {
+    if (typeof adminActionsEnabledProp === 'boolean') return adminActionsEnabledProp;
+    if (typeof window !== 'undefined') return localStorage.getItem('dswd_admin_actions_enabled') === 'true';
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof adminActionsEnabledProp === 'boolean') {
+      setInternalAdminActions(adminActionsEnabledProp);
+    }
+  }, [adminActionsEnabledProp]);
+
+  const effectiveAdminActionsEnabled = typeof adminActionsEnabledProp === 'boolean'
+    ? adminActionsEnabledProp
+    : internalAdminActions;
+
+  const handleToggleAdminActions = (enabled: boolean) => {
+    setInternalAdminActions(enabled);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dswd_admin_actions_enabled', String(enabled));
+      window.dispatchEvent(new CustomEvent('dswd_admin_actions_changed', { detail: { enabled } }));
+    }
+    if (onToggleAdminActions) {
+      onToggleAdminActions(enabled);
+    }
+  };
 
   // Tab 1: Profile States
   const [firstName, setFirstName] = useState(profile.firstName || profile.fullName?.split(' ')[0] || '');
@@ -861,6 +893,30 @@ export function SettingsModal({
                   </div>
                 </div>
               </button>
+
+              {/* Administrative Actions Tab */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('admin')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                  activeTab === 'admin'
+                    ? 'bg-[#2500ba] text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200/70 hover:text-gray-900'
+                }`}
+              >
+                <ShieldAlert className={`w-4 h-4 flex-shrink-0 ${activeTab === 'admin' ? 'text-white' : 'text-gray-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="leading-tight">Admin Actions</span>
+                    {effectiveAdminActionsEnabled && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" title="Administrative actions enabled" />
+                    )}
+                  </div>
+                  <div className={`text-[10px] font-normal truncate ${activeTab === 'admin' ? 'text-blue-100' : 'text-gray-400'}`}>
+                    Emergency recount controls
+                  </div>
+                </div>
+              </button>
             </nav>
           </div>
 
@@ -895,11 +951,13 @@ export function SettingsModal({
                 {activeTab === 'profile' && 'Profile Settings'}
                 {activeTab === 'metamask' && 'MetaMask Wallet Connection'}
                 {activeTab === 'data' && 'Master Data Configuration'}
+                {activeTab === 'admin' && 'Administrative Actions'}
               </h3>
               <p className="text-[11px] text-gray-500">
                 {activeTab === 'profile' && 'Manage your officer credentials, avatar photo, and contact information.'}
                 {activeTab === 'metamask' && 'Link your MetaMask Ethereum address to sign relief operations on blockchain.'}
                 {activeTab === 'data' && 'View and configure relief items, distribution supply sources, and warehouses.'}
+                {activeTab === 'admin' && 'Configure emergency stock recounts, inventory overrides, and LGU audit controls.'}
               </p>
             </div>
             <button
@@ -2184,6 +2242,162 @@ export function SettingsModal({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* =================================================================
+              TAB 4: ADMINISTRATIVE ACTIONS
+              ================================================================= */}
+          {activeTab === 'admin' && (
+            <div className="space-y-6">
+              {/* Feature Switch Card */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+                      effectiveAdminActionsEnabled
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      <ShieldAlert className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-base font-bold text-gray-900">
+                          Administrative Actions
+                        </h4>
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          effectiveAdminActionsEnabled
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-gray-100 text-gray-600 border border-gray-200'
+                        }`}>
+                          {effectiveAdminActionsEnabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600 mt-1 leading-relaxed max-w-xl">
+                        Enables privileged emergency actions on the LGU Monitor. When toggled on, authorized personnel can perform emergency recounts and manual stock corrections for relief goods.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Toggle Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAdminActions(!effectiveAdminActionsEnabled)}
+                    className={`relative inline-flex h-8 w-14 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#2500ba] focus:ring-offset-2 self-start sm:self-auto ${
+                      effectiveAdminActionsEnabled ? 'bg-emerald-600' : 'bg-gray-300'
+                    }`}
+                    role="switch"
+                    aria-checked={effectiveAdminActionsEnabled}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        effectiveAdminActionsEnabled ? 'translate-x-6' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* State Banner */}
+                <div className={`p-4 rounded-xl border text-xs leading-relaxed flex items-center justify-between gap-4 ${
+                  effectiveAdminActionsEnabled
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : 'bg-amber-50/70 border-amber-200 text-amber-900'
+                }`}>
+                  <div className="flex items-center gap-2.5">
+                    {effectiveAdminActionsEnabled ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-bold">
+                        {effectiveAdminActionsEnabled
+                          ? 'Emergency Recount is visible on LGU Monitor'
+                          : 'Emergency Recount is hidden on LGU Monitor'}
+                      </p>
+                      <p className="text-[11px] opacity-80 mt-0.5">
+                        {effectiveAdminActionsEnabled
+                          ? 'Staff can view Emergency Stock Correction buttons on LGU cards, table rows, and the top toolbar.'
+                          : 'Turn this on to view Emergency Recount buttons on the LGU Monitor page.'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAdminActions(!effectiveAdminActionsEnabled)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex-shrink-0 cursor-pointer ${
+                      effectiveAdminActionsEnabled
+                        ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                        : 'bg-amber-700 hover:bg-amber-800 text-white'
+                    }`}
+                  >
+                    {effectiveAdminActionsEnabled ? 'Disable' : 'Enable Administrative Actions'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Scope of Administrative Actions */}
+              <div className="rounded-2xl border border-gray-200 bg-gray-50/60 p-5 space-y-3">
+                <h5 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                  Affected Controls in LGU Monitor
+                </h5>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-700">
+                  <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
+                    <p className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <ShieldAlert className="w-4 h-4 text-red-600" />
+                      Header Emergency Correction
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Top-level button on LGU Monitor to recount and adjust any municipality.
+                    </p>
+                  </div>
+                  <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
+                    <p className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <Boxes className="w-4 h-4 text-purple-600" />
+                      Card View Recount Buttons
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Emergency Recount trigger embedded in each municipality stock card.
+                    </p>
+                  </div>
+                  <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
+                    <p className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <Building2 className="w-4 h-4 text-blue-600" />
+                      Table View Action Icons
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Direct row action icons for fast emergency stock corrections.
+                    </p>
+                  </div>
+                  <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
+                    <p className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <RefreshCw className="w-4 h-4 text-emerald-600" />
+                      Audit Trail Compliance
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      All emergency recounts require a mandatory justification and are logged.
+                    </p>
+                  </div>
+                </div>
+
+                {effectiveAdminActionsEnabled && (
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmergencyCorrectionLguId(undefined);
+                        setIsEmergencyCorrectionOpen(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition shadow-sm cursor-pointer"
+                    >
+                      <ShieldAlert className="w-4 h-4" />
+                      <span>Open Emergency Recount Modal Now</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

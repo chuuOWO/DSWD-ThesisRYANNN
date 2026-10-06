@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, ChevronRight, LayoutGrid, List, ShieldAlert, Package, Lock } from 'lucide-react';
 import type { LGUPriorityReport, UserRole, OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { EditLGUModal } from '../modals/EditLGUModal';
@@ -43,6 +43,8 @@ interface LGUMonitoringProps {
     lgusList?: LguRecord[];
     provincesList?: ProvinceRecord[];
     kitTypesList?: KitTypeRecord[];
+    adminActionsEnabled?: boolean;
+    setAdminActionsEnabled?: (enabled: boolean) => void;
     addLgu?: (input: LguInput) => Promise<{ ok: boolean; message: string }>;
     editLgu?: (id: string, updates: Partial<LguInput>) => Promise<{ ok: boolean; message: string }>;
     emergencyCorrectLguStock?: (
@@ -68,6 +70,47 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyLguId, setEmergencyLguId] = useState<string | undefined>(undefined);
+
+  // Administrative Actions State (synced from inventoryState or localStorage)
+  const [internalAdminActions, setInternalAdminActions] = useState<boolean>(() => {
+    if (typeof inventoryState?.adminActionsEnabled === 'boolean') {
+      return inventoryState.adminActionsEnabled;
+    }
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('dswd_admin_actions_enabled') === 'true';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof inventoryState?.adminActionsEnabled === 'boolean') {
+      setInternalAdminActions(inventoryState.adminActionsEnabled);
+    }
+  }, [inventoryState?.adminActionsEnabled]);
+
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'dswd_admin_actions_enabled') {
+        setInternalAdminActions(e.newValue === 'true');
+      }
+    };
+    const handleCustom = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean }>;
+      if (customEvent.detail && typeof customEvent.detail.enabled === 'boolean') {
+        setInternalAdminActions(customEvent.detail.enabled);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('dswd_admin_actions_changed', handleCustom);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('dswd_admin_actions_changed', handleCustom);
+    };
+  }, []);
+
+  const adminActionsEnabled = typeof inventoryState?.adminActionsEnabled === 'boolean'
+    ? inventoryState.adminActionsEnabled
+    : internalAdminActions;
 
   // Dynamically compute live LGU list exclusively from master Supabase lgus table
   const baseLguList = useMemo<LGUDelivery[]>(() => {
@@ -330,21 +373,30 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
+            {adminActionsEnabled && (
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                Admin Actions Enabled
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setEmergencyLguId(undefined);
-            setShowEmergencyModal(true);
-          }}
-          className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 text-xs font-bold transition shadow-xs cursor-pointer self-start sm:self-auto"
-          title="Authorized Stock Overrides & Discrepancy Audits"
-        >
-          <ShieldAlert className="w-4 h-4 text-red-600" />
-          <span>Emergency Stock Correction</span>
-        </button>
+        {adminActionsEnabled && (
+          <button
+            type="button"
+            onClick={() => {
+              setEmergencyLguId(undefined);
+              setShowEmergencyModal(true);
+            }}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 text-xs font-bold transition shadow-xs cursor-pointer self-start sm:self-auto"
+            title="Authorized Stock Overrides & Discrepancy Audits"
+          >
+            <ShieldAlert className="w-4 h-4 text-red-600" />
+            <span>Emergency Stock Correction</span>
+          </button>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -616,16 +668,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <Lock className="w-3 h-3 text-purple-500" />
                       Automated via deliveries
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEmergencyLguId(lgu.id);
-                        setShowEmergencyModal(true);
-                      }}
-                      className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
-                    >
-                      Emergency Recount
-                    </button>
+                    {adminActionsEnabled && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEmergencyLguId(lgu.id);
+                          setShowEmergencyModal(true);
+                        }}
+                        className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
+                      >
+                        Emergency Recount
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -714,16 +768,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => {
-                            setEmergencyLguId(lgu.id);
-                            setShowEmergencyModal(true);
-                          }}
-                          className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-600 transition cursor-pointer"
-                          title="Emergency Stock Correction"
-                        >
-                          <ShieldAlert className="w-4 h-4" />
-                        </button>
+                        {adminActionsEnabled && (
+                          <button
+                            onClick={() => {
+                              setEmergencyLguId(lgu.id);
+                              setShowEmergencyModal(true);
+                            }}
+                            className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-600 transition cursor-pointer"
+                            title="Emergency Stock Correction"
+                          >
+                            <ShieldAlert className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -856,10 +912,10 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             setSelectedLGU(null);
           }}
           onSubmit={handleEditLGU}
-          onOpenEmergencyCorrection={(lguId) => {
+          onOpenEmergencyCorrection={adminActionsEnabled ? (lguId) => {
             setEmergencyLguId(lguId);
             setShowEmergencyModal(true);
-          }}
+          } : undefined}
         />
       )}
 
