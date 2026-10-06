@@ -6,6 +6,7 @@ import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectio
 import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
 import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { computeSynchronizedLgus } from '../../lib/lguSync';
+import { evaluatePriorityIndicator } from '../../lib/priorityLogic';
 
 export interface LGUDelivery {
   id: string;
@@ -222,31 +223,21 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const overallCompletionRate = totalDeliveries > 0 ? Math.round((totalCompleted / totalDeliveries) * 100) : 0;
 
   const dynamicPriorities = useMemo(() => {
-    if (priorityReports.length > 0) {
-      return priorityReports.slice(0, 5).map(rep => ({
-        id: rep?.id || `REP-${rep?.municipality || 'LGU'}`,
-        municipality: rep?.municipality || 'LGU',
-        province: rep?.province || '',
-        lguName: rep?.lguName || `${rep?.municipality || 'LGU'} Municipal Office`,
-        reportedAt: rep?.reportedAt || 'Recent',
-        foodPacks: Number(rep?.foodPacks) || 0,
-        hygieneKits: Number(rep?.hygieneKits) || 0,
-        familyKits: Number(rep?.familyKits) || 0,
-        affectedFamilies: Number(rep?.affectedFamilies) || 0,
-        damageIndex: Number(rep?.damageIndex) || 0,
-        urgencyScore: Number(rep?.urgencyScore) || 50,
-        priorityColor: (rep?.priorityColor || 'Yellow') as 'Red' | 'Yellow' | 'Green',
-        recommendation: rep?.recommendation || 'Regular monitoring.'
-      }));
-    }
-
     return baseLguList
       .map((lgu) => {
-        const foodStock = Number(lgu?.currentStock?.['Food Pack']) || 0;
-        const totalStock = lgu?.currentStock ? Object.values(lgu.currentStock).reduce((sum, v) => sum + (Number(v) || 0), 0) : 0;
+        const foodStock = Number(lgu?.currentStock?.['Food Pack']) || Number(lgu?.foodPacks) || 0;
         const pending = Number(lgu?.pendingDeliveries) || 0;
-        const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodStock / 10) + (pending * 5))));
-        const priorityColor = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
+        const completed = Number(lgu?.completedDeliveries) || 0;
+        const deliveries = Number(lgu?.deliveryCount) || (completed + pending);
+        
+        const evalRes = evaluatePriorityIndicator({
+          foodPacks: foodStock,
+          completedDeliveries: completed,
+          pendingDeliveries: pending,
+          totalDeliveries: deliveries,
+          affectedFamilies: Number(lgu?.affectedFamilies) || 0
+        });
+
         return {
           id: `DYNAMIC-${lgu?.municipality || lgu?.id || Math.random()}`,
           municipality: lgu?.municipality || 'LGU',
@@ -254,22 +245,22 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           lguName: lgu?.lguName || `${lgu?.municipality || 'LGU'} Municipal Office`,
           reportedAt: lgu?.lastDeliveryDate || 'Recent',
           foodPacks: foodStock,
-          hygieneKits: Number(lgu?.currentStock?.['Hygiene Kit']) || 0,
-          familyKits: Number(lgu?.currentStock?.['Family Kit']) || 0,
-          affectedFamilies: Math.max(100, 350 - totalStock),
-          damageIndex: urgencyScore,
-          urgencyScore,
-          priorityColor: priorityColor as 'Red' | 'Yellow' | 'Green',
-          recommendation: priorityColor === 'Red'
-            ? 'Immediate restocking and dispatch recommended.'
-            : priorityColor === 'Yellow'
-            ? 'Prepare allocation; monitor within 24 hours.'
-            : 'Sufficient stock; continue monitoring.'
+          hygieneKits: Number(lgu?.currentStock?.['Hygiene Kit']) || Number(lgu?.hygieneKits) || 0,
+          familyKits: Number(lgu?.currentStock?.['Family Kit']) || Number(lgu?.familyKits) || 0,
+          affectedFamilies: Number(lgu?.affectedFamilies) || 0,
+          damageIndex: evalRes.urgencyScore,
+          urgencyScore: evalRes.urgencyScore,
+          priorityColor: evalRes.priorityColor,
+          priorityLevel: evalRes.priorityLevel,
+          stockRate: evalRes.stockRate,
+          effectiveRate: evalRes.effectiveRate,
+          systemResponse: evalRes.systemResponse,
+          recommendation: evalRes.systemResponse
         };
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore)
       .slice(0, 5);
-  }, [priorityReports, baseLguList]);
+  }, [baseLguList]);
 
   return (
     <div className="space-y-6">
@@ -347,7 +338,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             </div>
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">
-                Immediate Restocking: {dynamicPriorities.filter((report) => report.priorityColor === 'Red').length}
+                Immediate Restocking: {dynamicPriorities.filter((report) => report.priorityColor === 'Red' || report.priorityColor === 'Orange').length}
               </span>
             </div>
           </div>
@@ -357,8 +348,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 key={report.id}
                 className={`rounded-lg border p-3 flex flex-col justify-between ${
                   report.priorityColor === 'Red' ? 'bg-red-50/70 border-red-200' :
+                  report.priorityColor === 'Orange' ? 'bg-orange-50/70 border-orange-200' :
                   report.priorityColor === 'Yellow' ? 'bg-yellow-50/70 border-yellow-200' :
-                  'bg-green-50/70 border-green-200'
+                  'bg-emerald-50/70 border-emerald-200'
                 }`}
               >
                 <div>
@@ -366,19 +358,23 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     <p className="font-bold text-sm text-gray-900 truncate" title={report.municipality}>
                       {report.municipality}
                     </p>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      report.priorityColor === 'Red' ? 'bg-red-100 text-red-700' :
-                      report.priorityColor === 'Yellow' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-green-100 text-green-700'
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                      report.priorityColor === 'Red' ? 'bg-red-100 text-red-700 border-red-200' :
+                      report.priorityColor === 'Orange' ? 'bg-orange-100 text-orange-800 border-orange-200' :
+                      report.priorityColor === 'Yellow' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
+                      'bg-emerald-100 text-emerald-700 border-emerald-200'
                     }`}>
-                      {report.priorityColor}
+                      {report.priorityLevel || report.priorityColor}
                     </span>
                   </div>
-                  <p className="text-xl font-bold text-gray-900 mt-1">{report.urgencyScore}</p>
-                  <p className="text-[11px] text-gray-600 mt-1">Food packs: {report.foodPacks}</p>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <p className="text-xl font-bold text-gray-900">{report.effectiveRate ?? report.urgencyScore}%</p>
+                    <span className="text-[10px] font-semibold text-gray-500">Stock Rate</span>
+                  </div>
+                  <p className="text-[11px] text-gray-600 mt-0.5">Food packs: {report.foodPacks}</p>
                 </div>
-                <p className="text-[11px] text-gray-700 mt-2 font-medium truncate" title={report.recommendation}>
-                  {report.recommendation}
+                <p className="text-[11px] text-gray-700 mt-2 font-medium truncate" title={report.systemResponse || report.recommendation}>
+                  {report.systemResponse || report.recommendation}
                 </p>
               </div>
             ))}

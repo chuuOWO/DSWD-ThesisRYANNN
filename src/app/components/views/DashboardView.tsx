@@ -50,6 +50,12 @@ import type { SynchronizedLgu } from '../../lib/lguSync';
 import { getLguStockForCategory } from '../../lib/lguSync';
 import { parseIncidentInfo, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
 import { DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
+import {
+  evaluatePriorityIndicator,
+  PRIORITY_TABLE_LOGIC,
+  type PriorityColor,
+  type PriorityLevel
+} from '../../lib/priorityLogic';
 
 interface DashboardState {
   inventory: InventoryItem[];
@@ -68,10 +74,11 @@ interface DashboardViewProps {
   onNavigate: (view: string) => void;
 }
 
-const priorityClasses = {
-  Red: 'bg-red-100 text-red-700 border-red-200',
+const priorityClasses: Record<PriorityColor, string> = {
+  Red: 'bg-red-100 text-red-800 border-red-200',
+  Orange: 'bg-orange-100 text-orange-800 border-orange-200',
   Yellow: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  Green: 'bg-green-100 text-green-700 border-green-200'
+  Green: 'bg-emerald-100 text-emerald-800 border-emerald-200'
 };
 
 const MONTH_NAMES = [
@@ -110,13 +117,17 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
   const [historyPage, setHistoryPage] = useState(1);
   const historyPageSize = 8;
 
+  // LGU Priority Matrix Filter
+  const [lguPriorityTab, setLguPriorityTab] = useState<'All' | 'Red' | 'Orange' | 'Yellow' | 'Green'>('All');
+  const [lguPrioritySearch, setLguPrioritySearch] = useState('');
+
   // Use synchronized LGUs if provided, otherwise fallback to master lgusList
   const effectiveLgus: (LguRecord | SynchronizedLgu)[] = useMemo(() => {
     if (synchronizedLgusList && synchronizedLgusList.length > 0) return synchronizedLgusList;
     return lgusList;
   }, [synchronizedLgusList, lgusList]);
 
-  // Harmonized Priority Reports matching LGU Monitor
+  // Harmonized Priority Reports matching Table 1 System Logic
   const effectiveLguPriorities = useMemo(() => {
     const reportMap = new Map<string, LGUPriorityReport>();
     lguPriorityReports.forEach((report) => {
@@ -130,9 +141,15 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
       const foodPacks = report?.foodPacks ?? lgu.foodPacks ?? getLguStockForCategory(lgu, 'Food Pack');
       const affectedFamilies = report?.affectedFamilies ?? lgu.affectedFamilies ?? 0;
       const damageIndex = report?.damageIndex ?? lgu.damageIndex ?? 0;
-      const baseUrgency = report?.urgencyScore ?? lgu.urgencyScore ?? 0;
-      const computedUrgency = baseUrgency || Math.min(100, Math.max(10, Math.round((foodPacks < 150 ? 45 : foodPacks < 300 ? 25 : 8) + Math.min(35, affectedFamilies / 30) + damageIndex * 0.2)));
-      const priorityColor = report?.priorityColor ?? lgu.priorityColor ?? (computedUrgency >= 75 ? 'Red' : computedUrgency >= 50 ? 'Yellow' : 'Green');
+      const syncLgu = lgu as Partial<SynchronizedLgu>;
+
+      const evalRes = evaluatePriorityIndicator({
+        foodPacks,
+        completedDeliveries: syncLgu.completedDeliveries,
+        pendingDeliveries: syncLgu.pendingDeliveries,
+        totalDeliveries: syncLgu.deliveryCount,
+        affectedFamilies
+      });
 
       return {
         id: report?.id ?? lgu.id,
@@ -145,9 +162,14 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         familyKits: report?.familyKits ?? lgu.familyKits ?? getLguStockForCategory(lgu, 'Family Kit'),
         affectedFamilies,
         damageIndex,
-        urgencyScore: computedUrgency,
-        priorityColor: priorityColor === 'Red' || priorityColor === 'Yellow' || priorityColor === 'Green' ? priorityColor : 'Green',
-        recommendation: report?.recommendation ?? lgu.recommendation ?? ''
+        urgencyScore: evalRes.urgencyScore,
+        priorityColor: evalRes.priorityColor,
+        priorityLevel: evalRes.priorityLevel,
+        stockRate: evalRes.stockRate,
+        completionRate: evalRes.completionRate,
+        effectiveRate: evalRes.effectiveRate,
+        systemResponse: evalRes.systemResponse,
+        recommendation: report?.recommendation ?? lgu.recommendation ?? evalRes.systemResponse
       } satisfies LGUPriorityReport;
     });
 
@@ -270,9 +292,27 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
   const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
   const releaseRecordCount = outgoingReleasesList.filter(item => item.handoverContractId).length;
   const gpsAcceptedCount = outgoingReleasesList.filter(item => item.receiverGps).length;
-  const urgentLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Red');
+  const severeLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Red');
+  const lowLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Orange');
+  const mediumLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Yellow');
+  const adequateLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Green');
+  const urgentLGUs = [...severeLGUs, ...lowLGUs]; // Critical (< 50% completion/stock rate)
   const activeReleases = outgoingReleasesList.filter(item => ['Released', 'In Transit', 'Correction Requested'].includes(item.deliveryStatus));
   const incomingForReview = incomingGoodsList.filter(item => item.status === 'Pending Verification').length;
+
+  const filteredLguPriorities = useMemo(() => {
+    return effectiveLguPriorities.filter((report) => {
+      if (lguPriorityTab !== 'All' && report.priorityColor !== lguPriorityTab) return false;
+      if (lguPrioritySearch) {
+        const query = lguPrioritySearch.trim().toLowerCase();
+        const matchMuni = report.municipality.toLowerCase().includes(query);
+        const matchProv = report.province.toLowerCase().includes(query);
+        const matchLevel = (report.priorityLevel || '').toLowerCase().includes(query);
+        if (!matchMuni && !matchProv && !matchLevel) return false;
+      }
+      return true;
+    });
+  }, [effectiveLguPriorities, lguPriorityTab, lguPrioritySearch]);
 
   // CHART 1: Total Goods Allocated by Disaster Reason
   const disasterAllocationData = useMemo(() => {
@@ -603,25 +643,38 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
           </div>
         </button>
 
-        {/* Card 4: Red Priority LGUs */}
+        {/* Card 4: Table 1 High-Priority Attention */}
         <button
           type="button"
           onClick={() => onNavigate('lgu-monitoring')}
-          className="bg-white rounded-xl p-5 border border-rose-200/80 shadow-xs text-left hover:border-rose-400 hover:shadow-md transition cursor-pointer group"
+          className="bg-white rounded-xl p-5 border border-red-200/80 shadow-xs text-left hover:border-red-400 hover:shadow-md transition cursor-pointer group"
         >
           <div className="flex items-start justify-between">
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center font-bold">
+            <div className="w-10 h-10 rounded-xl bg-red-50 text-red-700 flex items-center justify-center font-bold">
               <AlertTriangle className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-              Urgent Need
+            <span className="text-[10px] font-bold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200">
+              Immediate Dispatch Watch
             </span>
           </div>
-          <p className="text-2xl font-bold text-gray-900 mt-3 font-mono">{urgentLGUs.length}</p>
-          <p className="text-xs font-bold text-gray-700 mt-0.5">Red Priority Municipalities</p>
-          <div className="flex items-center justify-between text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100">
-            <span>Critical Stock Deficit</span>
-            <span className="text-rose-600 font-semibold group-hover:underline">Prioritize Relief</span>
+          <div className="flex items-baseline gap-2 mt-3">
+            <p className="text-2xl font-bold text-gray-900 font-mono">{urgentLGUs.length}</p>
+            <span className="text-xs text-gray-500 font-medium">/ {effectiveLguPriorities.length} LGUs</span>
+          </div>
+          <p className="text-xs font-bold text-gray-700 mt-0.5">Critical Rate (&lt;50% Stock/Completion)</p>
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap text-[10px]">
+            <span className="px-1.5 py-0.5 rounded font-bold bg-red-100 text-red-800 border border-red-200">
+              Red: {severeLGUs.length}
+            </span>
+            <span className="px-1.5 py-0.5 rounded font-bold bg-orange-100 text-orange-800 border border-orange-200">
+              Orange: {lowLGUs.length}
+            </span>
+            <span className="px-1.5 py-0.5 rounded font-bold bg-yellow-100 text-yellow-800 border border-yellow-200">
+              Yellow: {mediumLGUs.length}
+            </span>
+            <span className="px-1.5 py-0.5 rounded font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+              Green: {adequateLGUs.length}
+            </span>
           </div>
         </button>
       </div>
@@ -1066,98 +1119,243 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         </div>
       </div>
 
-      {/* 5. Priority and Movement Overview + Follow-up Queue */}
+      {/* 5. Priority Matrix (Table 1) and Movement Overview + Follow-up Queue */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-base font-bold text-gray-900">Priority and Movement Overview</h3>
-              <p className="text-xs text-gray-500">Operational summary for directing subsequent dispatches.</p>
+              <h3 className="text-base font-bold text-gray-900">Table 1: System Logic for Priority Indicators</h3>
+              <p className="text-xs text-gray-500">Decision matrix mapping Completion/Stock Rate to operational response</p>
             </div>
-            <TrendingUp className="w-8 h-8 text-[#2500ba]" />
+            <ShieldAlert className="w-7 h-7 text-[#2500ba]" />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {[
-              ['Incoming for Review', `${incomingForReview} deliveries need warehouse inspection or final posting.`],
-              ['Ready or Moving Out', `${activeReleases.length} releases are released, in transit, or need correction.`],
-              ['Confirmed Receipts', `${gpsAcceptedCount} deliveries have LGU receipt and GPS location confirmation.`],
-              ['Urgent LGUs', `${urgentLGUs.length} municipalities are marked Red based on current supply deficit.`]
-            ].map(([title, description]) => (
-              <div key={title} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                <p className="font-bold text-sm text-gray-900">{title}</p>
-                <p className="text-xs text-gray-600 mt-1">{description}</p>
-              </div>
-            ))}
+          {/* Table 1 Direct Matrix */}
+          <div className="overflow-x-auto border border-gray-200 rounded-xl mb-4">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-gray-50/80 border-b border-gray-200 text-gray-600 font-bold uppercase text-[10px]">
+                <tr>
+                  <th className="px-3.5 py-2.5">Completion/Stock Rate</th>
+                  <th className="px-3.5 py-2.5 text-center">Indicator Color</th>
+                  <th className="px-3.5 py-2.5">Priority Level</th>
+                  <th className="px-3.5 py-2.5">System Response</th>
+                  <th className="px-3.5 py-2.5 text-right">Active LGUs</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {PRIORITY_TABLE_LOGIC.map((row) => {
+                  const count = row.color === 'Red' ? severeLGUs.length :
+                    row.color === 'Orange' ? lowLGUs.length :
+                    row.color === 'Yellow' ? mediumLGUs.length : adequateLGUs.length;
+                  return (
+                    <tr key={row.color} className="hover:bg-gray-50/70 transition">
+                      <td className="px-3.5 py-2.5 font-bold font-mono text-gray-900">
+                        {row.completionRateRange}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-center">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${row.badgeClasses}`}>
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: row.hexColor }}
+                          />
+                          <span>{row.color}</span>
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-2.5 font-bold text-gray-900">
+                        {row.priorityLevel}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-gray-700 font-medium">
+                        {row.systemResponse}
+                      </td>
+                      <td className="px-3.5 py-2.5 text-right font-mono font-bold text-gray-900">
+                        {count} LGUs
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Quick Metrics Bar across the 4 Table 1 tiers */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+            <div className="bg-red-50/70 p-3 rounded-xl border border-red-200">
+              <span className="text-[10px] font-bold text-red-700 uppercase">Severe (&lt;25%)</span>
+              <p className="text-xl font-bold text-red-900 font-mono mt-0.5">{severeLGUs.length}</p>
+              <p className="text-[10px] text-red-600 truncate mt-0.5">Immediate Dispatch</p>
+            </div>
+            <div className="bg-orange-50/70 p-3 rounded-xl border border-orange-200">
+              <span className="text-[10px] font-bold text-orange-700 uppercase">Low (&lt;50%)</span>
+              <p className="text-xl font-bold text-orange-900 font-mono mt-0.5">{lowLGUs.length}</p>
+              <p className="text-[10px] text-orange-600 truncate mt-0.5">Emergency Flag</p>
+            </div>
+            <div className="bg-yellow-50/70 p-3 rounded-xl border border-yellow-200">
+              <span className="text-[10px] font-bold text-yellow-700 uppercase">Medium (&lt;75%)</span>
+              <p className="text-xl font-bold text-yellow-900 font-mono mt-0.5">{mediumLGUs.length}</p>
+              <p className="text-[10px] text-yellow-600 truncate mt-0.5">Active Monitoring</p>
+            </div>
+            <div className="bg-emerald-50/70 p-3 rounded-xl border border-emerald-200">
+              <span className="text-[10px] font-bold text-emerald-700 uppercase">Adequate (&gt;76%)</span>
+              <p className="text-xl font-bold text-emerald-900 font-mono mt-0.5">{adequateLGUs.length}</p>
+              <p className="text-[10px] text-emerald-600 truncate mt-0.5">Standard Monitoring</p>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
-          <h3 className="text-base font-bold text-gray-900 mb-1">Release Follow-up Queue</h3>
-          <p className="text-xs text-gray-500 mb-4">Outgoing records that require staff action or transit tracking.</p>
+        <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex flex-col justify-between">
+          <div>
+            <h3 className="text-base font-bold text-gray-900 mb-1">Release Follow-up Queue</h3>
+            <p className="text-xs text-gray-500 mb-4">Outgoing records that require staff action or transit tracking.</p>
 
-          <div className="space-y-3">
-            {activeReleases.length > 0 ? (
-              activeReleases.slice(0, 4).map((release) => (
-                <button
-                  key={release.drNumber}
-                  type="button"
-                  onClick={() => onNavigate('outgoing')}
-                  className="w-full text-left p-3 bg-orange-50/70 rounded-xl border border-orange-200/60 hover:bg-orange-100/80 transition cursor-pointer"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-gray-900 font-mono">{release.drNumber} &bull; {release.municipality}</p>
-                      <p className="text-[11px] text-gray-600 mt-0.5">{release.fnfiCategory} &bull; {release.amountApproved || release.amountRequested} kits</p>
+            <div className="space-y-3">
+              {activeReleases.length > 0 ? (
+                activeReleases.slice(0, 4).map((release) => (
+                  <button
+                    key={release.drNumber}
+                    type="button"
+                    onClick={() => onNavigate('outgoing')}
+                    className="w-full text-left p-3 bg-orange-50/70 rounded-xl border border-orange-200/60 hover:bg-orange-100/80 transition cursor-pointer"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-900 font-mono">{release.drNumber} &bull; {release.municipality}</p>
+                        <p className="text-[11px] text-gray-600 mt-0.5">{release.fnfiCategory} &bull; {release.amountApproved || release.amountRequested} kits</p>
+                      </div>
+                      <span className="shrink-0 px-2 py-0.5 bg-white text-orange-700 border border-orange-200 rounded-full text-[10px] font-bold">
+                        {release.deliveryStatus}
+                      </span>
                     </div>
-                    <span className="shrink-0 px-2 py-0.5 bg-white text-orange-700 border border-orange-200 rounded-full text-[10px] font-bold">
-                      {release.deliveryStatus}
-                    </span>
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="p-4 bg-green-50 rounded-xl border border-green-100 text-xs text-green-800">
-                All current releases are delivered or accepted without pending follow-up.
-              </div>
-            )}
+                  </button>
+                ))
+              ) : (
+                <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100 text-xs text-emerald-800">
+                  All current releases are delivered or accepted without pending follow-up.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500 mt-4">
+            <span>Active Dispatches: <strong className="text-gray-900 font-mono">{activeReleases.length}</strong></span>
+            <span>Needs Review: <strong className="text-orange-700 font-mono">{incomingForReview}</strong></span>
           </div>
         </div>
       </div>
 
       {/* 6. LGU Priority List & Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm flex flex-col">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div>
               <h3 className="text-base font-bold text-gray-900">LGU Vulnerability & Need Ranking</h3>
-              <p className="text-xs text-gray-500">Live priority score based on stock deficit and affected population</p>
+              <p className="text-xs text-gray-500">Ranked by Table 1 Completion/Stock Rate & operational response</p>
             </div>
-            <span className="text-xs font-medium text-gray-500">
-              {effectiveLguPriorities.length} LGUs
+            <span className="text-xs font-mono font-bold text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full self-start sm:self-auto">
+              {filteredLguPriorities.length} of {effectiveLguPriorities.length} LGUs
             </span>
           </div>
 
-          <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-2">
-            {effectiveLguPriorities.slice(0, 10).map(report => (
-              <div key={report.id} className="flex items-center justify-between gap-4 p-3.5 bg-gray-50 rounded-xl border border-gray-100">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="font-bold text-xs text-gray-900 truncate">{report.municipality}, {report.province}</p>
+          {/* Filter Pills for Table 1 Indicator Colors */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-3 scrollbar-hide text-xs">
+            {(['All', 'Red', 'Orange', 'Yellow', 'Green'] as const).map((tab) => {
+              const label = tab === 'All' ? `All (${effectiveLguPriorities.length})` :
+                tab === 'Red' ? `Severe (${severeLGUs.length})` :
+                tab === 'Orange' ? `Low (${lowLGUs.length})` :
+                tab === 'Yellow' ? `Medium (${mediumLGUs.length})` :
+                `Adequate (${adequateLGUs.length})`;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setLguPriorityTab(tab)}
+                  className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition whitespace-nowrap cursor-pointer ${
+                    lguPriorityTab === tab
+                      ? tab === 'Red' ? 'bg-red-600 text-white shadow-xs' :
+                        tab === 'Orange' ? 'bg-orange-600 text-white shadow-xs' :
+                        tab === 'Yellow' ? 'bg-yellow-600 text-white shadow-xs' :
+                        tab === 'Green' ? 'bg-emerald-600 text-white shadow-xs' :
+                        'bg-[#2500ba] text-white shadow-xs'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick search input */}
+          <div className="relative mb-3">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={lguPrioritySearch}
+              onChange={(e) => setLguPrioritySearch(e.target.value)}
+              placeholder="Search municipality, province, or priority level..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-[#2500ba]"
+            />
+          </div>
+
+          <div className="space-y-2.5 max-h-[440px] overflow-y-auto pr-1">
+            {filteredLguPriorities.slice(0, 15).map(report => {
+              const rate = report.effectiveRate ?? report.stockRate ?? 0;
+              const barColor = report.priorityColor === 'Red' ? 'bg-red-500' :
+                report.priorityColor === 'Orange' ? 'bg-orange-500' :
+                report.priorityColor === 'Yellow' ? 'bg-yellow-500' : 'bg-emerald-500';
+
+              return (
+                <div
+                  key={report.id}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border transition ${
+                    report.priorityColor === 'Red' ? 'bg-red-50/40 border-red-200/80 hover:border-red-300' :
+                    report.priorityColor === 'Orange' ? 'bg-orange-50/40 border-orange-200/80 hover:border-orange-300' :
+                    report.priorityColor === 'Yellow' ? 'bg-yellow-50/40 border-yellow-200/80 hover:border-yellow-300' :
+                    'bg-emerald-50/30 border-emerald-200/70 hover:border-emerald-300'
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-xs text-gray-900 truncate">{report.municipality}, {report.province}</p>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] font-bold ${priorityClasses[report.priorityColor]}`}>
+                        {report.priorityLevel || report.priorityColor} ({report.priorityColor})
+                      </span>
+                    </div>
+
+                    {/* Progress Bar & Rate */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="flex-1 bg-gray-200/80 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-full ${barColor}`}
+                          style={{ width: `${Math.min(100, Math.max(5, rate))}%` }}
+                        />
+                      </div>
+                      <span className="text-[11px] font-mono font-bold text-gray-800 shrink-0">
+                        {rate}% Rate
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-600">
+                      <span>Food Packs: <strong className="text-gray-900 font-mono">{report.foodPacks}</strong></span>
+                      {report.affectedFamilies > 0 && (
+                        <span>Families: <strong className="text-gray-900 font-mono">{report.affectedFamilies.toLocaleString()}</strong></span>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-[11px] text-gray-600 mt-0.5">
-                    Families: {report.affectedFamilies.toLocaleString()} &bull; Food packs: {report.foodPacks}
-                  </p>
-                  <p className="text-[10px] text-gray-500 mt-0.5 truncate">{report.recommendation}</p>
+
+                  <div className="sm:text-right shrink-0">
+                    <span className="inline-block px-2.5 py-1 rounded-lg text-[10px] font-bold bg-white/90 border border-gray-200 text-gray-700 shadow-2xs">
+                      {report.systemResponse || report.recommendation}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full border text-[10px] font-bold ${priorityClasses[report.priorityColor]}`}>
-                    {report.priorityColor}
-                  </span>
-                  <p className="text-sm font-bold text-gray-900 mt-1 font-mono">{report.urgencyScore} pts</p>
-                </div>
+              );
+            })}
+
+            {filteredLguPriorities.length === 0 && (
+              <div className="text-center py-8 text-xs text-gray-400">
+                No municipalities found matching the selected priority filter.
               </div>
-            ))}
+            )}
           </div>
         </div>
 
@@ -1449,3 +1647,4 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
     </div>
   );
 }
+

@@ -1,6 +1,7 @@
 import type { LguRecord } from '../services/backendApi';
 import type { OutgoingRelease, IncomingGoods, LGUPriorityReport } from '../hooks/useInventoryState';
 import { DEFAULT_PANAY_LGUS } from './lguMatching';
+import { evaluatePriorityIndicator, type PriorityColor, type PriorityLevel } from './priorityLogic';
 
 export interface SynchronizedLgu extends LguRecord {
   id: string;
@@ -26,7 +27,12 @@ export interface SynchronizedLgu extends LguRecord {
   laminatedSacks: number;
   rtef: number;
   urgencyScore: number;
-  priorityColor: 'Red' | 'Yellow' | 'Green';
+  priorityColor: PriorityColor;
+  priorityLevel?: PriorityLevel;
+  stockRate?: number;
+  completionRate?: number;
+  effectiveRate?: number;
+  systemResponse?: string;
   recommendation: string;
   lastReportedAt?: string;
   isActive: boolean;
@@ -231,8 +237,16 @@ export function computeSynchronizedLgus(params: {
     const laminatedSacks = canonicalStock['Laminated Sack'];
     const rtef = canonicalStock['RTEF'];
 
-    const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodPacks / 10) + (pending * 5))));
-    const priorityColor: 'Red' | 'Yellow' | 'Green' = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
+    const evalRes = evaluatePriorityIndicator({
+      foodPacks,
+      completedDeliveries: completed,
+      pendingDeliveries: pending,
+      totalDeliveries: deliveryCount,
+      affectedFamilies: lgu.affectedFamilies
+    });
+
+    const urgencyScore = evalRes.urgencyScore;
+    const priorityColor = evalRes.priorityColor;
 
     return {
       id: lgu.id || `lgu-${provLower}-${muniLower.replace(/[^a-z0-9]/g, '-')}`,
@@ -259,7 +273,12 @@ export function computeSynchronizedLgus(params: {
       rtef,
       urgencyScore,
       priorityColor,
-      recommendation: lgu.recommendation || (priorityColor === 'Red' ? 'Immediate replenishment requested.' : 'Stable baseline stock.'),
+      priorityLevel: evalRes.priorityLevel,
+      stockRate: evalRes.stockRate,
+      completionRate: evalRes.completionRate,
+      effectiveRate: evalRes.effectiveRate,
+      systemResponse: evalRes.systemResponse,
+      recommendation: lgu.recommendation || evalRes.systemResponse,
       lastReportedAt: lastDate !== 'N/A' ? lastDate : lgu.lastReportedAt,
       isActive: lgu.isActive !== false
     };

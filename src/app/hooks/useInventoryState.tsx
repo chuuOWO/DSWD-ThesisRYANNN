@@ -20,6 +20,7 @@ import {
   DEFAULT_SUPPLY_SOURCES
 } from '../lib/lguMatching';
 import { parseIncidentInfo } from '../lib/incidentHelper';
+import { evaluatePriorityIndicator, type PriorityColor, type PriorityLevel } from '../lib/priorityLogic';
 
 export interface InventoryItem {
   category: string;
@@ -34,7 +35,7 @@ export type UserRole = 'Admin' | 'Receiver' | 'LGUReceiver' | 'Unregistered';
 export type WarehouseName = string;
 export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Minted' | 'Correction Requested' | 'Rejected';
 export type OutgoingStatus = 'Draft' | 'Allocating' | 'Approved' | 'Packed' | 'Released' | 'In Transit' | 'Delivered' | 'Accepted' | 'Distributed' | 'Correction Requested' | 'Cancelled';
-export type PriorityColor = 'Red' | 'Yellow' | 'Green';
+export type { PriorityColor, PriorityLevel };
 
 export interface AuditEvent {
   id: string;
@@ -117,6 +118,11 @@ export interface LGUPriorityReport {
   damageIndex: number;
   urgencyScore: number;
   priorityColor: PriorityColor;
+  priorityLevel?: PriorityLevel;
+  stockRate?: number;
+  completionRate?: number;
+  effectiveRate?: number;
+  systemResponse?: string;
   recommendation: string;
 }
 
@@ -286,21 +292,20 @@ const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
 
 
 const computePriority = (report: Pick<LGUPriorityReport, 'foodPacks' | 'affectedFamilies' | 'damageIndex'>) => {
-  const stockScore = report.foodPacks < 150 ? 45 : report.foodPacks < 300 ? 25 : 8;
-  const demandScore = Math.min(35, Math.round(report.affectedFamilies / 30));
-  const damageScore = Math.round(report.damageIndex * 0.2);
-  const urgencyScore = Math.min(100, stockScore + demandScore + damageScore);
-  const priorityColor: PriorityColor = urgencyScore >= 75 ? 'Red' : urgencyScore >= 50 ? 'Yellow' : 'Green';
+  const evalRes = evaluatePriorityIndicator({
+    foodPacks: report.foodPacks,
+    affectedFamilies: report.affectedFamilies
+  });
 
   return {
-    urgencyScore,
-    priorityColor,
-    recommendation:
-      priorityColor === 'Red'
-        ? 'Immediate restocking and dispatch recommended.'
-        : priorityColor === 'Yellow'
-        ? 'Prepare allocation; monitor within 24 hours.'
-        : 'Sufficient stock; continue monitoring.'
+    urgencyScore: evalRes.urgencyScore,
+    priorityColor: evalRes.priorityColor,
+    priorityLevel: evalRes.priorityLevel,
+    stockRate: evalRes.stockRate,
+    completionRate: evalRes.completionRate,
+    effectiveRate: evalRes.effectiveRate,
+    systemResponse: evalRes.systemResponse,
+    recommendation: evalRes.systemResponse
   };
 };
 
@@ -318,7 +323,7 @@ const mapLGUInventoryReport = (row: LGUInventoryReportRow): LGUPriorityReport =>
     damageIndex: row.damage_index ?? 0
   };
   const computed = computePriority(base);
-  const priorityColor = row.priority_color === 'Red' || row.priority_color === 'Yellow' || row.priority_color === 'Green'
+  const priorityColor = (row.priority_color === 'Red' || row.priority_color === 'Orange' || row.priority_color === 'Yellow' || row.priority_color === 'Green')
     ? row.priority_color
     : computed.priorityColor;
 
@@ -326,6 +331,11 @@ const mapLGUInventoryReport = (row: LGUInventoryReportRow): LGUPriorityReport =>
     ...base,
     urgencyScore: row.urgency_score ?? computed.urgencyScore,
     priorityColor,
+    priorityLevel: computed.priorityLevel,
+    stockRate: computed.stockRate,
+    completionRate: computed.completionRate,
+    effectiveRate: computed.effectiveRate,
+    systemResponse: computed.systemResponse,
     recommendation: row.recommendation ?? computed.recommendation
   };
 };
@@ -1358,21 +1368,32 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         if (sources && sources.length > 0) setSupplySourcesList(sources);
         if (kits && kits.length > 0) setKitTypesList(kits);
 
-        const reportsFromLgus: LGUPriorityReport[] = resolvedLgus.map(l => ({
-          id: l.id,
-          municipality: l.municipality,
-          province: l.province,
-          lguName: l.lguName || `${l.municipality} Municipal Office`,
-          foodPacks: l.foodPacks,
-          hygieneKits: l.hygieneKits,
-          familyKits: l.familyKits,
-          affectedFamilies: l.affectedFamilies,
-          damageIndex: l.damageIndex,
-          urgencyScore: l.urgencyScore,
-          priorityColor: l.priorityColor,
-          recommendation: l.recommendation,
-          reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
-        }));
+        const reportsFromLgus: LGUPriorityReport[] = resolvedLgus.map(l => {
+          const evalRes = evaluatePriorityIndicator({
+            foodPacks: l.foodPacks,
+            affectedFamilies: l.affectedFamilies
+          });
+          return {
+            id: l.id,
+            municipality: l.municipality,
+            province: l.province,
+            lguName: l.lguName || `${l.municipality} Municipal Office`,
+            foodPacks: l.foodPacks,
+            hygieneKits: l.hygieneKits,
+            familyKits: l.familyKits,
+            affectedFamilies: l.affectedFamilies,
+            damageIndex: l.damageIndex,
+            urgencyScore: evalRes.urgencyScore,
+            priorityColor: evalRes.priorityColor,
+            priorityLevel: evalRes.priorityLevel,
+            stockRate: evalRes.stockRate,
+            completionRate: evalRes.completionRate,
+            effectiveRate: evalRes.effectiveRate,
+            systemResponse: evalRes.systemResponse,
+            recommendation: l.recommendation || evalRes.systemResponse,
+            reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
+          };
+        });
         setLguPriorityReports(reportsFromLgus);
       }).catch(err => console.warn('Failed to load master tables:', err));
     };
@@ -1391,21 +1412,32 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     try {
       const list = await backendApi.getLgus();
       setLgusList(list);
-      const reportsFromLgus: LGUPriorityReport[] = list.map(l => ({
-        id: l.id,
-        municipality: l.municipality,
-        province: l.province,
-        lguName: l.lguName || `${l.municipality} Municipal Office`,
-        foodPacks: l.foodPacks,
-        hygieneKits: l.hygieneKits,
-        familyKits: l.familyKits,
-        affectedFamilies: l.affectedFamilies,
-        damageIndex: l.damageIndex,
-        urgencyScore: l.urgencyScore,
-        priorityColor: l.priorityColor,
-        recommendation: l.recommendation,
-        reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
-      }));
+      const reportsFromLgus: LGUPriorityReport[] = list.map(l => {
+        const evalRes = evaluatePriorityIndicator({
+          foodPacks: l.foodPacks,
+          affectedFamilies: l.affectedFamilies
+        });
+        return {
+          id: l.id,
+          municipality: l.municipality,
+          province: l.province,
+          lguName: l.lguName || `${l.municipality} Municipal Office`,
+          foodPacks: l.foodPacks,
+          hygieneKits: l.hygieneKits,
+          familyKits: l.familyKits,
+          affectedFamilies: l.affectedFamilies,
+          damageIndex: l.damageIndex,
+          urgencyScore: evalRes.urgencyScore,
+          priorityColor: evalRes.priorityColor,
+          priorityLevel: evalRes.priorityLevel,
+          stockRate: evalRes.stockRate,
+          completionRate: evalRes.completionRate,
+          effectiveRate: evalRes.effectiveRate,
+          systemResponse: evalRes.systemResponse,
+          recommendation: l.recommendation || evalRes.systemResponse,
+          reportedAt: l.lastReportedAt || l.updatedAt || new Date().toISOString()
+        };
+      });
       setLguPriorityReports(reportsFromLgus);
     } catch (err) {
       console.warn('Failed to refresh lgus:', err);

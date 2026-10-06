@@ -130,7 +130,7 @@ export interface LguRecord {
   laminatedSacks: number;
   rtef: number;
   urgencyScore: number;
-  priorityColor: 'Red' | 'Yellow' | 'Green';
+  priorityColor: 'Red' | 'Orange' | 'Yellow' | 'Green';
   affectedFamilies: number;
   damageIndex: number;
   recommendation: string;
@@ -190,7 +190,7 @@ export interface LGUInventoryReportPayload {
   affectedFamilies: number;
   damageIndex: number;
   urgencyScore: number;
-  priorityColor: 'Red' | 'Yellow' | 'Green';
+  priorityColor: 'Red' | 'Orange' | 'Yellow' | 'Green';
   recommendation: string;
 }
 
