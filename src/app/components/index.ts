@@ -32,5 +32,6 @@ export * from './modals/EditLGUModal';
 export * from './modals/QrCodeGeneratorModal';
 export * from './modals/ProfileSettingsModal';
 export * from './modals/SettingsModal';
+export * from './modals/EmergencyStockCorrectionModal';
 export * from './modals/ConfirmLogoutModal';
 export * from './modals/MetaMaskMismatchModal';

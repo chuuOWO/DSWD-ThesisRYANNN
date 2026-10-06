@@ -639,6 +639,45 @@ export const backendApi = {
     }
   },
 
+  async emergencyCorrectLguStock(
+    lguId: string,
+    stockUpdates: Record<string, number>,
+    reason: string,
+    actorName?: string
+  ): Promise<{ ok: boolean }> {
+    const updates: Record<string, unknown> = {
+      current_stock: stockUpdates,
+      updated_at: new Date().toISOString(),
+      last_reported_at: new Date().toISOString()
+    };
+    if (stockUpdates['Food Pack'] !== undefined) updates.food_packs = stockUpdates['Food Pack'];
+    if (stockUpdates['Hygiene Kit'] !== undefined) updates.hygiene_kits = stockUpdates['Hygiene Kit'];
+    if (stockUpdates['Sleeping Kit'] !== undefined) updates.sleeping_kits = stockUpdates['Sleeping Kit'];
+    if (stockUpdates['Kitchen Kit'] !== undefined) updates.kitchen_kits = stockUpdates['Kitchen Kit'];
+    if (stockUpdates['Family Kit'] !== undefined) updates.family_kits = stockUpdates['Family Kit'];
+    if (stockUpdates['Laminated Sack'] !== undefined) updates.laminated_sacks = stockUpdates['Laminated Sack'];
+    if (stockUpdates['RTEF'] !== undefined) updates.rtef = stockUpdates['RTEF'];
+
+    const { error } = await supabase
+      .from('lgus')
+      .update(updates)
+      .eq('id', lguId);
+
+    throwIfError(error, 'Failed to update LGU stock in database');
+
+    try {
+      await supabase.from('discrepancy_reports').insert({
+        report_type: 'Emergency LGU Stock Correction',
+        manifest_number: `EMERGENCY-LGU-${lguId.slice(0, 8)}`,
+        note: `Emergency correction by ${actorName || 'Admin'}: ${reason.trim()}. Adjusted stock: ${JSON.stringify(stockUpdates)}`
+      });
+    } catch (discErr) {
+      console.warn('Could not record emergency discrepancy log:', discErr);
+    }
+
+    return { ok: true };
+  },
+
   // --- SUPPLY SOURCES ---
   async getSupplySources(): Promise<SupplySourceRecord[]> {
     try {
@@ -1464,10 +1503,24 @@ export const backendApi = {
   async markTruckLiveLocationDone(truckId: string, drNumber?: string) {
     try {
       if (drNumber) {
+        const { data: release } = await supabase
+          .from('outgoing_requests')
+          .select('municipality, lgu_name, category, amount_approved, amount_requested, province')
+          .eq('dr_number', drNumber)
+          .maybeSingle();
+
         await supabase
           .from('outgoing_requests')
           .update({ delivery_status: 'Delivered' })
           .eq('dr_number', drNumber);
+
+        if (release) {
+          const targetMuni = release.municipality || release.lgu_name;
+          const targetQty = release.amount_approved || release.amount_requested || 0;
+          if (targetMuni && targetQty > 0 && release.category) {
+            await backendApi.addLguStock(targetMuni, release.category, targetQty, release.province);
+          }
+        }
       } else {
         await supabase
           .from('outgoing_requests')

@@ -22,11 +22,13 @@ import {
   LogOut,
   Map,
   Search,
-  Filter
+  Filter,
+  ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { blockchain } from '../../services/blockchain';
+import { EmergencyStockCorrectionModal } from './EmergencyStockCorrectionModal';
 import {
   backendApi,
   type LguRecord,
@@ -132,6 +134,8 @@ export function SettingsModal({
   });
 
   const [isAddingLgu, setIsAddingLgu] = useState(false);
+  const [isEmergencyCorrectionOpen, setIsEmergencyCorrectionOpen] = useState(false);
+  const [emergencyCorrectionLguId, setEmergencyCorrectionLguId] = useState<string | undefined>(undefined);
   const [newLgu, setNewLgu] = useState<{ municipality: string; province: string; lguName: string; contactPerson: string; contactNumber: string; latitude: number; longitude: number }>({
     municipality: '',
     province: '',
@@ -734,6 +738,27 @@ export function SettingsModal({
     } finally {
       setIsMutatingMasterData(false);
     }
+  };
+
+  const handleEmergencyStockCorrection = async (
+    lguId: string,
+    newStock: Record<string, number>,
+    reason: string
+  ) => {
+    const result = await backendApi.emergencyCorrectLguStock(
+      lguId,
+      newStock,
+      reason,
+      profile.fullName || profile.email || 'Administrator'
+    );
+    if (result.ok) {
+      const updated = await backendApi.getLgus();
+      setDbLgus(updated);
+      setMasterDataFeedback({ type: 'success', text: result.message || 'LGU stock overridden and audit log saved.' });
+    } else {
+      setMasterDataFeedback({ type: 'error', text: result.message || 'Failed to update LGU stock.' });
+    }
+    return result;
   };
 
   const handleToggleSelectLgu = (id: string) => {
@@ -1977,6 +2002,18 @@ export function SettingsModal({
                       )}
                       <button
                         type="button"
+                        onClick={() => {
+                          setEmergencyCorrectionLguId(undefined);
+                          setIsEmergencyCorrectionOpen(true);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold shadow-xs transition cursor-pointer"
+                        title="Authorized Stock Overrides & Discrepancy Audits"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5 text-red-600" />
+                        <span>Emergency Stock Correction</span>
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setIsAddingLgu(!isAddingLgu)}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
                       >
@@ -2117,6 +2154,17 @@ export function SettingsModal({
                             </span>
                             <button
                               type="button"
+                              onClick={() => {
+                                setEmergencyCorrectionLguId(lgu.id);
+                                setIsEmergencyCorrectionOpen(true);
+                              }}
+                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              title="Emergency Stock Recount"
+                            >
+                              <ShieldAlert className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDeleteSingleLgu(lgu.id)}
                               disabled={isMutatingMasterData}
                               className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
@@ -2140,6 +2188,20 @@ export function SettingsModal({
           )}
         </div>
       </div>
+
+      {isEmergencyCorrectionOpen && (
+        <EmergencyStockCorrectionModal
+          isOpen={isEmergencyCorrectionOpen}
+          onClose={() => {
+            setIsEmergencyCorrectionOpen(false);
+            setEmergencyCorrectionLguId(undefined);
+          }}
+          lgusList={dbLgus}
+          kitTypesList={kitTypes}
+          initialLguId={emergencyCorrectionLguId}
+          onCorrectStock={handleEmergencyStockCorrection}
+        />
+      )}
     </div>
   </div>
 );

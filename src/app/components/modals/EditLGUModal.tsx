@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, MapPin, AlertCircle, Edit } from 'lucide-react';
+import { X, MapPin, AlertCircle, Edit, Lock, Package, ShieldAlert } from 'lucide-react';
 import { sanitizeTextOnly, sanitizeNumbersOnly, sanitizePhone } from '../../lib/inputValidation';
 import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import type { LGUDelivery } from '../views/LGUMonitoring';
@@ -9,11 +9,18 @@ interface EditLGUModalProps {
   onClose: () => void;
   onSubmit: (data: LGUDelivery) => void | Promise<void>;
   availableCategories?: string[];
+  onOpenEmergencyCorrection?: (lguId: string) => void;
 }
 
 const PROVINCES = REGIONAL_PROVINCES;
 
-export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] }: EditLGUModalProps) {
+export function EditLGUModal({
+  lgu,
+  onClose,
+  onSubmit,
+  availableCategories = [],
+  onOpenEmergencyCorrection
+}: EditLGUModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState<LGUDelivery>({
@@ -48,16 +55,6 @@ export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] 
         deliveryCount: completed + pending
       }));
     }
-  };
-
-  const handleStockChange = (category: string, value: number) => {
-    setFormData(prev => ({
-      ...prev,
-      currentStock: {
-        ...(prev.currentStock || {}),
-        [category]: value
-      }
-    }));
   };
 
   const validate = (): boolean => {
@@ -275,37 +272,50 @@ export function EditLGUModal({ lgu, onClose, onSubmit, availableCategories = [] 
             />
           </div>
 
-          {/* Current Stock */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="font-bold text-blue-900 text-sm mb-3">Current Stock at LGU</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {categoriesToRender.map(category => (
-                <div key={category}>
-                  <label className="block text-xs font-bold text-blue-700 mb-2">
-                    {category}
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={formData.currentStock?.[category] || ''}
-                    onChange={(e) => {
-                      const c = sanitizeNumbersOnly(e.target.value);
-                      handleStockChange(category, c ? parseInt(c, 10) : 0);
-                    }}
-                    className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 pt-3 border-t border-blue-200">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-blue-900">Total Stock</span>
-                <span className="text-lg font-bold text-blue-600">
-                  {Object.values(formData.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()}
-                </span>
+          {/* Current Stock (Read-Only / Automated) */}
+          <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-purple-900 font-bold text-sm">
+                <Lock className="w-4 h-4 text-purple-700" />
+                <span>On-Hand Inventory (Locked & Automated)</span>
               </div>
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                {Object.values(formData.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()} Total Items
+              </span>
             </div>
+
+            <p className="text-xs text-purple-700 leading-relaxed">
+              LGU inventory balances are automatically updated when releases are accepted and direct incoming goods are stocked. Manual editing is restricted here to ensure chain-of-custody integrity.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+              {categoriesToRender.map(category => {
+                const qty = formData.currentStock?.[category] || 0;
+                return (
+                  <div key={category} className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-xs">
+                    <p className="text-[11px] font-semibold text-gray-500 truncate" title={category}>{category}</p>
+                    <p className="text-base font-bold text-gray-900 mt-0.5">{qty.toLocaleString()}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {onOpenEmergencyCorrection && (
+              <div className="pt-2 border-t border-purple-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-[11px] text-purple-800">Need an authorized recount or emergency adjustment?</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenEmergencyCorrection(formData.id);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-800 text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <span>Emergency Stock Correction</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* GPS Coordinates */}

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
-import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, ChevronRight, LayoutGrid, List, ShieldAlert, Package, Lock } from 'lucide-react';
+import type { LGUPriorityReport, UserRole, OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { EditLGUModal } from '../modals/EditLGUModal';
-import type { LguRecord, LguInput, ProvinceRecord, KitTypeRecord } from '../../services/backendApi';
+import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
+import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
 import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
 
 export interface LGUDelivery {
@@ -36,6 +37,7 @@ interface RecentActivity {
 interface LGUMonitoringProps {
   inventoryState?: {
     inventory?: { category: string; warehouseA: number; warehouseB: number }[];
+    incomingGoodsList?: IncomingGoods[];
     outgoingReleasesList?: OutgoingRelease[];
     lguPriorityReports: LGUPriorityReport[];
     lgusList?: LguRecord[];
@@ -43,6 +45,13 @@ interface LGUMonitoringProps {
     kitTypesList?: KitTypeRecord[];
     addLgu?: (input: LguInput) => Promise<{ ok: boolean; message: string }>;
     editLgu?: (id: string, updates: Partial<LguInput>) => Promise<{ ok: boolean; message: string }>;
+    emergencyCorrectLguStock?: (
+      lguId: string,
+      stockUpdates: Record<string, number>,
+      reason: string,
+      actorName?: string
+    ) => Promise<{ ok: boolean; message: string }>;
+    refreshLgus?: () => Promise<void>;
   };
   currentRole?: UserRole;
 }
@@ -57,10 +66,13 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [emergencyLguId, setEmergencyLguId] = useState<string | undefined>(undefined);
 
   // Dynamically compute live LGU list exclusively from master Supabase lgus table
   const baseLguList = useMemo<LGUDelivery[]>(() => {
     const releases = inventoryState?.outgoingReleasesList ?? [];
+    const incomingGoods = inventoryState?.incomingGoodsList ?? [];
     const reports = inventoryState?.lguPriorityReports ?? [];
     const masterLgus = (inventoryState?.lgusList && inventoryState.lgusList.length > 0)
       ? inventoryState.lgusList
@@ -77,7 +89,12 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         return (r?.lguId && r.lguId === lgu.id) || (muniLower && target.includes(muniLower)) || (muniLower && m === muniLower);
       });
 
-      const report = reports.find((rpt) => (rpt?.municipality || '').toLowerCase() === muniLower);
+      // Filter incoming goods that were stocked directly to this LGU
+      const lguIncomingDirect = incomingGoods.filter((inc) => {
+        if (inc.destinationType !== 'LGU') return false;
+        const dest = (inc.destination || '').toLowerCase();
+        return dest === muniLower || (muniLower && dest.includes(muniLower));
+      });
 
       const totalReleased = lguReleases.reduce((sum, r) => sum + (r.amountApproved || r.amountRequested || 0), 0);
       const deliveryCount = lguReleases.length;
@@ -85,18 +102,40 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       const pending = lguReleases.filter((r) => ['Allocating', 'Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length;
       const lastDate = lguReleases[0]?.dateAllocated || (report ? report.reportedAt?.slice(0, 10) : 'N/A');
 
+      // Baseline stock from Supabase master table public.lgus
       const stock: Record<string, number> = {
         ...(lgu.currentStock || {})
       };
 
-      // Accumulate accepted relief packages dynamically for all categories
+      // Populate known kit categories from record columns if not in json map
+      if (lgu.foodPacks && !stock['Food Pack']) stock['Food Pack'] = lgu.foodPacks;
+      if (lgu.hygieneKits && !stock['Hygiene Kit']) stock['Hygiene Kit'] = lgu.hygieneKits;
+      if (lgu.familyKits && !stock['Family Kit']) stock['Family Kit'] = lgu.familyKits;
+      if (lgu.sleepingKits && !stock['Sleeping Kit']) stock['Sleeping Kit'] = lgu.sleepingKits;
+      if (lgu.kitchenKits && !stock['Kitchen Kit']) stock['Kitchen Kit'] = lgu.kitchenKits;
+      if (lgu.laminatedSacks && !stock['Laminated Sacks']) stock['Laminated Sacks'] = lgu.laminatedSacks;
+      if (lgu.rtef && !stock['Ready-to-Eat Food']) stock['Ready-to-Eat Food'] = lgu.rtef;
+
+      // Track verified arrivals from completed deliveries and direct incoming goods
+      const arrivalsMap: Record<string, number> = {};
       lguReleases.forEach((r) => {
         if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory) {
-          stock[r.fnfiCategory] = (stock[r.fnfiCategory] || 0) + (r.amountApproved || r.amountRequested || 0);
+          arrivalsMap[r.fnfiCategory] = (arrivalsMap[r.fnfiCategory] || 0) + (r.amountApproved || r.amountRequested || 0);
+        }
+      });
+      lguIncomingDirect.forEach((inc) => {
+        if (inc.fnfiCategory && inc.quantity > 0) {
+          arrivalsMap[inc.fnfiCategory] = (arrivalsMap[inc.fnfiCategory] || 0) + inc.quantity;
         }
       });
 
-      // Override/augment from official LGU inventory reports
+      // Synchronize: taking the maximum between the DB balance and completed arrivals
+      // guarantees immediate visibility of newly completed deliveries/incoming stock while avoiding double-counting
+      Object.entries(arrivalsMap).forEach(([cat, arrivalQty]) => {
+        stock[cat] = Math.max(stock[cat] || 0, arrivalQty);
+      });
+
+      // Override/augment from official LGU inventory priority reports if higher
       if (report) {
         if (report.foodPacks) stock['Food Pack'] = Math.max(stock['Food Pack'] || 0, report.foodPacks);
         if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(stock['Hygiene Kit'] || 0, report.hygieneKits);
@@ -123,7 +162,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     });
 
     return Array.from(lguEntriesMap.values());
-  }, [inventoryState?.outgoingReleasesList, inventoryState?.lguPriorityReports, inventoryState?.lgusList]);
+  }, [inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, inventoryState?.lguPriorityReports, inventoryState?.lgusList]);
 
   // Province list with counts
   const provinceOptions = useMemo(() => {
@@ -141,11 +180,12 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     const set = new Set<string>();
     (inventoryState?.kitTypesList ?? []).forEach(k => { if (k.name) set.add(k.name.trim()); });
     (inventoryState?.outgoingReleasesList ?? []).forEach(r => { if (r.fnfiCategory) set.add(r.fnfiCategory.trim()); });
+    (inventoryState?.incomingGoodsList ?? []).forEach(g => { if (g.fnfiCategory) set.add(g.fnfiCategory.trim()); });
     if (set.size === 0) {
       DEFAULT_KIT_NAMES.forEach(c => set.add(c));
     }
     return Array.from(set).sort();
-  }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList]);
+  }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList]);
 
 
   const handleEditLGU = async (updatedLGU: LGUDelivery) => {
@@ -260,6 +300,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           <h1 className="text-2xl font-bold text-gray-900">LGU Monitoring</h1>
           <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setEmergencyLguId(undefined);
+            setShowEmergencyModal(true);
+          }}
+          className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 text-xs font-bold transition shadow-xs cursor-pointer self-start sm:self-auto"
+          title="Authorized Stock Overrides & Discrepancy Audits"
+        >
+          <ShieldAlert className="w-4 h-4 text-red-600" />
+          <span>Emergency Stock Correction</span>
+        </button>
       </div>
 
       {/* Summary Cards */}
@@ -496,11 +548,52 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center text-xs pt-1">
-                  <span className="font-semibold text-gray-600">Current Stock</span>
-                  <span className="font-bold text-purple-600">
-                    {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0} kits
-                  </span>
+                {/* On-Hand Relief Inventory (Prominent & Automated) */}
+                <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Package className="w-4 h-4 text-purple-700" />
+                      <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
+                    </div>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                      {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()} Items Total
+                    </span>
+                  </div>
+
+                  {/* Category Breakdown Chips */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {Object.entries(lgu.currentStock || {})
+                      .filter(([_, qty]) => qty > 0)
+                      .slice(0, 4)
+                      .map(([category, qty]) => (
+                        <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
+                          <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
+                          <p className="text-xs font-bold text-purple-900 mt-0.5">{qty.toLocaleString()}</p>
+                        </div>
+                      ))}
+                    {Object.values(lgu.currentStock || {}).every(v => v === 0) && (
+                      <div className="col-span-2 text-center py-2 text-[11px] text-purple-600 font-medium italic">
+                        No relief stock recorded on-hand
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-purple-700 pt-1 border-t border-purple-200/60">
+                    <span className="flex items-center gap-1">
+                      <Lock className="w-3 h-3 text-purple-500" />
+                      Automated via deliveries
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmergencyLguId(lgu.id);
+                        setShowEmergencyModal(true);
+                      }}
+                      className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
+                    >
+                      Emergency Recount
+                    </button>
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t border-gray-100 space-y-1 text-[11px] text-gray-500">
@@ -530,8 +623,8 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                   <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Facility</th>
                   <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Released</th>
                   <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Deliveries</th>
-                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Stock</th>
-                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Action</th>
+                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Current Stock</th>
+                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -556,17 +649,49 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <span className="text-gray-400 mx-1">/</span>
                       <span className="text-gray-700">{lgu.deliveryCount}</span>
                     </td>
-                    <td className="px-6 py-4 text-right font-bold text-sm text-purple-600">
-                      {lgu.currentStock ? Object.values(lgu.currentStock).reduce((sum, val) => sum + val, 0).toLocaleString() : 0}
+                    <td className="px-6 py-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-sm text-purple-700">
+                            {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + val, 0).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-gray-400 font-medium">items</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {Object.entries(lgu.currentStock || {})
+                            .filter(([_, qty]) => qty > 0)
+                            .slice(0, 3)
+                            .map(([cat, qty]) => (
+                              <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
+                                {cat}: {qty.toLocaleString()}
+                              </span>
+                            ))}
+                          {Object.values(lgu.currentStock || {}).every(v => v === 0) && (
+                            <span className="text-[10px] text-gray-400 italic">0 in stock</span>
+                          )}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-center">
-                      <button
-                        onClick={() => openEditModal(lgu)}
-                        className="p-1 hover:bg-gray-100 rounded text-blue-600 hover:text-blue-800 transition cursor-pointer"
-                        title="Edit LGU"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          onClick={() => openEditModal(lgu)}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
+                          title="Edit LGU Info"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEmergencyLguId(lgu.id);
+                            setShowEmergencyModal(true);
+                          }}
+                          className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-600 transition cursor-pointer"
+                          title="Emergency Stock Correction"
+                        >
+                          <ShieldAlert className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -698,6 +823,30 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             setSelectedLGU(null);
           }}
           onSubmit={handleEditLGU}
+          onOpenEmergencyCorrection={(lguId) => {
+            setEmergencyLguId(lguId);
+            setShowEmergencyModal(true);
+          }}
+        />
+      )}
+
+      {/* Emergency Stock Correction Modal */}
+      {showEmergencyModal && (
+        <EmergencyStockCorrectionModal
+          isOpen={showEmergencyModal}
+          onClose={() => {
+            setShowEmergencyModal(false);
+            setEmergencyLguId(undefined);
+          }}
+          lgusList={inventoryState?.lgusList && inventoryState.lgusList.length > 0 ? inventoryState.lgusList : DEFAULT_PANAY_LGUS}
+          kitTypesList={inventoryState?.kitTypesList}
+          initialLguId={emergencyLguId}
+          onCorrectStock={async (lguId, newStock, reason) => {
+            if (inventoryState?.emergencyCorrectLguStock) {
+              return inventoryState.emergencyCorrectLguStock(lguId, newStock, reason);
+            }
+            return backendApi.emergencyCorrectLguStock(lguId, newStock, reason);
+          }}
         />
       )}
     </div>

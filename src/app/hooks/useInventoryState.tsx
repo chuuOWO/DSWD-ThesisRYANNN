@@ -1140,6 +1140,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           auditTrail: [audit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', proof.hash), ...item.auditTrail]
         }
       : item));
+    // Credit recipient LGU stock in database and local state upon delivery completion
+    const targetMuni = release.municipality || release.lguName;
+    const targetQty = release.amountApproved || release.amountRequested || 0;
+    if (targetMuni && targetQty > 0 && release.fnfiCategory) {
+      addLguStock(targetMuni, release.fnfiCategory, targetQty, release.province);
+    }
+
     backendApi.updateOutgoing(canonicalDr, {
       deliveryStatus: 'Accepted',
       receiverGps: latestGps,
@@ -1156,6 +1163,55 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
   };
 
+  const emergencyCorrectLguStock = async (
+    lguId: string,
+    newStock: Record<string, number>,
+    reason: string
+  ): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const targetLgu = lgusList.find(l => l.id === lguId);
+      if (!targetLgu) {
+        return { ok: false, message: 'LGU not found.' };
+      }
+
+      await backendApi.emergencyCorrectLguStock(
+        lguId,
+        newStock,
+        reason,
+        currentActor.name
+      );
+
+      // Update in-memory lgusList state immediately
+      setLgusList(prev => prev.map(lgu => {
+        if (lgu.id !== lguId) return lgu;
+        return {
+          ...lgu,
+          foodPacks: newStock['Food Pack'] !== undefined ? newStock['Food Pack'] : lgu.foodPacks,
+          hygieneKits: newStock['Hygiene Kit'] !== undefined ? newStock['Hygiene Kit'] : lgu.hygieneKits,
+          familyKits: newStock['Family Kit'] !== undefined ? newStock['Family Kit'] : lgu.familyKits,
+          sleepingKits: newStock['Sleeping Kit'] !== undefined ? newStock['Sleeping Kit'] : lgu.sleepingKits,
+          kitchenKits: newStock['Kitchen Kit'] !== undefined ? newStock['Kitchen Kit'] : lgu.kitchenKits,
+          laminatedSacks: newStock['Laminated Sack'] !== undefined ? newStock['Laminated Sack'] : lgu.laminatedSacks,
+          rtef: newStock['RTEF'] !== undefined ? newStock['RTEF'] : lgu.rtef,
+          currentStock: {
+            ...(lgu.currentStock || {}),
+            ...newStock
+          }
+        };
+      }));
+
+      return {
+        ok: true,
+        message: `Emergency stock correction successfully applied for ${targetLgu.municipality}, ${targetLgu.province}.`
+      };
+    } catch (err: any) {
+      console.error('Emergency stock correction failed:', err);
+      return {
+        ok: false,
+        message: err?.message || 'Failed to update LGU stock in database.'
+      };
+    }
+  };
 
   const submitLGUInventoryReport = async (input: LGUInventoryReportInput) => {
     try {
@@ -1302,6 +1358,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     refreshKitTypes,
     addStock,
     addLguStock,
+    emergencyCorrectLguStock,
     deductStock,
     getAvailableStock,
     addIncomingGoods,
