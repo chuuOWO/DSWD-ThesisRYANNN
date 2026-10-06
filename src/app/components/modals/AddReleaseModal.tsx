@@ -4,6 +4,7 @@ import type { OutgoingStatus } from '../../hooks/useInventoryState';
 import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
 import { LocationPickerMap } from '../design/LocationPickerMap';
 import { sanitizeNumbersOnly, sanitizeTextOnly } from '../../lib/inputValidation';
+import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 
 export interface ReleaseForm {
   dateAllocated: string;
@@ -55,9 +56,9 @@ const DELIVERY_STATUSES: OutgoingStatus[] = [
 const defaultFormData: ReleaseForm = {
     dateAllocated: new Date().toISOString().split('T')[0],
     lguName: '',
-    province: '',
+    province: 'Iloilo',
     municipality: '',
-    fnfiCategory: '',
+    fnfiCategory: 'Food Pack',
     amountRequested: 0,
     amountApproved: 0,
     sourceType: 'Warehouse',
@@ -95,9 +96,10 @@ export function AddReleaseModal({
     return { ...initialData, lguName: cleanBuildingName(initialData.lguName) };
   });
 
-  // Master LGUs from Supabase
+  // Master LGUs from Supabase with authoritative regional fallback
   const availableLgus = useMemo(() => {
-    return lgusList;
+    if (lgusList && lgusList.length > 0) return lgusList;
+    return DEFAULT_PANAY_LGUS;
   }, [lgusList]);
 
   const provinces = useMemo(() => {
@@ -108,7 +110,8 @@ export function AddReleaseModal({
     availableLgus.forEach(l => {
       if (l.province) set.add(l.province);
     });
-    return Array.from(set).sort();
+    const list = Array.from(set).sort();
+    return list.length > 0 ? list : [...REGIONAL_PROVINCES];
   }, [provincesList, availableLgus]);
 
   const municipalitiesByProvince = useMemo(() => {
@@ -126,16 +129,18 @@ export function AddReleaseModal({
 
   const categoryOptions = useMemo(() => {
     if (kitTypesList && kitTypesList.length > 0) {
-      return kitTypesList.filter(k => k.isActive !== false).map(k => k.name);
+      const active = kitTypesList.filter(k => k.isActive !== false).map(k => k.name);
+      if (active.length > 0) return active;
     }
-    return [];
+    return [...DEFAULT_KIT_NAMES];
   }, [kitTypesList]);
 
   const warehouseOptions = useMemo(() => {
     if (warehousesList && warehousesList.length > 0) {
-      return warehousesList.filter(w => w.isActive !== false).map(w => w.name);
+      const active = warehousesList.filter(w => w.isActive !== false).map(w => w.name);
+      if (active.length > 0) return active;
     }
-    return [];
+    return DEFAULT_WAREHOUSES.map(w => w.name);
   }, [warehousesList]);
 
   const [selectedProvince, setSelectedProvince] = useState(provinces[0] || 'Iloilo');

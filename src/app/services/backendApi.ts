@@ -1,4 +1,11 @@
 import { supabase } from '../lib/supabase';
+import {
+  DEFAULT_PANAY_LGUS,
+  DEFAULT_KIT_TYPES,
+  DEFAULT_PROVINCES,
+  DEFAULT_WAREHOUSES,
+  DEFAULT_SUPPLY_SOURCES
+} from '../lib/lguMatching';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -312,25 +319,30 @@ export const backendApi = {
 
   // --- PROVINCES ---
   async getProvinces(): Promise<ProvinceRecord[]> {
-    const { data, error } = await supabase
-      .from('provinces')
-      .select('*')
-      .eq('is_active', true)
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('provinces')
+        .select('*')
+        .order('name', { ascending: true });
 
-    if (error) {
-      console.error('Failed to fetch provinces from Supabase:', error.message);
-      return [];
+      if (error || !data || data.length === 0) {
+        return DEFAULT_PROVINCES;
+      }
+
+      const activeProvinces = (data ?? []).filter((r: any) => r.is_active !== false);
+      if (activeProvinces.length === 0) return DEFAULT_PROVINCES;
+
+      return activeProvinces.map(row => ({
+        id: String(row.id),
+        name: String(row.name),
+        region: String(row.region ?? 'Region VI (Western Visayas)'),
+        isActive: Boolean(row.is_active ?? true),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch {
+      return DEFAULT_PROVINCES;
     }
-
-    return (data ?? []).map(row => ({
-      id: String(row.id),
-      name: String(row.name),
-      region: String(row.region ?? 'Region VI (Western Visayas)'),
-      isActive: Boolean(row.is_active ?? true),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }));
   },
 
   async createProvince(name: string, region = 'Region VI (Western Visayas)'): Promise<{ id: string }> {
@@ -364,16 +376,18 @@ export const backendApi = {
 
   // --- WAREHOUSES ---
   async getWarehouses(): Promise<WarehouseRecord[]> {
-    const { data, error } = await supabase
-      .from('warehouses')
-      .select('*')
-      .eq('is_active', true)
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('warehouses')
+        .select('*')
+        .order('name', { ascending: true });
 
-    if (error) {
-      console.error('Failed to fetch warehouses from Supabase:', error.message);
-      return [];
-    }
+      if (error || !data || data.length === 0) {
+        return DEFAULT_WAREHOUSES;
+      }
+
+      const activeWh = (data ?? []).filter((r: any) => r.is_active !== false);
+      if (activeWh.length === 0) return DEFAULT_WAREHOUSES;
 
     return (data ?? []).map(row => {
       const foodPacks = Number(row.food_packs ?? 0);
@@ -417,6 +431,9 @@ export const backendApi = {
         updatedAt: row.updated_at
       };
     });
+    } catch {
+      return DEFAULT_WAREHOUSES;
+    }
   },
 
   async createWarehouse(payload: WarehouseInput): Promise<{ id: string }> {
@@ -576,28 +593,33 @@ export const backendApi = {
 
   // --- SUPPLY SOURCES ---
   async getSupplySources(): Promise<SupplySourceRecord[]> {
-    const { data, error } = await supabase
-      .from('supply_sources')
-      .select('*')
-      .eq('is_active', true)
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('supply_sources')
+        .select('*')
+        .order('name', { ascending: true });
 
-    if (error) {
-      console.error('Failed to fetch supply sources from Supabase:', error.message);
-      return [];
+      if (error || !data || data.length === 0) {
+        return DEFAULT_SUPPLY_SOURCES;
+      }
+
+      const activeSources = (data ?? []).filter((r: any) => r.is_active !== false);
+      if (activeSources.length === 0) return DEFAULT_SUPPLY_SOURCES;
+
+      return activeSources.map(row => ({
+        id: String(row.id),
+        name: String(row.name),
+        shortCode: String(row.short_code ?? row.name),
+        facilityType: String(row.facility_type ?? 'National Resource Center'),
+        region: String(row.region ?? 'Region VII (Central Visayas)'),
+        location: String(row.location ?? ''),
+        isActive: Boolean(row.is_active ?? true),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch {
+      return DEFAULT_SUPPLY_SOURCES;
     }
-
-    return (data ?? []).map(row => ({
-      id: String(row.id),
-      name: String(row.name),
-      shortCode: String(row.short_code ?? row.name),
-      facilityType: String(row.facility_type ?? 'National Resource Center'),
-      region: String(row.region ?? 'Region VII (Central Visayas)'),
-      location: String(row.location ?? ''),
-      isActive: Boolean(row.is_active ?? true),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }));
   },
 
   async createSupplySource(payload: SupplySourceInput): Promise<{ id: string }> {
@@ -632,27 +654,32 @@ export const backendApi = {
 
   // --- KIT TYPES ---
   async getKitTypes(): Promise<KitTypeRecord[]> {
-    const { data, error } = await supabase
-      .from('kit_types')
-      .select('*')
-      .eq('is_active', true)
-      .order('name', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('kit_types')
+        .select('*')
+        .order('name', { ascending: true });
 
-    if (error) {
-      console.error('Failed to fetch kit types from Supabase:', error.message);
-      return [];
+      if (error || !data || data.length === 0) {
+        return DEFAULT_KIT_TYPES;
+      }
+
+      const activeKits = (data ?? []).filter((r: any) => r.is_active !== false);
+      if (activeKits.length === 0) return DEFAULT_KIT_TYPES;
+
+      return activeKits.map(row => ({
+        id: String(row.id),
+        name: String(row.name),
+        category: row.category === 'Food Item' ? 'Food Item' : 'Non-Food Item',
+        unitType: String(row.unit_type ?? 'packs'),
+        description: String(row.description ?? ''),
+        isActive: Boolean(row.is_active ?? true),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch {
+      return DEFAULT_KIT_TYPES;
     }
-
-    return (data ?? []).map(row => ({
-      id: String(row.id),
-      name: String(row.name),
-      category: row.category === 'Food Item' ? 'Food Item' : 'Non-Food Item',
-      unitType: String(row.unit_type ?? 'packs'),
-      description: String(row.description ?? ''),
-      isActive: Boolean(row.is_active ?? true),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    }));
   },
 
   async createKitType(payload: KitTypeInput): Promise<{ id: string }> {
@@ -686,11 +713,14 @@ export const backendApi = {
 
   // --- LGUS ---
   async getLgus(provinceFilter?: string): Promise<LguRecord[]> {
+    const filteredDefaults = (provinceFilter && provinceFilter !== 'All')
+      ? DEFAULT_PANAY_LGUS.filter(l => l.province.toLowerCase() === provinceFilter.trim().toLowerCase())
+      : DEFAULT_PANAY_LGUS;
+
     try {
       let query = supabase
         .from('lgus')
-        .select('*')
-        .eq('is_active', true);
+        .select('*');
 
       if (provinceFilter && provinceFilter !== 'All') {
         query = query.ilike('province', provinceFilter.trim());
@@ -700,12 +730,19 @@ export const backendApi = {
         .order('province', { ascending: true })
         .order('municipality', { ascending: true });
 
-      if (error) {
-        console.error('Failed to fetch LGUs from Supabase:', error.message);
-        return [];
+      if (error || !data || data.length === 0) {
+        if (error) {
+          console.warn('Could not fetch LGUs from Supabase, using authoritative regional directory:', error.message);
+        }
+        return filteredDefaults;
       }
 
-      return (data ?? []).map((row: Record<string, any>) => {
+      const activeRows = (data ?? []).filter((r: any) => r.is_active !== false);
+      if (activeRows.length === 0) {
+        return filteredDefaults;
+      }
+
+      return activeRows.map((row: Record<string, any>) => {
         const foodPacks = Number(row.food_packs ?? 0);
         const hygieneKits = Number(row.hygiene_kits ?? 0);
         const sleepingKits = Number(row.sleeping_kits ?? 0);
@@ -759,8 +796,8 @@ export const backendApi = {
         };
       });
     } catch (err) {
-      console.error('Error in getLgus:', err);
-      return [];
+      console.warn('Error in getLgus, falling back to authoritative regional directory:', err);
+      return filteredDefaults;
     }
   },
 

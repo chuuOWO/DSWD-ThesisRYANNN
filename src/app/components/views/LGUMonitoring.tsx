@@ -3,6 +3,7 @@ import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, Chev
 import type { LGUPriorityReport, UserRole, OutgoingRelease } from '../../hooks/useInventoryState';
 import { EditLGUModal } from '../modals/EditLGUModal';
 import type { LguRecord, LguInput, ProvinceRecord, KitTypeRecord } from '../../services/backendApi';
+import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
 
 export interface LGUDelivery {
   id: string;
@@ -61,7 +62,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const baseLguList = useMemo<LGUDelivery[]>(() => {
     const releases = inventoryState?.outgoingReleasesList ?? [];
     const reports = inventoryState?.lguPriorityReports ?? [];
-    const masterLgus = inventoryState?.lgusList ?? [];
+    const masterLgus = (inventoryState?.lgusList && inventoryState.lgusList.length > 0)
+      ? inventoryState.lgusList
+      : DEFAULT_PANAY_LGUS;
 
     const lguEntriesMap = new Map<string, LGUDelivery>();
 
@@ -138,6 +141,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     const set = new Set<string>();
     (inventoryState?.kitTypesList ?? []).forEach(k => { if (k.name) set.add(k.name.trim()); });
     (inventoryState?.outgoingReleasesList ?? []).forEach(r => { if (r.fnfiCategory) set.add(r.fnfiCategory.trim()); });
+    if (set.size === 0) {
+      DEFAULT_KIT_NAMES.forEach(c => set.add(c));
+    }
     return Array.from(set).sort();
   }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList]);
 

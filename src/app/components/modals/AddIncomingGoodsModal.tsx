@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { X, Calendar, Package, AlertCircle } from 'lucide-react';
 import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
 import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord } from '../../services/backendApi';
+import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES } from '../../lib/lguMatching';
 
 export interface IncomingGoodsForm {
   dateReceived: string;
@@ -36,34 +37,37 @@ export function AddIncomingGoodsModal({
 }: AddIncomingGoodsModalProps) {
   const sourceOptions = useMemo(() => {
     if (supplySourcesList && supplySourcesList.length > 0) {
-      return supplySourcesList.filter(s => s.isActive !== false).map(s => s.shortCode || s.name);
+      const active = supplySourcesList.filter(s => s.isActive !== false).map(s => s.shortCode || s.name);
+      if (active.length > 0) return active;
     }
-    return [];
+    return DEFAULT_SUPPLY_SOURCES.map(s => s.shortCode || s.name);
   }, [supplySourcesList]);
 
   const categoryOptions = useMemo(() => {
     if (kitTypesList && kitTypesList.length > 0) {
-      return kitTypesList.filter(k => k.isActive !== false).map(k => k.name);
+      const active = kitTypesList.filter(k => k.isActive !== false).map(k => k.name);
+      if (active.length > 0) return active;
     }
-    return [];
+    return [...DEFAULT_KIT_NAMES];
   }, [kitTypesList]);
 
   const warehouseOptions = useMemo(() => {
     if (warehousesList && warehousesList.length > 0) {
-      return warehousesList.filter(w => w.isActive !== false).map(w => w.name);
+      const active = warehousesList.filter(w => w.isActive !== false).map(w => w.name);
+      if (active.length > 0) return active;
     }
-    return [];
+    return DEFAULT_WAREHOUSES.map(w => w.name);
   }, [warehousesList]);
 
   const defaultFormData: IncomingGoodsForm = {
     dateReceived: new Date().toISOString().split('T')[0],
-    fnfiCategory: '',
+    fnfiCategory: categoryOptions[0] || 'Food Pack',
     quantity: 0,
     unitType: 'packs',
     expirationDate: '',
-    source: sourceOptions[0] || '',
+    source: sourceOptions[0] || 'VDRC',
     destinationType: 'Warehouse',
-    destination: warehouseOptions[0] || '',
+    destination: warehouseOptions[0] || 'Oton Main Warehouse',
     incidentCode: ''
   };
 

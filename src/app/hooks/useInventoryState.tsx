@@ -8,7 +8,15 @@ import {
   type KitTypeRecord
 } from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
-import { findMatchingLgu, normalizeLguName } from '../lib/lguMatching';
+import {
+  findMatchingLgu,
+  normalizeLguName,
+  DEFAULT_PANAY_LGUS,
+  DEFAULT_KIT_TYPES,
+  DEFAULT_PROVINCES,
+  DEFAULT_WAREHOUSES,
+  DEFAULT_SUPPLY_SOURCES
+} from '../lib/lguMatching';
 
 export interface InventoryItem {
   category: string;
@@ -484,12 +492,12 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   const [lguPriorityReports, setLguPriorityReports] = useState<LGUPriorityReport[]>([]);
   const [discrepancyReports, setDiscrepancyReports] = useState<DiscrepancyReport[]>([]);
 
-  // Master relational data directly from Supabase
-  const [provincesList, setProvincesList] = useState<ProvinceRecord[]>([]);
-  const [warehousesList, setWarehousesList] = useState<WarehouseRecord[]>([]);
-  const [supplySourcesList, setSupplySourcesList] = useState<SupplySourceRecord[]>([]);
-  const [kitTypesList, setKitTypesList] = useState<KitTypeRecord[]>([]);
-  const [lgusList, setLgusList] = useState<LguRecord[]>([]);
+  // Master relational data directly from Supabase (with safe operational defaults)
+  const [provincesList, setProvincesList] = useState<ProvinceRecord[]>(DEFAULT_PROVINCES);
+  const [warehousesList, setWarehousesList] = useState<WarehouseRecord[]>(DEFAULT_WAREHOUSES);
+  const [supplySourcesList, setSupplySourcesList] = useState<SupplySourceRecord[]>(DEFAULT_SUPPLY_SOURCES);
+  const [kitTypesList, setKitTypesList] = useState<KitTypeRecord[]>(DEFAULT_KIT_TYPES);
+  const [lgusList, setLgusList] = useState<LguRecord[]>(DEFAULT_PANAY_LGUS);
 
   // Inventory is derived from the authoritative warehouses table
   useEffect(() => {
@@ -1131,13 +1139,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         backendApi.getSupplySources(),
         backendApi.getKitTypes()
       ]).then(([lgus, provinces, warehouses, sources, kits]) => {
-        setLgusList(lgus);
-        setProvincesList(provinces);
-        setWarehousesList(warehouses);
-        setSupplySourcesList(sources);
-        setKitTypesList(kits);
+        const resolvedLgus = (lgus && lgus.length > 0) ? lgus : DEFAULT_PANAY_LGUS;
+        setLgusList(resolvedLgus);
+        if (provinces && provinces.length > 0) setProvincesList(provinces);
+        if (warehouses && warehouses.length > 0) setWarehousesList(warehouses);
+        if (sources && sources.length > 0) setSupplySourcesList(sources);
+        if (kits && kits.length > 0) setKitTypesList(kits);
 
-        const reportsFromLgus: LGUPriorityReport[] = lgus.map(l => ({
+        const reportsFromLgus: LGUPriorityReport[] = resolvedLgus.map(l => ({
           id: l.id,
           municipality: l.municipality,
           province: l.province,
