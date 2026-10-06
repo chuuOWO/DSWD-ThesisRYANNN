@@ -41,6 +41,7 @@ interface LocationPickerMapProps {
   lguDestination?: string;
   onLguDestinationChange?: (name: string) => void;
   lgusList?: LguRecord[];
+  isSpecific?: boolean;
 }
 
 // Custom high-visibility delivery pin marker
@@ -128,7 +129,8 @@ export function LocationPickerMap({
   municipality = '',
   lguDestination = '',
   onLguDestinationChange,
-  lgusList
+  lgusList,
+  isSpecific = false
 }: LocationPickerMapProps) {
   // Authoritative LGU list from Supabase
   const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
@@ -510,132 +512,190 @@ export function LocationPickerMap({
         </div>
       </div>
 
-      {/* Structured Address Entry (Panay Island Only) */}
-      <div className="space-y-2.5 bg-gray-50/80 p-3 rounded-xl border border-gray-200">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-bold text-gray-700">Detailed Address Breakdown</span>
-          <span className="text-[10px] font-semibold text-[#2500ba] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-            Panay Island Only (Region VI)
-          </span>
-        </div>
+      {/* Address Entry: Specific mode for Inter-LGU transfers vs Simplified LGU dropdown for Warehouse dispatches */}
+      {isSpecific ? (
+        <div className="space-y-2.5 bg-gray-50/80 p-3 rounded-xl border border-purple-200">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-purple-900">Inter-LGU Drop-off Specifics</span>
+            <span className="text-[10px] font-semibold text-purple-700 bg-purple-100 px-2 py-0.5 rounded border border-purple-200">
+              Mutual Aid Requirement
+            </span>
+          </div>
+          <p className="text-[11px] text-gray-500 leading-tight">
+            For LGU-to-LGU transfers, specify the exact evacuation center, gym, or building and barangay drop-off destination.
+          </p>
 
-        {/* Row 1: Building Name & Street */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <div>
-            <label className="block text-[11px] font-bold text-gray-700 mb-1">
-              Building Name
-            </label>
-            <input
-              type="text"
-              value={building}
-              onChange={(e) => {
-                const val = e.target.value;
-                setBuilding(val);
-                onLguDestinationChange?.(val);
-                updateAddressFields(val, street, barangay, district, selectedMunicipality, selectedProvince);
-              }}
-              placeholder="e.g. Municipal Evacuation Center, Gym, Hall (optional)"
-              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-            />
+          {/* Row 1: Building Name & Street */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                Building / Evacuation Site Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={building}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setBuilding(val);
+                  onLguDestinationChange?.(val);
+                  updateAddressFields(val, street, barangay, district, selectedMunicipality, selectedProvince);
+                }}
+                placeholder="e.g. Municipal Evacuation Center, Gym, Hall"
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                Street / Road Name
+              </label>
+              <input
+                type="text"
+                value={street}
+                onChange={(e) => {
+                  setStreet(e.target.value);
+                  updateAddressFields(building, e.target.value, barangay, district, selectedMunicipality, selectedProvince);
+                }}
+                placeholder="e.g. Rizal Street, National Highway"
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">
-              Street / Road Name
-            </label>
-            <input
-              type="text"
-              value={street}
-              onChange={(e) => {
-                setStreet(e.target.value);
-                updateAddressFields(building, e.target.value, barangay, district, selectedMunicipality, selectedProvince);
-              }}
-              placeholder="e.g. Rizal Street, National Highway"
-              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-            />
-          </div>
-        </div>
 
-        {/* Row 2: Barangay & District */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">
-              Barangay <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={barangay}
-              onChange={(e) => {
-                setBarangay(e.target.value);
-                updateAddressFields(building, street, e.target.value, district, selectedMunicipality, selectedProvince);
-              }}
-              placeholder="e.g. Brgy. Kirayan Sur"
-              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-              required
-            />
+          {/* Row 2: Barangay & District */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                Barangay <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={barangay}
+                onChange={(e) => {
+                  setBarangay(e.target.value);
+                  updateAddressFields(building, street, e.target.value, district, selectedMunicipality, selectedProvince);
+                }}
+                placeholder="e.g. Brgy. Kirayan Sur"
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-gray-600 mb-1">
+                District (if applicable, else NA)
+              </label>
+              <input
+                type="text"
+                value={district}
+                onChange={(e) => {
+                  setDistrict(e.target.value);
+                  updateAddressFields(building, street, barangay, e.target.value, selectedMunicipality, selectedProvince);
+                }}
+                placeholder="NA"
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">
-              District (if applicable, else NA)
-            </label>
-            <input
-              type="text"
-              value={district}
-              onChange={(e) => {
-                setDistrict(e.target.value);
-                updateAddressFields(building, street, barangay, e.target.value, selectedMunicipality, selectedProvince);
-              }}
-              placeholder="NA"
-              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-            />
-          </div>
-        </div>
 
-        {/* Row 3: Province & Municipality Dropdowns */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">
-              Province <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={selectedProvince}
-              onChange={(e) => handleProvinceSelect(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-            >
-              {provinces.map((prov) => (
-                <option key={prov} value={prov}>
-                  {prov}
-                </option>
-              ))}
-            </select>
+          {/* Row 3: Province & Municipality Dropdowns */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                Province <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedProvince}
+                onChange={(e) => handleProvinceSelect(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              >
+                {provinces.map((prov) => (
+                  <option key={prov} value={prov}>
+                    {prov}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                Municipality / City <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedMunicipality}
+                onChange={(e) => handleMunicipalitySelect(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+              >
+                {(municipalitiesByProvince[selectedProvince] || []).map((mun) => (
+                  <option key={mun} value={mun}>
+                    {mun}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">
-              Municipality / City <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={selectedMunicipality}
-              onChange={(e) => handleMunicipalitySelect(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-800 bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
-            >
-              {(municipalitiesByProvince[selectedProvince] || []).map((mun) => (
-                <option key={mun} value={mun}>
-                  {mun}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        {/* Compiled Address Summary */}
-        <div className="pt-1">
-          <label className="block text-[10.5px] font-semibold text-gray-500 mb-0.5">
-            Compiled Destination Address:
-          </label>
-          <div className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 truncate select-all">
-            {destinationAddress || 'Building, Barangay, Municipality, Province'}
+          {/* Compiled Address Summary */}
+          <div className="pt-1">
+            <label className="block text-[10.5px] font-semibold text-gray-500 mb-0.5">
+              Compiled Destination Address:
+            </label>
+            <div className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 truncate select-all">
+              {destinationAddress || 'Building, Barangay, Municipality, Province'}
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="space-y-3 bg-gray-50/80 p-3.5 rounded-xl border border-gray-200">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-gray-800">Destination Municipality Selection</span>
+            <span className="text-[10px] font-semibold text-[#2500ba] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+              Panay Island LGUs
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                Province <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedProvince}
+                onChange={(e) => handleProvinceSelect(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
+              >
+                {provinces.map((prov) => (
+                  <option key={prov} value={prov}>
+                    {prov}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                Municipality / LGU <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedMunicipality}
+                onChange={(e) => handleMunicipalitySelect(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
+              >
+                <option value="">Select municipality...</option>
+                {(municipalitiesByProvince[selectedProvince] || []).map((mun) => (
+                  <option key={mun} value={mun}>
+                    {mun}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {selectedMunicipality && (
+            <div className="pt-1">
+              <div className="flex items-center justify-between text-xs text-gray-700 bg-white p-2.5 rounded-lg border border-gray-200">
+                <span className="font-medium text-gray-500">Destination:</span>
+                <span className="font-bold text-gray-800">{selectedMunicipality}, {selectedProvince}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Boundary Warning Alert */}
       {boundaryWarning && (
@@ -645,61 +705,63 @@ export function LocationPickerMap({
         </div>
       )}
 
-      {/* Mini-Map Search Bar */}
-      <div className="relative">
-        <div className="flex gap-1.5">
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSearch();
-                }
-              }}
-              placeholder={`Search landmarks in ${selectedProvince}...`}
-              className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
-            />
+      {/* Mini-Map Search Bar - Rendered in specific mode */}
+      {isSpecific && (
+        <div className="relative">
+          <div className="flex gap-1.5">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+                placeholder={`Search landmarks in ${selectedProvince}...`}
+                className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSearch()}
+              disabled={isSearching}
+              className="rounded-lg bg-[#2500ba] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+            >
+              {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Search'}
+            </button>
+            <button
+              type="button"
+              onClick={resetToMunicipalityCenter}
+              title="Snap to Municipal Center"
+              className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1 cursor-pointer"
+            >
+              <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
+              <span className="hidden sm:inline">Center</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => handleSearch()}
-            disabled={isSearching}
-            className="rounded-lg bg-[#2500ba] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
-          >
-            {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Search'}
-          </button>
-          <button
-            type="button"
-            onClick={resetToMunicipalityCenter}
-            title="Snap to Municipal Center"
-            className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1 cursor-pointer"
-          >
-            <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
-            <span className="hidden sm:inline">Center</span>
-          </button>
-        </div>
 
-        {/* Search Results Dropdown */}
-        {showResults && searchResults.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-[1000] mt-1 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-            {searchResults.map((result, idx) => (
-              <button
-                key={`${result.label}-${idx}`}
-                type="button"
-                onClick={() => selectSearchResult(result)}
-                className="w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition flex items-center gap-2"
-              >
-                <MapPin className="h-3 w-3 text-[#2500ba] flex-shrink-0" />
-                <span className="truncate">{result.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+          {/* Search Results Dropdown */}
+          {showResults && searchResults.length > 0 && (
+            <div className="absolute left-0 right-0 top-full z-[1000] mt-1 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              {searchResults.map((result, idx) => (
+                <button
+                  key={`${result.label}-${idx}`}
+                  type="button"
+                  onClick={() => selectSearchResult(result)}
+                  className="w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition flex items-center gap-2"
+                >
+                  <MapPin className="h-3 w-3 text-[#2500ba] flex-shrink-0" />
+                  <span className="truncate">{result.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Interactive Mini-Map Container */}
       <div className="relative h-60 w-full overflow-hidden rounded-lg border border-gray-300 shadow-inner">

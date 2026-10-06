@@ -167,6 +167,8 @@ export interface OutgoingPayload {
   deliveryMode: string;
   deliveryStatus?: string;
   incidentCode: string;
+  incidentDate?: string;
+  reportReason?: string;
   allocatedBatches?: { batchTokenId: string; quantity: number }[];
   senderGps?: string;
   receiverGps?: string;

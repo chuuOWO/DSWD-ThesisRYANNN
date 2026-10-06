@@ -465,6 +465,8 @@ alter table public.outgoing_requests add column if not exists warehouse_source t
 alter table public.outgoing_requests add column if not exists delivery_mode text;
 alter table public.outgoing_requests add column if not exists delivery_status text not null default 'Allocating';
 alter table public.outgoing_requests add column if not exists incident_code text;
+alter table public.outgoing_requests add column if not exists incident_date text;
+alter table public.outgoing_requests add column if not exists report_reason text;
 alter table public.outgoing_requests add column if not exists allocated_batches jsonb;
 alter table public.outgoing_requests add column if not exists sender_gps text;
 alter table public.outgoing_requests add column if not exists receiver_gps text;

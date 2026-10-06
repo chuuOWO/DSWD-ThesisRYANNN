@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { CheckCircle, ChevronLeft, ChevronRight, Edit, Loader2, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
+import { parseIncidentInfo } from '../../lib/incidentHelper';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import { blockchain } from '../../services/blockchain';
@@ -219,6 +220,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       (release.municipality || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.fnfiCategory || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.drNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (release.incidentCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (release.handoverContractId || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       batches.map(batch => batch?.batchTokenId || '').join(' ').toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -380,9 +382,29 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     <p className="font-bold text-sm text-gray-900">{release.fnfiCategory || 'Relief Goods'}</p>
                     <p className="text-sm text-gray-700">Requested: {(release.amountRequested ?? 0).toLocaleString()} kits</p>
                     <p className="text-sm text-green-700 font-semibold">Approved: {release.amountApproved ? `${(release.amountApproved).toLocaleString()} kits` : '-'}</p>
-                    {release.incidentCode && release.incidentCode.toLowerCase() !== 'none' && (
-                      <p className="text-xs text-gray-500 mt-0.5">Remarks: {release.incidentCode}</p>
-                    )}
+                    {(() => {
+                      const incidentInfo = parseIncidentInfo(release.incidentCode);
+                      const displayCode = incidentInfo.incidentCode || release.incidentCode;
+                      if (!displayCode || displayCode.toLowerCase() === 'none') return null;
+                      return (
+                        <div className="mt-2 space-y-1 pt-1.5 border-t border-gray-100">
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-900 text-[11px] font-bold">
+                            <span className="text-[10px] uppercase font-bold text-blue-600">Incident:</span>
+                            <span>{displayCode}</span>
+                          </div>
+                          {incidentInfo.reportReason && (
+                            <p className="text-xs text-gray-700 font-medium">
+                              <span className="text-gray-500 font-normal">Reason:</span> {incidentInfo.reportReason}
+                            </p>
+                          )}
+                          {incidentInfo.incidentDate && (
+                            <p className="text-[11px] text-gray-500">
+                              <span>Disaster Date:</span> {incidentInfo.incidentDate}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[release.deliveryStatus] || 'bg-gray-100 text-gray-700'}`}>
@@ -605,6 +627,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             deliveryMode: editingRelease.deliveryMode,
             deliveryStatus: editingRelease.deliveryStatus,
             incidentCode: editingRelease.incidentCode,
+            incidentDate: editingRelease.incidentDate || '',
+            reportReason: editingRelease.reportReason || '',
             receiverGps: editingRelease.receiverGps,
             destinationAddress: editingRelease.destinationAddress
           }}

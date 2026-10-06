@@ -17,6 +17,7 @@ import {
   DEFAULT_WAREHOUSES,
   DEFAULT_SUPPLY_SOURCES
 } from '../lib/lguMatching';
+import { parseIncidentInfo } from '../lib/incidentHelper';
 
 export interface InventoryItem {
   category: string;
@@ -84,6 +85,8 @@ export interface OutgoingRelease {
   deliveryMode: string;
   deliveryStatus: OutgoingStatus;
   incidentCode: string;
+  incidentDate?: string;
+  reportReason?: string;
   allocatedBatches: BatchAllocation[];
   handoverContractId?: string;
   adminSignature?: string;
@@ -385,6 +388,8 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
     deliveryMode: row.delivery_mode ?? '',
     deliveryStatus: isOutgoingStatus(row.delivery_status) ? row.delivery_status : 'Allocating',
     incidentCode: row.incident_code ?? '',
+    incidentDate: parseIncidentInfo(row.incident_code).incidentDate || row.date_allocated || undefined,
+    reportReason: parseIncidentInfo(row.incident_code).reportReason || undefined,
     allocatedBatches,
     handoverContractId: row.handover_contract_id ?? undefined,
     adminSignature: row.tx_hash ?? row.admin_signature ?? undefined,
