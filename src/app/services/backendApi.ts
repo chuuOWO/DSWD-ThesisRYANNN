@@ -591,6 +591,54 @@ export const backendApi = {
     }
   },
 
+  async addLguStock(municipality: string, category: string, quantity: number, province?: string): Promise<{ ok: boolean }> {
+    try {
+      const cleanMuni = municipality.trim();
+      let query = supabase
+        .from('lgus')
+        .select('*')
+        .ilike('municipality', cleanMuni);
+      if (province && province.trim()) {
+        query = query.ilike('province', province.trim());
+      }
+      const { data: lgu } = await query.limit(1).maybeSingle();
+
+      if (!lgu) {
+        console.warn(`LGU "${cleanMuni}" not found for stock addition.`);
+        return { ok: false };
+      }
+
+      const catLower = category.toLowerCase();
+      const updates: Record<string, unknown> = {
+        last_reported_at: new Date().toISOString()
+      };
+
+      if (catLower.includes('food')) {
+        updates.food_packs = (lgu.food_packs || 0) + quantity;
+      } else if (catLower.includes('hygiene')) {
+        updates.hygiene_kits = (lgu.hygiene_kits || 0) + quantity;
+      } else if (catLower.includes('family')) {
+        updates.family_kits = (lgu.family_kits || 0) + quantity;
+      } else if (catLower.includes('sleeping')) {
+        updates.sleeping_kits = (lgu.sleeping_kits || 0) + quantity;
+      }
+
+      const stockMap = { ...(lgu.current_stock || {}) };
+      stockMap[category] = (stockMap[category] || 0) + quantity;
+      updates.current_stock = stockMap;
+
+      const { error } = await supabase.from('lgus').update(updates).eq('id', lgu.id);
+      if (error) {
+        console.warn('Failed to update LGU stock:', error.message);
+        return { ok: false };
+      }
+      return { ok: true };
+    } catch (err) {
+      console.warn('Failed to add LGU stock:', err);
+      return { ok: false };
+    }
+  },
+
   // --- SUPPLY SOURCES ---
   async getSupplySources(): Promise<SupplySourceRecord[]> {
     try {

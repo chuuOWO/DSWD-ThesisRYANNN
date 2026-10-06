@@ -3,7 +3,7 @@ import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Pac
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
-import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
+import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
@@ -11,6 +11,8 @@ interface InventoryState {
   warehousesList?: WarehouseRecord[];
   supplySourcesList?: SupplySourceRecord[];
   kitTypesList?: KitTypeRecord[];
+  lgusList?: LguRecord[];
+  provincesList?: ProvinceRecord[];
   addIncomingGoods: (data: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => void;
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
@@ -81,7 +83,9 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     requestIncomingCorrection,
     warehousesList = [],
     supplySourcesList = [],
-    kitTypesList = []
+    kitTypesList = [],
+    lgusList = [],
+    provincesList = []
   } = inventoryState;
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -96,11 +100,14 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     warehousesList?.forEach(w => {
       if (w.name?.trim()) set.add(w.name.trim());
     });
+    lgusList?.forEach(l => {
+      if (l.municipality?.trim()) set.add(l.municipality.trim());
+    });
     incomingGoodsList.forEach(item => {
       if (item.destination?.trim()) set.add(item.destination.trim());
     });
     return Array.from(set).sort();
-  }, [warehousesList, incomingGoodsList]);
+  }, [warehousesList, lgusList, incomingGoodsList]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
@@ -367,10 +374,19 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     <p className="text-xs text-gray-500">Source: {item.source}</p>
                   </td>
                   <td className="px-4 py-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${item.destinationType === 'Warehouse' ? 'bg-purple-100 text-purple-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                      {item.destination}
-                    </span>
-                    <p className="text-xs text-gray-500 mt-2">{item.incidentCode || 'No remarks'}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                        item.destinationType === 'Warehouse'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-purple-100 text-purple-800'
+                      }`}>
+                        {item.destinationType === 'Warehouse' ? 'Warehouse' : 'LGU'}
+                      </span>
+                      <span className="font-semibold text-sm text-gray-900">{item.destination}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      {item.incidentCode ? `RIS: ${item.incidentCode}` : 'No RIS recorded'}
+                    </p>
                   </td>
                   <td className="px-4 py-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[item.status]}`}>
@@ -379,7 +395,14 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     {item.verifiedBy && <p className="text-xs text-gray-500 mt-2">Verified by {item.verifiedBy}</p>}
                   </td>
                   <td className="px-4 py-4">
-                    {item.batchTokenId ? (
+                    {item.destinationType === 'LGU' ? (
+                      <div className="space-y-0.5">
+                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                          Stocked to LGU (Direct)
+                        </span>
+                        <p className="text-[11px] text-gray-400">No blockchain required</p>
+                      </div>
+                    ) : item.batchTokenId ? (
                       <div className="space-y-1">
                         <p className="font-bold text-sm text-green-700">{item.batchTokenId}</p>
                         <p className="text-xs text-gray-500">Posted: {item.mintedAt}</p>
@@ -519,6 +542,8 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           supplySourcesList={supplySourcesList}
           warehousesList={warehousesList}
           kitTypesList={kitTypesList}
+          lgusList={lgusList}
+          provincesList={provincesList}
         />
       )}
 
@@ -530,6 +555,8 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           supplySourcesList={supplySourcesList}
           warehousesList={warehousesList}
           kitTypesList={kitTypesList}
+          lgusList={lgusList}
+          provincesList={provincesList}
           initialData={{
             dateReceived: editingIncoming.dateReceived,
             fnfiCategory: editingIncoming.fnfiCategory,

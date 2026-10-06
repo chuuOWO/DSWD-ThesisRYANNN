@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, Package, AlertCircle } from 'lucide-react';
+import { X, Calendar, Package, AlertCircle, Building2 } from 'lucide-react';
 import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
-import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord } from '../../services/backendApi';
-import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES } from '../../lib/lguMatching';
+import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
+import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES, DEFAULT_PANAY_LGUS, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 
 export interface IncomingGoodsForm {
   dateReceived: string;
@@ -24,6 +24,8 @@ interface AddIncomingGoodsModalProps {
   supplySourcesList?: SupplySourceRecord[];
   warehousesList?: WarehouseRecord[];
   kitTypesList?: KitTypeRecord[];
+  lgusList?: LguRecord[];
+  provincesList?: ProvinceRecord[];
 }
 
 export function AddIncomingGoodsModal({
@@ -33,7 +35,9 @@ export function AddIncomingGoodsModal({
   mode = 'add',
   supplySourcesList,
   warehousesList,
-  kitTypesList
+  kitTypesList,
+  lgusList = [],
+  provincesList = []
 }: AddIncomingGoodsModalProps) {
   const sourceOptions = useMemo(() => {
     if (supplySourcesList && supplySourcesList.length > 0) {
@@ -59,6 +63,52 @@ export function AddIncomingGoodsModal({
     return DEFAULT_WAREHOUSES.map(w => w.name);
   }, [warehousesList]);
 
+  // Master LGUs from Supabase with authoritative regional fallback
+  const availableLgus = useMemo(() => {
+    if (lgusList && lgusList.length > 0) return lgusList;
+    return DEFAULT_PANAY_LGUS;
+  }, [lgusList]);
+
+  const provinces = useMemo(() => {
+    if (provincesList && provincesList.length > 0) {
+      return provincesList.map(p => p.name).sort();
+    }
+    const set = new Set<string>();
+    availableLgus.forEach(l => {
+      if (l.province) set.add(l.province);
+    });
+    const list = Array.from(set).sort();
+    return list.length > 0 ? list : [...REGIONAL_PROVINCES];
+  }, [provincesList, availableLgus]);
+
+  const municipalitiesByProvince = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    availableLgus.forEach(l => {
+      if (!l.province) return;
+      if (!map[l.province]) map[l.province] = [];
+      if (!map[l.province].includes(l.municipality)) {
+        map[l.province].push(l.municipality);
+      }
+    });
+    Object.keys(map).forEach(p => map[p].sort());
+    return map;
+  }, [availableLgus]);
+
+  const [selectedProvince, setSelectedProvince] = useState<string>(() => {
+    if (initialData && initialData.destinationType === 'LGU') {
+      const matched = availableLgus.find(l => l.municipality.toLowerCase() === initialData.destination.toLowerCase());
+      if (matched) return matched.province;
+    }
+    return provinces[0] || 'Iloilo';
+  });
+
+  const [selectedMunicipality, setSelectedMunicipality] = useState<string>(() => {
+    if (initialData && initialData.destinationType === 'LGU') {
+      return initialData.destination;
+    }
+    return '';
+  });
+
   const defaultFormData: IncomingGoodsForm = {
     dateReceived: new Date().toISOString().split('T')[0],
     fnfiCategory: categoryOptions[0] || 'Food Pack',
@@ -78,8 +128,15 @@ export function AddIncomingGoodsModal({
 
   useEffect(() => {
     if (!initialData) return;
-    setFormData({ ...initialData, unitType: initialData.unitType || 'kits' });
-  }, [initialData]);
+    setFormData({ ...initialData, unitType: initialData.unitType || 'packs' });
+    if (initialData.destinationType === 'LGU') {
+      const matched = availableLgus.find(l => l.municipality.toLowerCase() === initialData.destination.toLowerCase());
+      if (matched) {
+        setSelectedProvince(matched.province);
+      }
+      setSelectedMunicipality(initialData.destination);
+    }
+  }, [initialData, availableLgus]);
 
   const handleChange = (field: keyof IncomingGoodsForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -118,8 +175,14 @@ export function AddIncomingGoodsModal({
       newErrors.source = 'Source/Donor is required';
     }
 
-    if (!formData.destination.trim()) {
-      newErrors.destination = 'Destination is required';
+    if (formData.destinationType === 'Warehouse') {
+      if (!formData.destination.trim()) {
+        newErrors.destination = 'Destination warehouse is required';
+      }
+    } else if (formData.destinationType === 'LGU') {
+      if (!selectedMunicipality.trim()) {
+        newErrors.destination = 'Destination LGU is required';
+      }
     }
 
     setErrors(newErrors);
@@ -130,7 +193,11 @@ export function AddIncomingGoodsModal({
     e.preventDefault();
 
     if (validate()) {
-      onSubmit(formData);
+      const submissionData = {
+        ...formData,
+        destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination
+      };
+      onSubmit(submissionData);
     }
   };
 
@@ -145,13 +212,13 @@ export function AddIncomingGoodsModal({
             </div>
             <div>
               <h2 className="text-xl font-bold text-gray-900">{mode === 'edit' ? 'Edit Incoming Delivery' : 'Add Incoming Goods'}</h2>
-              <p className="text-sm text-gray-600">{mode === 'edit' ? 'Update incoming FNFI delivery details' : 'Add new FNFI items to warehouse inventory'}</p>
+              <p className="text-sm text-gray-600">{mode === 'edit' ? 'Update incoming FNFI delivery details' : 'Add new FNFI items to warehouse or LGU inventory'}</p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5 text-gray-500" />
           </button>
@@ -293,10 +360,10 @@ export function AddIncomingGoodsModal({
             )}
           </div>
 
-          {/* Source/Donor */}
+          {/* Source Selection (First source is picked) */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
-              Source <span className="text-red-500">*</span>
+              Source / Donor <span className="text-red-500">*</span>
             </label>
             <select
               value={formData.source}
@@ -317,53 +384,177 @@ export function AddIncomingGoodsModal({
             )}
           </div>
 
-          {/* Destination Warehouse */}
-          <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              Destination Warehouse <span className="text-red-500">*</span>
-            </label>
-            {warehouseOptions.length <= 4 ? (
+          {/* Destination Selection (Then destination is picked) */}
+          <div className="space-y-4">
+            {/* Destination Type Toggle */}
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-2">
+                Destination Type <span className="text-red-500">*</span>
+              </label>
               <div className="grid grid-cols-2 gap-3">
-                {warehouseOptions.map(wh => (
-                  <button
-                    key={wh}
-                    type="button"
-                    onClick={() => handleChange('destination', wh)}
-                    className={`px-4 py-3 rounded-lg font-semibold transition-all ${
-                      formData.destination === wh
-                        ? 'bg-[#2500ba] text-white shadow-md'
-                        : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
-                    }`}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData(prev => ({
+                      ...prev,
+                      destinationType: 'Warehouse',
+                      destination: warehouseOptions[0] || 'Oton Main Warehouse'
+                    }));
+                  }}
+                  className={`px-4 py-3 rounded-lg font-semibold transition-all cursor-pointer ${
+                    formData.destinationType === 'Warehouse'
+                      ? 'bg-[#2500ba] text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  Warehouse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData(prev => ({
+                      ...prev,
+                      destinationType: 'LGU',
+                      destination: selectedMunicipality || ''
+                    }));
+                  }}
+                  className={`px-4 py-3 rounded-lg font-semibold transition-all cursor-pointer ${
+                    formData.destinationType === 'LGU'
+                      ? 'bg-purple-600 text-white shadow-md'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  LGU
+                </button>
+              </div>
+            </div>
+
+            {/* Destination Warehouse vs LGU */}
+            {formData.destinationType === 'Warehouse' ? (
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">
+                  Destination Warehouse <span className="text-red-500">*</span>
+                </label>
+                {warehouseOptions.length <= 4 ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    {warehouseOptions.map(wh => (
+                      <button
+                        key={wh}
+                        type="button"
+                        onClick={() => handleChange('destination', wh)}
+                        className={`px-4 py-3 rounded-lg font-semibold transition-all cursor-pointer ${
+                          formData.destination === wh
+                            ? 'bg-[#2500ba] text-white shadow-md'
+                            : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                        }`}
+                      >
+                        {wh}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <select
+                    value={formData.destination}
+                    onChange={(e) => handleChange('destination', e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    {wh}
-                  </button>
-                ))}
+                    {warehouseOptions.map(wh => (
+                      <option key={wh} value={wh}>{wh}</option>
+                    ))}
+                  </select>
+                )}
+                {errors.destination && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    {errors.destination}
+                  </p>
+                )}
               </div>
             ) : (
-              <select
-                value={formData.destination}
-                onChange={(e) => handleChange('destination', e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {warehouseOptions.map(wh => (
-                  <option key={wh} value={wh}>{wh}</option>
-                ))}
-              </select>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">
+                      Province <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={selectedProvince}
+                      onChange={(e) => {
+                        const newProv = e.target.value;
+                        setSelectedProvince(newProv);
+                        setSelectedMunicipality('');
+                        setFormData(prev => ({ ...prev, destination: '' }));
+                      }}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {provinces.map(prov => (
+                        <option key={prov} value={prov}>{prov}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">
+                      Municipality / LGU <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={selectedMunicipality}
+                      onChange={(e) => {
+                        const muni = e.target.value;
+                        setSelectedMunicipality(muni);
+                        setFormData(prev => ({ ...prev, destination: muni }));
+                        if (errors.destination) {
+                          setErrors(prev => ({ ...prev, destination: '' }));
+                        }
+                      }}
+                      className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        errors.destination ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">Select municipality...</option>
+                      {(municipalitiesByProvince[selectedProvince] || []).map(mun => (
+                        <option key={mun} value={mun}>{mun}</option>
+                      ))}
+                    </select>
+                    {errors.destination && (
+                      <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />
+                        {errors.destination}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {selectedMunicipality && (
+                  <div className="rounded-lg border border-purple-200 bg-purple-50/80 p-3 flex items-start gap-2.5 text-xs text-purple-900">
+                    <Building2 className="w-4 h-4 text-purple-700 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-purple-900">LGU Direct Crediting</p>
+                      <p className="text-purple-700 mt-0.5">
+                        This delivery will immediately credit the inventory of {selectedMunicipality}, {selectedProvince}. No blockchain token or wallet signature required.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Incident Code */}
+          {/* RIS (Request Slip) */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
-              Incident Code (Optional)
+              RIS (Request Slip) <span className="text-xs font-normal text-gray-500">(Optional)</span>
             </label>
             <input
               type="text"
               value={formData.incidentCode}
               onChange={(e) => handleChange('incidentCode', sanitizeAlphanumeric(e.target.value))}
-              placeholder="e.g., EMERGENCY-01, GOOD-CONDITION"
+              placeholder="e.g., RIS-2026-001, DSWD-RIS-042"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Official Request and Issue Slip reference for this incoming delivery.
+            </p>
           </div>
 
           {/* Actions */}
@@ -371,13 +562,13 @@ export function AddIncomingGoodsModal({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+              className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm cursor-pointer"
             >
               {mode === 'edit' ? 'Save Changes' : 'Add to Inventory'}
             </button>

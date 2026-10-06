@@ -639,6 +639,29 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     return item?.warehouseBreakdown?.[warehouse] || (warehouse.toLowerCase().includes('oton') ? item?.warehouseA : item?.warehouseB) || 0;
   };
 
+  const addLguStock = (municipality: string, category: string, quantity: number, province?: string) => {
+    setLgusList(prev => prev.map(lgu => {
+      const matchMuni = lgu.municipality.toLowerCase() === municipality.toLowerCase();
+      const matchProv = !province || lgu.province.toLowerCase() === province.toLowerCase();
+      if (!matchMuni || !matchProv) return lgu;
+
+      const catLower = category.toLowerCase();
+      const updated = { ...lgu };
+      if (catLower.includes('food')) updated.foodPacks = (updated.foodPacks || 0) + quantity;
+      else if (catLower.includes('hygiene')) updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
+      else if (catLower.includes('family')) updated.familyKits = (updated.familyKits || 0) + quantity;
+      else if (catLower.includes('sleeping')) updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
+
+      const currentMap = { ...(updated.currentStock || {}) };
+      currentMap[category] = (currentMap[category] || 0) + quantity;
+      updated.currentStock = currentMap;
+      return updated;
+    }));
+    backendApi.addLguStock(municipality, category, quantity, province).catch(err => {
+      console.warn('backendApi.addLguStock error:', err);
+    });
+  };
+
   const addIncomingGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
     const nextIndex = incomingGoodsList.reduce((max, entry) => {
       const match = entry.id.match(/INC-\d{4}-(\d+)/i);
@@ -648,18 +671,31 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }, 0) + 1;
     const year = new Date().getFullYear();
     const newId = `INC-${year}-${String(nextIndex).padStart(3, '0')}`;
+    const isLgu = newGoods.destinationType === 'LGU';
+    const initialStatus: IncomingStatus = isLgu ? 'Verified' : 'Draft';
+    const auditMessage = isLgu
+      ? `Direct delivery of ${newGoods.quantity} ${newGoods.unitType} of ${newGoods.fnfiCategory} stocked to ${newGoods.destination} inventory without blockchain.`
+      : 'Incoming manifest saved as editable draft. No blockchain minting yet.';
+
     const goodsWithId: IncomingGoods = {
       ...newGoods,
       id: newId,
-      status: 'Draft',
+      status: initialStatus,
       manifestHash: makeManifestHash(newGoods),
-      auditTrail: [audit('Draft Created', 'Incoming manifest saved as editable draft. No blockchain minting yet.')]
+      verifiedBy: isLgu ? currentActor.name : undefined,
+      auditTrail: [audit(isLgu ? 'Stocked to LGU' : 'Draft Created', auditMessage)]
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
+
+    // If destination is an LGU, add directly to that LGU's inventory
+    if (isLgu) {
+      addLguStock(newGoods.destination, newGoods.fnfiCategory, newGoods.quantity);
+    }
+
     backendApi.createIncoming({
       ...newGoods,
       manifestNumber: newId,
-      status: 'Draft',
+      status: initialStatus,
       manifestHash: goodsWithId.manifestHash
     }).then(() => {
       setIntegrationMode('backend');
@@ -692,6 +728,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const verifyIncomingReceipt = (id: string) => {
+    const target = incomingGoodsList.find(item => item.id === id);
+    if (target && target.destinationType === 'LGU') {
+      addLguStock(target.destination, target.fnfiCategory, target.quantity);
+    }
+
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Pending Verification'
       ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified', `Physical count and manifest details verified by ${currentActor.name}.`), ...item.auditTrail] }
       : item));
@@ -705,6 +746,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     if (actorRole !== 'Admin') return { ok: false, message: 'RBAC: only Admin can post/mint a batch token.' };
     const item = incomingGoodsList.find(item => item.id === id);
     if (!item || item.status !== 'Verified') return { ok: false, message: 'Only verified manifests can be minted.' };
+    if (item.destinationType === 'LGU') {
+      return { ok: false, message: 'Direct LGU deliveries are stocked directly and do not require blockchain tokens.' };
+    }
 
     const duplicate = incomingGoodsList.find(other => other.id !== id && other.status === 'Minted' && other.manifestHash === item.manifestHash);
     if (duplicate) {
@@ -1257,6 +1301,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     refreshSupplySources,
     refreshKitTypes,
     addStock,
+    addLguStock,
     deductStock,
     getAvailableStock,
     addIncomingGoods,
