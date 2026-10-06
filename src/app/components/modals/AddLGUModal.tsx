@@ -81,16 +81,6 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
         lguName: `${value} Municipal Office`
       }));
     }
-
-    // Auto-calculate total deliveries
-    if (field === 'completedDeliveries' || field === 'pendingDeliveries') {
-      const completed = field === 'completedDeliveries' ? Number(value) : formData.completedDeliveries;
-      const pending = field === 'pendingDeliveries' ? Number(value) : formData.pendingDeliveries;
-      setFormData(prev => ({
-        ...prev,
-        deliveryCount: completed + pending
-      }));
-    }
   };
 
   const handleStockChange = (category: typeof FNFI_CATEGORIES[number], value: number) => {
@@ -270,88 +260,12 @@ export function AddLGUModal({ onClose, onSubmit }: AddLGUModalProps) {
             </div>
           </div>
 
-          {/* Delivery Statistics */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="font-bold text-blue-900 text-sm mb-3">Delivery Statistics</h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-blue-700 mb-2">
-                  Total Items Released
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={formData.totalItemsReleased || ''}
-                  onChange={(e) => {
-                    const c = sanitizeNumbersOnly(e.target.value);
-                    handleChange('totalItemsReleased', c ? parseInt(c, 10) : 0);
-                  }}
-                  placeholder="0"
-                  className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-green-700 mb-2">
-                  Completed Deliveries
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={formData.completedDeliveries || ''}
-                  onChange={(e) => {
-                    const c = sanitizeNumbersOnly(e.target.value);
-                    handleChange('completedDeliveries', c ? parseInt(c, 10) : 0);
-                  }}
-                  placeholder="0"
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.completedDeliveries ? 'border-red-500' : 'border-green-300'
-                  }`}
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-orange-700 mb-2">
-                  Pending Deliveries
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={formData.pendingDeliveries || ''}
-                  onChange={(e) => {
-                    const c = sanitizeNumbersOnly(e.target.value);
-                    handleChange('pendingDeliveries', c ? parseInt(c, 10) : 0);
-                  }}
-                  placeholder="0"
-                  className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.pendingDeliveries ? 'border-red-500' : 'border-orange-300'
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-blue-200">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-blue-900">Total Deliveries</span>
-                <span className="text-lg font-bold text-blue-600">{formData.deliveryCount}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Last Delivery Date */}
-          <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              Last Delivery Date
-            </label>
-            <input
-              type="date"
-              value={formData.lastDeliveryDate}
-              onChange={(e) => handleChange('lastDeliveryDate', e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          {/* Delivery Statistics (Automated & Locked) */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-1.5">
+            <h3 className="font-bold text-blue-900 text-sm">Delivery Statistics (Automated via Dispatches)</h3>
+            <p className="text-xs text-blue-800 leading-relaxed">
+              New municipalities start with 0 releases. Delivery statistics and last delivery timestamps are tracked automatically once relief goods are dispatched and verified.
+            </p>
           </div>
 
           {/* Current Stock */}
