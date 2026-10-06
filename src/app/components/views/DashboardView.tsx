@@ -141,6 +141,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
       const foodPacks = report?.foodPacks ?? lgu.foodPacks ?? getLguStockForCategory(lgu, 'Food Pack');
       const affectedFamilies = report?.affectedFamilies ?? lgu.affectedFamilies ?? 0;
       const damageIndex = report?.damageIndex ?? lgu.damageIndex ?? 0;
+      const maxStock = Number((lgu as any).maxStock) > 0 ? Number((lgu as any).maxStock) : (Number(report?.maxStock) > 0 ? Number(report?.maxStock) : 3000);
       const syncLgu = lgu as Partial<SynchronizedLgu>;
 
       const evalRes = evaluatePriorityIndicator({
@@ -148,7 +149,8 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         completedDeliveries: syncLgu.completedDeliveries,
         pendingDeliveries: syncLgu.pendingDeliveries,
         totalDeliveries: syncLgu.deliveryCount,
-        affectedFamilies
+        affectedFamilies,
+        targetQuota: maxStock
       });
 
       return {
@@ -162,6 +164,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         familyKits: report?.familyKits ?? lgu.familyKits ?? getLguStockForCategory(lgu, 'Family Kit'),
         affectedFamilies,
         damageIndex,
+        maxStock,
         urgencyScore: evalRes.urgencyScore,
         priorityColor: evalRes.priorityColor,
         priorityLevel: evalRes.priorityLevel,
@@ -1335,7 +1338,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
                     </div>
 
                     <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-600">
-                      <span>Food Packs: <strong className="text-gray-900 font-mono">{report.foodPacks}</strong></span>
+                      <span>Food Packs: <strong className="text-gray-900 font-mono">{report.foodPacks} / {(report.maxStock ?? 3000).toLocaleString()} Max</strong></span>
                       {report.affectedFamilies > 0 && (
                         <span>Families: <strong className="text-gray-900 font-mono">{report.affectedFamilies.toLocaleString()}</strong></span>
                       )}

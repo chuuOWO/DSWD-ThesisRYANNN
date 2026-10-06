@@ -23,6 +23,7 @@ export interface LGUDelivery {
   remarks?: string;
   latitude?: number;
   longitude?: number;
+  maxStock?: number;
   currentStock?: Record<string, number>;
 }
 
@@ -163,6 +164,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         remarks: updatedLGU.remarks,
         latitude: updatedLGU.latitude,
         longitude: updatedLGU.longitude,
+        maxStock: updatedLGU.maxStock !== undefined ? Number(updatedLGU.maxStock) || 3000 : 3000,
         initialStock: updatedLGU.currentStock
       });
       if (!res.ok) {
@@ -230,12 +232,15 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         const completed = Number(lgu?.completedDeliveries) || 0;
         const deliveries = Number(lgu?.deliveryCount) || (completed + pending);
         
+        const maxStock = Number(lgu?.maxStock) > 0 ? Number(lgu.maxStock) : 3000;
+        
         const evalRes = evaluatePriorityIndicator({
           foodPacks: foodStock,
           completedDeliveries: completed,
           pendingDeliveries: pending,
           totalDeliveries: deliveries,
-          affectedFamilies: Number(lgu?.affectedFamilies) || 0
+          affectedFamilies: Number(lgu?.affectedFamilies) || 0,
+          targetQuota: maxStock
         });
 
         return {
@@ -249,6 +254,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           familyKits: Number(lgu?.currentStock?.['Family Kit']) || Number(lgu?.familyKits) || 0,
           affectedFamilies: Number(lgu?.affectedFamilies) || 0,
           damageIndex: evalRes.urgencyScore,
+          maxStock,
           urgencyScore: evalRes.urgencyScore,
           priorityColor: evalRes.priorityColor,
           priorityLevel: evalRes.priorityLevel,
@@ -543,7 +549,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
                     </div>
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                      {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} Items Total
+                      {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} / {(lgu.maxStock ?? 3000).toLocaleString()} Max
                     </span>
                   </div>
 
@@ -647,7 +653,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                           <span className="font-bold text-sm text-purple-700">
                             {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()}
                           </span>
-                          <span className="text-[10px] text-gray-400 font-medium">items</span>
+                          <span className="text-[10px] text-gray-400 font-medium">/ {(lgu.maxStock ?? 3000).toLocaleString()} max</span>
                         </div>
                         <div className="flex flex-wrap gap-1 max-w-xs">
                           {Object.entries(lgu.currentStock || {})
@@ -812,6 +818,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         <EditLGUModal
           lgu={selectedLGU}
           availableCategories={categoryOptions}
+          adminActionsEnabled={adminActionsEnabled}
           onClose={() => {
             setShowEditModal(false);
             setSelectedLGU(null);

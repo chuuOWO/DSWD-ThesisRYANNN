@@ -134,6 +134,7 @@ export interface LguRecord {
   affectedFamilies: number;
   damageIndex: number;
   recommendation: string;
+  maxStock?: number;
   lastReportedAt?: string;
   currentStock?: Record<string, number>;
   createdAt?: string;
@@ -149,6 +150,7 @@ export interface LguInput {
   latitude?: number;
   longitude?: number;
   remarks?: string;
+  maxStock?: number;
   initialStock?: Record<string, number>;
 }
 
@@ -877,6 +879,7 @@ export const backendApi = {
           priorityColor,
           affectedFamilies: Number(row.affected_families ?? 0),
           damageIndex: Number(row.damage_index ?? 0),
+          maxStock: Number(row.max_stock ?? 3000),
           recommendation: String(row.recommendation ?? (priorityColor === 'Red' ? 'Immediate replenishment requested.' : 'Sufficient stock on hand.')),
           lastReportedAt: row.last_reported_at || row.updated_at,
           currentStock: stockMerged,
@@ -915,6 +918,7 @@ export const backendApi = {
         latitude: payload.latitude ?? 10.7870,
         longitude: payload.longitude ?? 122.3892,
         remarks: payload.remarks?.trim() || '',
+        max_stock: payload.maxStock !== undefined ? Number(payload.maxStock) || 3000 : 3000,
         food_packs: payload.initialStock?.['Food Pack'] || 0,
         hygiene_kits: payload.initialStock?.['Hygiene Kit'] || 0,
         sleeping_kits: payload.initialStock?.['Sleeping Kit'] || 0,
@@ -965,6 +969,7 @@ export const backendApi = {
     if (payload.latitude !== undefined) updates.latitude = payload.latitude;
     if (payload.longitude !== undefined) updates.longitude = payload.longitude;
     if (payload.remarks !== undefined) updates.remarks = payload.remarks.trim();
+    if (payload.maxStock !== undefined) updates.max_stock = Number(payload.maxStock) || 3000;
 
     if (payload.initialStock) {
       updates.current_stock = payload.initialStock;

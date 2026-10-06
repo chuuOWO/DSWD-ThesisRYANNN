@@ -76,7 +76,7 @@ export const PRIORITY_TABLE_LOGIC: PriorityIndicatorConfig[] = [
   }
 ];
 
-export const TARGET_BASELINE_STOCK = 400; // Municipal emergency buffer quota standard
+export const TARGET_BASELINE_STOCK = 3000; // Municipal maximum stock capacity standard
 
 export interface PriorityEvaluation {
   stockRate: number; // 0 to 100%

@@ -282,6 +282,7 @@ const createDefaultLgu = (
   urgencyScore: 20,
   priorityColor: 'Green',
   recommendation: 'Stable baseline stock',
+  maxStock: 3000,
   lastReportedAt: new Date().toISOString()
 });
 

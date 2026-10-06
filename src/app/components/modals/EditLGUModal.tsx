@@ -11,6 +11,7 @@ interface EditLGUModalProps {
   onSubmit: (data: LGUDelivery) => void | Promise<void>;
   availableCategories?: string[];
   onOpenEmergencyCorrection?: (lguId: string) => void;
+  adminActionsEnabled?: boolean;
 }
 
 const PROVINCES = REGIONAL_PROVINCES;
@@ -20,12 +21,14 @@ export function EditLGUModal({
   onClose,
   onSubmit,
   availableCategories = [],
-  onOpenEmergencyCorrection
+  onOpenEmergencyCorrection,
+  adminActionsEnabled = false
 }: EditLGUModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState<LGUDelivery>({
     ...lgu,
+    maxStock: lgu.maxStock !== undefined ? Number(lgu.maxStock) || 3000 : 3000,
     latitude: lgu.latitude,
     longitude: lgu.longitude,
     currentStock: lgu.currentStock || {}
@@ -297,6 +300,53 @@ export function EditLGUModal({
                   <span>Emergency Stock Correction</span>
                 </button>
               </div>
+            )}
+          </div>
+
+          {/* Maximum Stock Capacity (Admin Mode Restricted) */}
+          <div className={`p-4 rounded-xl border ${
+            adminActionsEnabled
+              ? 'bg-blue-50/60 border-blue-200'
+              : 'bg-gray-50 border-gray-200'
+          } space-y-2`}>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-bold text-gray-800">
+                Maximum Stock Capacity (Units)
+              </label>
+              {adminActionsEnabled ? (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                  Admin Editable
+                </span>
+              ) : (
+                <div className="flex items-center gap-1 text-[11px] text-gray-500 font-semibold">
+                  <Lock className="w-3.5 h-3.5 text-gray-400" />
+                  <span>Admin Mode Required</span>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Target baseline capacity used by the prioritization engine to evaluate completion and stock sufficiency rates (default: 3,000 units).
+            </p>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={formData.maxStock !== undefined ? formData.maxStock : 3000}
+              disabled={!adminActionsEnabled}
+              onChange={(e) => {
+                const val = e.target.value === '' ? 3000 : Math.max(1, parseInt(e.target.value, 10) || 3000);
+                handleChange('maxStock', val);
+              }}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold text-sm ${
+                adminActionsEnabled
+                  ? 'bg-white border-blue-300 text-gray-900'
+                  : 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed'
+              }`}
+            />
+            {!adminActionsEnabled && (
+              <p className="text-[11px] text-gray-500 italic">
+                Enable Administrative Mode in the dashboard to modify stock capacity thresholds.
+              </p>
             )}
           </div>
 

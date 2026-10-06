@@ -119,6 +119,7 @@ export interface LGUPriorityReport {
   urgencyScore: number;
   priorityColor: PriorityColor;
   priorityLevel?: PriorityLevel;
+  maxStock?: number;
   stockRate?: number;
   completionRate?: number;
   effectiveRate?: number;
@@ -719,6 +720,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         return {
           ...lgu,
           ...updates,
+          maxStock: updates.maxStock !== undefined ? Number(updates.maxStock) || 3000 : (lgu.maxStock ?? 3000),
           currentStock: updates.initialStock ? { ...lgu.currentStock, ...updates.initialStock } : lgu.currentStock
         };
       }));
@@ -742,6 +744,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         contactPerson: input.contactPerson || '',
         contactNumber: input.contactNumber || '',
         remarks: input.remarks || '',
+        maxStock: input.maxStock !== undefined ? Number(input.maxStock) || 3000 : 3000,
         currentStock: input.initialStock || {},
         foodPacks: input.initialStock?.['Food Pack'] || 0,
         hygieneKits: input.initialStock?.['Hygiene Kit'] || 0,
@@ -1369,9 +1372,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         if (kits && kits.length > 0) setKitTypesList(kits);
 
         const reportsFromLgus: LGUPriorityReport[] = resolvedLgus.map(l => {
+          const maxStock = Number(l.maxStock) > 0 ? Number(l.maxStock) : 3000;
           const evalRes = evaluatePriorityIndicator({
             foodPacks: l.foodPacks,
-            affectedFamilies: l.affectedFamilies
+            affectedFamilies: l.affectedFamilies,
+            targetQuota: maxStock
           });
           return {
             id: l.id,
@@ -1383,6 +1388,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
             familyKits: l.familyKits,
             affectedFamilies: l.affectedFamilies,
             damageIndex: l.damageIndex,
+            maxStock,
             urgencyScore: evalRes.urgencyScore,
             priorityColor: evalRes.priorityColor,
             priorityLevel: evalRes.priorityLevel,
@@ -1413,9 +1419,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       const list = await backendApi.getLgus();
       setLgusList(list);
       const reportsFromLgus: LGUPriorityReport[] = list.map(l => {
+        const maxStock = Number(l.maxStock) > 0 ? Number(l.maxStock) : 3000;
         const evalRes = evaluatePriorityIndicator({
           foodPacks: l.foodPacks,
-          affectedFamilies: l.affectedFamilies
+          affectedFamilies: l.affectedFamilies,
+          targetQuota: maxStock
         });
         return {
           id: l.id,
@@ -1427,6 +1435,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           familyKits: l.familyKits,
           affectedFamilies: l.affectedFamilies,
           damageIndex: l.damageIndex,
+          maxStock,
           urgencyScore: evalRes.urgencyScore,
           priorityColor: evalRes.priorityColor,
           priorityLevel: evalRes.priorityLevel,
