@@ -164,13 +164,13 @@ export function computeSynchronizedLgus(params: {
     const stock: Record<string, number> = {
       ...(lgu.currentStock && typeof lgu.currentStock === 'object' ? lgu.currentStock : {})
     };
-    if (lgu.foodPacks && !stock['Food Pack']) stock['Food Pack'] = Number(lgu.foodPacks);
-    if (lgu.hygieneKits && !stock['Hygiene Kit']) stock['Hygiene Kit'] = Number(lgu.hygieneKits);
-    if (lgu.familyKits && !stock['Family Kit']) stock['Family Kit'] = Number(lgu.familyKits);
-    if (lgu.sleepingKits && !stock['Sleeping Kit']) stock['Sleeping Kit'] = Number(lgu.sleepingKits);
-    if (lgu.kitchenKits && !stock['Kitchen Kit']) stock['Kitchen Kit'] = Number(lgu.kitchenKits);
-    if (lgu.laminatedSacks && !stock['Laminated Sack']) stock['Laminated Sack'] = Number(lgu.laminatedSacks);
-    if (lgu.rtef && !stock['RTEF']) stock['RTEF'] = Number(lgu.rtef);
+    stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(lgu.foodPacks) || 0);
+    stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(lgu.hygieneKits) || 0);
+    stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(lgu.familyKits) || 0);
+    stock['Sleeping Kit'] = Math.max(Number(stock['Sleeping Kit']) || 0, Number(lgu.sleepingKits) || 0);
+    stock['Kitchen Kit'] = Math.max(Number(stock['Kitchen Kit']) || 0, Number(lgu.kitchenKits) || 0);
+    stock['Laminated Sack'] = Math.max(Number(stock['Laminated Sack']) || 0, Number(lgu.laminatedSacks) || 0);
+    stock['RTEF'] = Math.max(Number(stock['RTEF']) || 0, Number(lgu.rtef) || 0);
 
     // 6. Aggregate verified inbound arrivals from completed deliveries and direct manifests
     const arrivalsMap: Record<string, number> = {};

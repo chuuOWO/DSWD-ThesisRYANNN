@@ -9,7 +9,7 @@ import {
   type KitTypeRecord
 } from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
-import { computeSynchronizedLgus, type SynchronizedLgu } from '../lib/lguSync';
+import { computeSynchronizedLgus, type SynchronizedLgu, normalizeCategoryName } from '../lib/lguSync';
 import {
   findMatchingLgu,
   normalizeLguName,
@@ -691,23 +691,73 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const addLguStock = (municipality: string, category: string, quantity: number, province?: string) => {
+    const targetNorm = normalizeLguName(municipality);
+    const catLower = category.toLowerCase();
+    const canonical = normalizeCategoryName(category);
+
     setLgusList(prev => prev.map(lgu => {
-      const matchMuni = lgu.municipality.toLowerCase() === municipality.toLowerCase();
+      const lguNorm = normalizeLguName(lgu.municipality);
+      const matchMuni = lgu.municipality.toLowerCase() === municipality.toLowerCase()
+        || (targetNorm.length > 0 && lguNorm.length > 0 && targetNorm === lguNorm)
+        || lgu.municipality.toLowerCase().includes(targetNorm)
+        || targetNorm.includes(lgu.municipality.toLowerCase());
       const matchProv = !province || lgu.province.toLowerCase() === province.toLowerCase();
       if (!matchMuni || !matchProv) return lgu;
 
-      const catLower = category.toLowerCase();
       const updated = { ...lgu };
-      if (catLower.includes('food')) updated.foodPacks = (updated.foodPacks || 0) + quantity;
-      else if (catLower.includes('hygiene')) updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
-      else if (catLower.includes('family')) updated.familyKits = (updated.familyKits || 0) + quantity;
-      else if (catLower.includes('sleeping')) updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
+      if (catLower.includes('food') || canonical === 'Food Pack') updated.foodPacks = (updated.foodPacks || 0) + quantity;
+      else if (catLower.includes('hygiene') || canonical === 'Hygiene Kit') updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
+      else if (catLower.includes('family') || canonical === 'Family Kit') updated.familyKits = (updated.familyKits || 0) + quantity;
+      else if (catLower.includes('sleeping') || canonical === 'Sleeping Kit') updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
+      else if (catLower.includes('kitchen') || canonical === 'Kitchen Kit') updated.kitchenKits = (updated.kitchenKits || 0) + quantity;
+      else if (catLower.includes('sack') || canonical === 'Laminated Sack') updated.laminatedSacks = (updated.laminatedSacks || 0) + quantity;
+      else if (catLower.includes('rtef') || canonical === 'RTEF') updated.rtef = (updated.rtef || 0) + quantity;
 
       const currentMap = { ...(updated.currentStock || {}) };
       currentMap[category] = (currentMap[category] || 0) + quantity;
+      if (canonical) {
+        currentMap[canonical] = (currentMap[canonical] || 0) + quantity;
+      }
       updated.currentStock = currentMap;
       return updated;
     }));
+
+    setLguPriorityReports(prev => prev.map(rep => {
+      const repNorm = normalizeLguName(rep.municipality);
+      const matchMuni = rep.municipality.toLowerCase() === municipality.toLowerCase()
+        || (targetNorm.length > 0 && repNorm.length > 0 && targetNorm === repNorm)
+        || rep.municipality.toLowerCase().includes(targetNorm)
+        || targetNorm.includes(rep.municipality.toLowerCase());
+      const matchProv = !province || rep.province.toLowerCase() === province.toLowerCase();
+      if (!matchMuni || !matchProv) return rep;
+
+      const isFood = catLower.includes('food') || canonical === 'Food Pack';
+      const updatedFood = isFood ? (rep.foodPacks || 0) + quantity : rep.foodPacks;
+      const updatedHygiene = (catLower.includes('hygiene') || canonical === 'Hygiene Kit') ? (rep.hygieneKits || 0) + quantity : rep.hygieneKits;
+      const updatedFamily = (catLower.includes('family') || canonical === 'Family Kit') ? (rep.familyKits || 0) + quantity : rep.familyKits;
+      const maxStock = Number(rep.maxStock) > 0 ? Number(rep.maxStock) : 3000;
+
+      const evalRes = evaluatePriorityIndicator({
+        foodPacks: updatedFood,
+        affectedFamilies: rep.affectedFamilies,
+        targetQuota: maxStock
+      });
+
+      return {
+        ...rep,
+        foodPacks: updatedFood,
+        hygieneKits: updatedHygiene,
+        familyKits: updatedFamily,
+        urgencyScore: evalRes.urgencyScore,
+        priorityColor: evalRes.priorityColor,
+        priorityLevel: evalRes.priorityLevel,
+        stockRate: evalRes.stockRate,
+        completionRate: evalRes.completionRate,
+        effectiveRate: evalRes.effectiveRate,
+        systemResponse: evalRes.systemResponse
+      };
+    }));
+
     backendApi.addLguStock(municipality, category, quantity, province).catch(err => {
       console.warn('backendApi.addLguStock error:', err);
     });
@@ -724,6 +774,34 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           currentStock: updates.initialStock ? { ...lgu.currentStock, ...updates.initialStock } : lgu.currentStock
         };
       }));
+
+      setLguPriorityReports(prev => prev.map(rep => {
+        if (rep.id !== id && rep.municipality.toLowerCase() !== (updates.municipality || '').toLowerCase()) return rep;
+        const targetLgu = lgusList.find(l => l.id === id);
+        const updatedFood = updates.initialStock?.['Food Pack'] !== undefined ? updates.initialStock['Food Pack'] : rep.foodPacks;
+        const maxStock = updates.maxStock !== undefined ? Number(updates.maxStock) || 3000 : (Number(rep.maxStock) || Number(targetLgu?.maxStock) || 3000);
+        const affectedFamilies = updates.affectedFamilies !== undefined ? Number(updates.affectedFamilies) : rep.affectedFamilies;
+        const evalRes = evaluatePriorityIndicator({
+          foodPacks: updatedFood,
+          affectedFamilies,
+          targetQuota: maxStock
+        });
+        return {
+          ...rep,
+          foodPacks: updatedFood,
+          hygieneKits: updates.initialStock?.['Hygiene Kit'] !== undefined ? updates.initialStock['Hygiene Kit'] : rep.hygieneKits,
+          familyKits: updates.initialStock?.['Family Kit'] !== undefined ? updates.initialStock['Family Kit'] : rep.familyKits,
+          maxStock,
+          urgencyScore: evalRes.urgencyScore,
+          priorityColor: evalRes.priorityColor,
+          priorityLevel: evalRes.priorityLevel,
+          stockRate: evalRes.stockRate,
+          completionRate: evalRes.completionRate,
+          effectiveRate: evalRes.effectiveRate,
+          systemResponse: evalRes.systemResponse
+        };
+      }));
+
       await backendApi.updateLgu(id, updates);
       return { ok: true, message: 'LGU profile updated successfully.' };
     } catch (err: any) {
@@ -1300,6 +1378,32 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
             ...(lgu.currentStock || {}),
             ...newStock
           }
+        };
+      }));
+
+      // Update in-memory lguPriorityReports state immediately
+      setLguPriorityReports(prev => prev.map(rep => {
+        if (rep.id !== lguId && rep.municipality.toLowerCase() !== targetLgu.municipality.toLowerCase()) return rep;
+        const updatedFood = newStock['Food Pack'] !== undefined ? newStock['Food Pack'] : rep.foodPacks;
+        const maxStock = Number(rep.maxStock) > 0 ? Number(rep.maxStock) : (Number(targetLgu.maxStock) > 0 ? Number(targetLgu.maxStock) : 3000);
+        const evalRes = evaluatePriorityIndicator({
+          foodPacks: updatedFood,
+          affectedFamilies: rep.affectedFamilies,
+          targetQuota: maxStock
+        });
+        return {
+          ...rep,
+          foodPacks: updatedFood,
+          hygieneKits: newStock['Hygiene Kit'] !== undefined ? newStock['Hygiene Kit'] : rep.hygieneKits,
+          familyKits: newStock['Family Kit'] !== undefined ? newStock['Family Kit'] : rep.familyKits,
+          maxStock,
+          urgencyScore: evalRes.urgencyScore,
+          priorityColor: evalRes.priorityColor,
+          priorityLevel: evalRes.priorityLevel,
+          stockRate: evalRes.stockRate,
+          completionRate: evalRes.completionRate,
+          effectiveRate: evalRes.effectiveRate,
+          systemResponse: evalRes.systemResponse
         };
       }));
 

@@ -4,8 +4,11 @@ import {
   DEFAULT_KIT_TYPES,
   DEFAULT_PROVINCES,
   DEFAULT_WAREHOUSES,
-  DEFAULT_SUPPLY_SOURCES
+  DEFAULT_SUPPLY_SOURCES,
+  normalizeLguName
 } from '../lib/lguMatching';
+import { evaluatePriorityIndicator } from '../lib/priorityLogic';
+import { normalizeCategoryName } from '../lib/lguSync';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -605,7 +608,20 @@ export const backendApi = {
       if (province && province.trim()) {
         query = query.ilike('province', province.trim());
       }
-      const { data: lgu } = await query.limit(1).maybeSingle();
+      let { data: lgu } = await query.limit(1).maybeSingle();
+
+      if (!lgu) {
+        const norm = normalizeLguName(cleanMuni);
+        if (norm) {
+          const { data: fallbackLgu } = await supabase
+            .from('lgus')
+            .select('*')
+            .ilike('municipality', norm)
+            .limit(1)
+            .maybeSingle();
+          lgu = fallbackLgu;
+        }
+      }
 
       if (!lgu) {
         console.warn(`LGU "${cleanMuni}" not found for stock addition.`);
@@ -613,23 +629,44 @@ export const backendApi = {
       }
 
       const catLower = category.toLowerCase();
+      const canonical = normalizeCategoryName(category);
       const updates: Record<string, unknown> = {
         last_reported_at: new Date().toISOString()
       };
 
-      if (catLower.includes('food')) {
+      if (catLower.includes('food') || canonical === 'Food Pack') {
         updates.food_packs = (lgu.food_packs || 0) + quantity;
-      } else if (catLower.includes('hygiene')) {
+      } else if (catLower.includes('hygiene') || canonical === 'Hygiene Kit') {
         updates.hygiene_kits = (lgu.hygiene_kits || 0) + quantity;
-      } else if (catLower.includes('family')) {
+      } else if (catLower.includes('family') || canonical === 'Family Kit') {
         updates.family_kits = (lgu.family_kits || 0) + quantity;
-      } else if (catLower.includes('sleeping')) {
+      } else if (catLower.includes('sleeping') || canonical === 'Sleeping Kit') {
         updates.sleeping_kits = (lgu.sleeping_kits || 0) + quantity;
+      } else if (catLower.includes('kitchen') || canonical === 'Kitchen Kit') {
+        updates.kitchen_kits = (lgu.kitchen_kits || 0) + quantity;
+      } else if (catLower.includes('sack') || canonical === 'Laminated Sack') {
+        updates.laminated_sacks = (lgu.laminated_sacks || 0) + quantity;
+      } else if (catLower.includes('rtef') || canonical === 'RTEF') {
+        updates.rtef = (lgu.rtef || 0) + quantity;
       }
 
       const stockMap = { ...(lgu.current_stock || {}) };
       stockMap[category] = (stockMap[category] || 0) + quantity;
+      if (canonical) {
+        stockMap[canonical] = (stockMap[canonical] || 0) + quantity;
+      }
       updates.current_stock = stockMap;
+
+      const updatedFoodPacks = updates.food_packs !== undefined ? Number(updates.food_packs) : Number(lgu.food_packs || 0);
+      const maxStock = Number(lgu.max_stock ?? 3000);
+      const evalRes = evaluatePriorityIndicator({
+        foodPacks: updatedFoodPacks,
+        affectedFamilies: Number(lgu.affected_families ?? 0),
+        targetQuota: maxStock
+      });
+      updates.urgency_score = evalRes.urgencyScore;
+      updates.priority_color = evalRes.priorityColor;
+      updates.recommendation = evalRes.systemResponse;
 
       const { error } = await supabase.from('lgus').update(updates).eq('id', lgu.id);
       if (error) {
@@ -661,6 +698,22 @@ export const backendApi = {
     if (stockUpdates['Family Kit'] !== undefined) updates.family_kits = stockUpdates['Family Kit'];
     if (stockUpdates['Laminated Sack'] !== undefined) updates.laminated_sacks = stockUpdates['Laminated Sack'];
     if (stockUpdates['RTEF'] !== undefined) updates.rtef = stockUpdates['RTEF'];
+
+    try {
+      const { data: currentLgu } = await supabase.from('lgus').select('max_stock, affected_families, food_packs').eq('id', lguId).maybeSingle();
+      if (currentLgu) {
+        const targetQuota = Number(currentLgu.max_stock ?? 3000);
+        const evalFood = stockUpdates['Food Pack'] !== undefined ? Number(stockUpdates['Food Pack']) : Number(currentLgu.food_packs ?? 0);
+        const evalRes = evaluatePriorityIndicator({
+          foodPacks: evalFood,
+          affectedFamilies: Number(currentLgu.affected_families ?? 0),
+          targetQuota
+        });
+        updates.urgency_score = evalRes.urgencyScore;
+        updates.priority_color = evalRes.priorityColor;
+        updates.recommendation = evalRes.systemResponse;
+      }
+    } catch {}
 
     const { error } = await supabase
       .from('lgus')
@@ -834,27 +887,55 @@ export const backendApi = {
       }
 
       return activeRows.map((row: Record<string, any>) => {
-        const foodPacks = Number(row.food_packs ?? 0);
-        const hygieneKits = Number(row.hygiene_kits ?? 0);
-        const sleepingKits = Number(row.sleeping_kits ?? 0);
-        const kitchenKits = Number(row.kitchen_kits ?? 0);
-        const familyKits = Number(row.family_kits ?? 0);
-        const laminatedSacks = Number(row.laminated_sacks ?? 0);
-        const rtef = Number(row.rtef ?? 0);
-
-        const urgencyScore = Number(row.urgency_score ?? (foodPacks < 100 ? 85 : foodPacks < 300 ? 50 : 20));
-        const priorityColor: 'Red' | 'Yellow' | 'Green' = (row.priority_color as 'Red' | 'Yellow' | 'Green') || (foodPacks < 100 ? 'Red' : foodPacks < 300 ? 'Yellow' : 'Green');
-
         const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
+        const foodPacks = Math.max(
+          Number(row.food_packs ?? 0),
+          Number(rawStock['Food Pack'] ?? rawStock['food_packs'] ?? 0)
+        );
+        const hygieneKits = Math.max(
+          Number(row.hygiene_kits ?? 0),
+          Number(rawStock['Hygiene Kit'] ?? rawStock['hygiene_kits'] ?? 0)
+        );
+        const sleepingKits = Math.max(
+          Number(row.sleeping_kits ?? 0),
+          Number(rawStock['Sleeping Kit'] ?? rawStock['sleeping_kits'] ?? 0)
+        );
+        const kitchenKits = Math.max(
+          Number(row.kitchen_kits ?? 0),
+          Number(rawStock['Kitchen Kit'] ?? rawStock['kitchen_kits'] ?? 0)
+        );
+        const familyKits = Math.max(
+          Number(row.family_kits ?? 0),
+          Number(rawStock['Family Kit'] ?? rawStock['family_kits'] ?? 0)
+        );
+        const laminatedSacks = Math.max(
+          Number(row.laminated_sacks ?? 0),
+          Number(rawStock['Laminated Sack'] ?? rawStock['laminated_sacks'] ?? 0)
+        );
+        const rtef = Math.max(
+          Number(row.rtef ?? 0),
+          Number(rawStock['RTEF'] ?? rawStock['rtef'] ?? 0)
+        );
+
+        const maxStock = Number(row.max_stock ?? 3000);
+        const evalRes = evaluatePriorityIndicator({
+          foodPacks,
+          affectedFamilies: Number(row.affected_families ?? 0),
+          targetQuota: maxStock
+        });
+
+        const urgencyScore = Number(row.urgency_score ?? evalRes.urgencyScore);
+        const priorityColor: 'Red' | 'Yellow' | 'Green' | 'Orange' = (row.priority_color as any) || evalRes.priorityColor;
+
         const stockMerged: Record<string, number> = {
+          ...rawStock,
           'Food Pack': foodPacks,
           'Hygiene Kit': hygieneKits,
           'Sleeping Kit': sleepingKits,
           'Kitchen Kit': kitchenKits,
           'Family Kit': familyKits,
           'Laminated Sack': laminatedSacks,
-          'RTEF': rtef,
-          ...rawStock
+          'RTEF': rtef
         };
 
         return {

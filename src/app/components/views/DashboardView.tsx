@@ -138,9 +138,16 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
     const fromMaster = effectiveLgus.map((lgu) => {
       const key = lgu.municipality.trim().toLowerCase();
       const report = reportMap.get(key);
-      const foodPacks = report?.foodPacks ?? lgu.foodPacks ?? getLguStockForCategory(lgu, 'Food Pack');
-      const affectedFamilies = report?.affectedFamilies ?? lgu.affectedFamilies ?? 0;
-      const damageIndex = report?.damageIndex ?? lgu.damageIndex ?? 0;
+      const onHandFoodPacks = getLguStockForCategory(lgu, 'Food Pack');
+      const foodPacks = onHandFoodPacks > 0
+        ? onHandFoodPacks
+        : (lgu.foodPacks !== undefined && lgu.foodPacks !== null && lgu.foodPacks > 0)
+          ? Number(lgu.foodPacks)
+          : (report?.foodPacks !== undefined && report?.foodPacks !== null && report.foodPacks > 0)
+            ? Number(report.foodPacks)
+            : onHandFoodPacks;
+      const affectedFamilies = lgu.affectedFamilies ?? report?.affectedFamilies ?? 0;
+      const damageIndex = lgu.damageIndex ?? report?.damageIndex ?? 0;
       const maxStock = Number((lgu as any).maxStock) > 0 ? Number((lgu as any).maxStock) : (Number(report?.maxStock) > 0 ? Number(report?.maxStock) : 3000);
       const syncLgu = lgu as Partial<SynchronizedLgu>;
 
@@ -160,8 +167,8 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
         lguName: lgu.lguName,
         reportedAt: report?.reportedAt ?? lgu.lastReportedAt ?? lgu.updatedAt ?? lgu.createdAt ?? '',
         foodPacks,
-        hygieneKits: report?.hygieneKits ?? lgu.hygieneKits ?? getLguStockForCategory(lgu, 'Hygiene Kit'),
-        familyKits: report?.familyKits ?? lgu.familyKits ?? getLguStockForCategory(lgu, 'Family Kit'),
+        hygieneKits: getLguStockForCategory(lgu, 'Hygiene Kit') || Number(report?.hygieneKits) || Number(lgu.hygieneKits) || 0,
+        familyKits: getLguStockForCategory(lgu, 'Family Kit') || Number(report?.familyKits) || Number(lgu.familyKits) || 0,
         affectedFamilies,
         damageIndex,
         maxStock,

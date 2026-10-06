@@ -4,8 +4,8 @@ import type { LGUPriorityReport, UserRole, OutgoingRelease, IncomingGoods } from
 import { EditLGUModal } from '../modals/EditLGUModal';
 import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
 import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
-import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
-import { computeSynchronizedLgus } from '../../lib/lguSync';
+import { DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
+import { computeSynchronizedLgus, getLguStockForCategory } from '../../lib/lguSync';
 import { evaluatePriorityIndicator } from '../../lib/priorityLogic';
 
 export interface LGUDelivery {
@@ -227,7 +227,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const dynamicPriorities = useMemo(() => {
     return baseLguList
       .map((lgu) => {
-        const foodStock = Number(lgu?.currentStock?.['Food Pack']) || Number(lgu?.foodPacks) || 0;
+        const foodStock = getLguStockForCategory(lgu, 'Food Pack');
         const pending = Number(lgu?.pendingDeliveries) || 0;
         const completed = Number(lgu?.completedDeliveries) || 0;
         const deliveries = Number(lgu?.deliveryCount) || (completed + pending);
@@ -250,8 +250,8 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           lguName: lgu?.lguName || `${lgu?.municipality || 'LGU'} Municipal Office`,
           reportedAt: lgu?.lastDeliveryDate || 'Recent',
           foodPacks: foodStock,
-          hygieneKits: Number(lgu?.currentStock?.['Hygiene Kit']) || Number(lgu?.hygieneKits) || 0,
-          familyKits: Number(lgu?.currentStock?.['Family Kit']) || Number(lgu?.familyKits) || 0,
+          hygieneKits: getLguStockForCategory(lgu, 'Hygiene Kit'),
+          familyKits: getLguStockForCategory(lgu, 'Family Kit'),
           affectedFamilies: Number(lgu?.affectedFamilies) || 0,
           damageIndex: evalRes.urgencyScore,
           maxStock,
