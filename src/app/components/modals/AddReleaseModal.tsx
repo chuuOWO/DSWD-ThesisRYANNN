@@ -699,6 +699,9 @@ export function AddReleaseModal({
                       <div className="flex items-center gap-2">
                         <Building2 className="w-4 h-4 text-purple-700" />
                         <div>
+                          <p className="text-[10px] font-mono font-bold text-purple-700">
+                            {sourceLguRecord.id}
+                          </p>
                           <p className="text-xs font-bold text-purple-950">
                             {sourceLguRecord.municipality}, {sourceLguRecord.province}
                           </p>
@@ -734,11 +737,11 @@ export function AddReleaseModal({
 
                     {/* Additional Kit Categories if available */}
                     {Object.entries(sourceLguRecord.currentStock || {})
-                      .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Food Packs', 'food pack', 'food packs', 'Hygiene Kit', 'Hygiene Kits', 'hygiene kit', 'hygiene kits', 'Family Kit', 'Family Kits', 'family kit', 'family kits', 'Sleeping Kit', 'Sleeping Kits', 'sleeping kit', 'sleeping kits'].includes(k))
+                      .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit'].includes(k))
                       .length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         {Object.entries(sourceLguRecord.currentStock || {})
-                          .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Food Packs', 'food pack', 'food packs', 'Hygiene Kit', 'Hygiene Kits', 'hygiene kit', 'hygiene kits', 'Family Kit', 'Family Kits', 'family kit', 'family kits', 'Sleeping Kit', 'Sleeping Kits', 'sleeping kit', 'sleeping kits'].includes(k))
+                          .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit'].includes(k))
                           .map(([cat, qty]) => (
                             <span key={cat} className="text-[10px] px-2 py-0.5 rounded bg-white text-purple-900 border border-purple-200 font-medium">
                               {cat}: {Number(qty).toLocaleString()}

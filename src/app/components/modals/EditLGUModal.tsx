@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { X, MapPin, AlertCircle, Edit, Lock, Package, ShieldAlert } from 'lucide-react';
 import { sanitizeTextOnly, sanitizePhone } from '../../lib/inputValidation';
 import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
+import { normalizeCategoryName, getLguStockForCategory } from '../../lib/lguSync';
 import type { LGUDelivery } from '../views/LGUMonitoring';
 
 interface EditLGUModalProps {
@@ -32,12 +33,30 @@ export function EditLGUModal({
   const [errors, setErrors] = useState<Partial<Record<keyof LGUDelivery, string>>>({});
 
   const categoriesToRender = useMemo(() => {
-    const set = new Set<string>(availableCategories);
-    if (formData.currentStock) {
-      Object.keys(formData.currentStock).forEach(k => set.add(k));
+    const canonicalSet = new Set<string>();
+    const standardCategories = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    standardCategories.forEach(cat => canonicalSet.add(cat));
+
+    if (Array.isArray(availableCategories)) {
+      availableCategories.forEach(cat => {
+        if (!cat) return;
+        canonicalSet.add(normalizeCategoryName(cat));
+      });
     }
-    return Array.from(set).sort();
+
+    if (formData.currentStock) {
+      Object.keys(formData.currentStock).forEach(k => {
+        if (!k) return;
+        canonicalSet.add(normalizeCategoryName(k));
+      });
+    }
+
+    return Array.from(canonicalSet).sort();
   }, [availableCategories, formData.currentStock]);
+
+  const totalOnHandItems = useMemo(() => {
+    return categoriesToRender.reduce((sum, cat) => sum + getLguStockForCategory(formData, cat), 0);
+  }, [categoriesToRender, formData]);
 
   const handleChange = (field: keyof LGUDelivery, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -140,6 +159,20 @@ export function EditLGUModal({
             </div>
           </div>
 
+          {/* LGU ID */}
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">
+              LGU ID
+            </label>
+            <input
+              type="text"
+              value={formData.id}
+              readOnly
+              disabled
+              className="w-full px-4 py-2.5 border border-gray-200 bg-gray-100 text-gray-700 rounded-lg cursor-not-allowed font-mono text-xs font-semibold select-all"
+            />
+          </div>
+
           {/* LGU Name */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -229,7 +262,7 @@ export function EditLGUModal({
                 <span>On-Hand Inventory (Locked & Automated)</span>
               </div>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                {Object.values(formData.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} Total Items
+                {totalOnHandItems.toLocaleString()} Total Items
               </span>
             </div>
 
@@ -239,7 +272,7 @@ export function EditLGUModal({
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
               {categoriesToRender.map(category => {
-                const qty = formData.currentStock?.[category] || 0;
+                const qty = getLguStockForCategory(formData, category);
                 return (
                   <div key={category} className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-xs">
                     <p className="text-[11px] font-semibold text-gray-500 truncate" title={category}>{category}</p>

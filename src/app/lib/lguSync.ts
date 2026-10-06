@@ -48,16 +48,6 @@ export function normalizeCategoryName(cat?: string | null): string {
   return cat.trim();
 }
 
-/**
- * Populates canonical category name and common aliases in a stock map.
- */
-function setStockWithAliases(stock: Record<string, number>, canonical: string, aliases: string[], value: number) {
-  const safeVal = Math.max(0, Number(value) || 0);
-  stock[canonical] = safeVal;
-  aliases.forEach(a => {
-    stock[a] = safeVal;
-  });
-}
 
 /**
  * Retrieves stock count for any category name with case-insensitive and alias fallbacks.
@@ -211,22 +201,35 @@ export function computeSynchronizedLgus(params: {
       if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
     }
 
-    // 9. Synchronize canonical keys and common variations
-    setStockWithAliases(stock, 'Food Pack', ['Food Packs', 'food pack', 'food packs'], Number(stock['Food Pack']) || 0);
-    setStockWithAliases(stock, 'Hygiene Kit', ['Hygiene Kits', 'hygiene kit', 'hygiene kits'], Number(stock['Hygiene Kit']) || 0);
-    setStockWithAliases(stock, 'Family Kit', ['Family Kits', 'family kit', 'family kits'], Number(stock['Family Kit']) || 0);
-    setStockWithAliases(stock, 'Sleeping Kit', ['Sleeping Kits', 'sleeping kit', 'sleeping kits'], Number(stock['Sleeping Kit']) || 0);
-    setStockWithAliases(stock, 'Kitchen Kit', ['Kitchen Kits', 'kitchen kit', 'kitchen kits'], Number(stock['Kitchen Kit']) || 0);
-    setStockWithAliases(stock, 'Laminated Sack', ['Laminated Sacks', 'laminated sack', 'laminated sacks'], Number(stock['Laminated Sack'] ?? stock['Laminated Sacks']) || 0);
-    setStockWithAliases(stock, 'RTEF', ['Ready-to-Eat Food', 'Ready-to-eat Food', 'rtef'], Number(stock['RTEF'] ?? stock['Ready-to-Eat Food']) || 0);
+    // 9. Consolidate into strictly unique canonical categories (no duplicate alias keys)
+    const canonicalStock: Record<string, number> = {
+      'Food Pack': Math.max(0, Number(stock['Food Pack']) || 0),
+      'Hygiene Kit': Math.max(0, Number(stock['Hygiene Kit']) || 0),
+      'Family Kit': Math.max(0, Number(stock['Family Kit']) || 0),
+      'Sleeping Kit': Math.max(0, Number(stock['Sleeping Kit']) || 0),
+      'Kitchen Kit': Math.max(0, Number(stock['Kitchen Kit']) || 0),
+      'Laminated Sack': Math.max(0, Number(stock['Laminated Sack'] ?? stock['Laminated Sacks']) || 0),
+      'RTEF': Math.max(0, Number(stock['RTEF'] ?? stock['Ready-to-Eat Food']) || 0)
+    };
 
-    const foodPacks = stock['Food Pack'];
-    const hygieneKits = stock['Hygiene Kit'];
-    const familyKits = stock['Family Kit'];
-    const sleepingKits = stock['Sleeping Kit'];
-    const kitchenKits = stock['Kitchen Kit'];
-    const laminatedSacks = stock['Laminated Sack'];
-    const rtef = stock['RTEF'];
+    // Any other custom non-standard categories that are not standard kit aliases
+    Object.entries(stock).forEach(([k, v]) => {
+      const canonical = normalizeCategoryName(k);
+      if (['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'].includes(canonical)) {
+        return;
+      }
+      if (Number(v) > 0) {
+        canonicalStock[canonical] = Math.max(0, Number(v) || 0);
+      }
+    });
+
+    const foodPacks = canonicalStock['Food Pack'];
+    const hygieneKits = canonicalStock['Hygiene Kit'];
+    const familyKits = canonicalStock['Family Kit'];
+    const sleepingKits = canonicalStock['Sleeping Kit'];
+    const kitchenKits = canonicalStock['Kitchen Kit'];
+    const laminatedSacks = canonicalStock['Laminated Sack'];
+    const rtef = canonicalStock['RTEF'];
 
     const urgencyScore = Math.min(100, Math.max(15, Math.round(85 - (foodPacks / 10) + (pending * 5))));
     const priorityColor: 'Red' | 'Yellow' | 'Green' = urgencyScore >= 70 ? 'Red' : urgencyScore >= 40 ? 'Yellow' : 'Green';
@@ -246,7 +249,7 @@ export function computeSynchronizedLgus(params: {
       remarks: lgu.remarks || '',
       latitude: Number(lgu.latitude ?? 10.7870),
       longitude: Number(lgu.longitude ?? 122.3892),
-      currentStock: stock,
+      currentStock: canonicalStock,
       foodPacks,
       hygieneKits,
       familyKits,

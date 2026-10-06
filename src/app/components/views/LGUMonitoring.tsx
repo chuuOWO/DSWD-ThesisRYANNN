@@ -501,6 +501,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     <MapPin className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
+                    <span className="inline-block text-[10px] font-mono font-semibold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5 truncate max-w-full" title={lgu.id}>
+                      {lgu.id}
+                    </span>
                     <h3 className="font-bold text-base text-gray-900 truncate" title={lgu.municipality}>{lgu.municipality}</h3>
                     <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
                   </div>
@@ -621,7 +624,10 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 {paginatedLGUs.map((lgu) => (
                   <tr key={lgu.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4">
-                      <span className="font-bold text-sm text-gray-900">{lgu.municipality}</span>
+                      <div>
+                        <span className="block text-[10px] font-mono text-purple-700 font-semibold leading-tight">{lgu.id}</span>
+                        <span className="font-bold text-sm text-gray-900">{lgu.municipality}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       <span className="text-xs font-semibold px-2 py-0.5 rounded bg-gray-100 text-gray-700">
