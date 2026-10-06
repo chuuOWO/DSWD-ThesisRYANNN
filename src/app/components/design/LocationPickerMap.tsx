@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import { MapContainer, Marker, TileLayer, Polygon, useMap, useMapEvents } from 'react-leaflet';
-import { Crosshair, MapPin, Search, Loader2, Info, AlertTriangle } from 'lucide-react';
+import { Crosshair, MapPin, Search, Loader2, Info, AlertTriangle, Check } from 'lucide-react';
 import { backendApi, type LguRecord } from '../../services/backendApi';
 import {
   findMatchingLgu,
@@ -87,10 +87,99 @@ interface SearchResultItem {
   prov?: string;
 }
 
+/**
+ * Match raw province name against authoritative provinces
+ */
+function matchProvinceName(raw?: string, availableProvinces: string[] = []): string | undefined {
+  if (!raw) return undefined;
+  const lower = raw.trim().toLowerCase();
+  return availableProvinces.find(p => lower.includes(p.toLowerCase()) || p.toLowerCase().includes(lower));
+}
+
+/**
+ * Match raw municipality name against available municipalities
+ */
+function matchMunicipalityName(raw?: string, availableMunicipalities: string[] = []): string | undefined {
+  if (!raw) return undefined;
+  const lower = raw.trim().toLowerCase();
+  return availableMunicipalities.find(m => lower.includes(m.toLowerCase()) || m.toLowerCase().includes(lower));
+}
+
+/**
+ * Reverse geocodes coordinates using OpenStreetMap Nominatim and Komoot Photon
+ */
+async function fetchReverseGeocode(lat: number, lng: number): Promise<{
+  building?: string;
+  street?: string;
+  barangay?: string;
+  district?: string;
+  municipality?: string;
+  province?: string;
+} | null> {
+  // 1. Nominatim Reverse Geocoding
+  try {
+    const nomUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const res = await fetch(nomUrl, { headers: { 'Accept-Language': 'en' } });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.address) {
+        const addr = data.address;
+        const buildingName = addr.amenity || addr.building || addr.office || addr.school || addr.leisure || addr.hospital || addr.community_centre || addr.sports_centre || addr.public_building || data.name || '';
+        const streetName = addr.road || addr.pedestrian || addr.highway || '';
+        const rawBrgy = addr.quarter || addr.suburb || addr.village || addr.neighbourhood || '';
+        const formattedBrgy = rawBrgy ? (rawBrgy.toLowerCase().startsWith('brgy') || rawBrgy.toLowerCase().startsWith('barangay') ? rawBrgy : `Brgy. ${rawBrgy}`) : '';
+        const districtName = addr.city_district || 'NA';
+        const muniName = addr.city || addr.town || addr.municipality || '';
+        const provName = addr.state || addr.province || '';
+
+        return {
+          building: buildingName || (data.display_name ? data.display_name.split(',')[0].trim() : undefined),
+          street: streetName,
+          barangay: formattedBrgy,
+          district: districtName,
+          municipality: muniName,
+          province: provName
+        };
+      }
+    }
+  } catch {
+    // Nominatim failed, fallback to Photon
+  }
+
+  // 2. Photon Reverse Geocoding
+  try {
+    const photonUrl = `https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`;
+    const pRes = await fetch(photonUrl);
+    if (pRes.ok) {
+      const pData = await pRes.json();
+      const feat = pData.features?.[0];
+      if (feat && feat.properties) {
+        const props = feat.properties;
+        const rawBrgy = props.district || props.suburb || '';
+        const formattedBrgy = rawBrgy ? (rawBrgy.toLowerCase().startsWith('brgy') || rawBrgy.toLowerCase().startsWith('barangay') ? rawBrgy : `Brgy. ${rawBrgy}`) : '';
+        return {
+          building: props.name || '',
+          street: props.street || '',
+          barangay: formattedBrgy,
+          district: props.district || 'NA',
+          municipality: props.city || props.town || props.municipality || '',
+          province: props.state || ''
+        };
+      }
+    }
+  } catch {
+    // Photon failed
+  }
+
+  return null;
+}
+
 function MapPanController({ center, zoom = 14 }: { center: [number, number]; zoom?: number }) {
   const map = useMap();
   useEffect(() => {
-    map.flyTo(center, zoom, { duration: 1.0 });
+    const currentZoom = map.getZoom();
+    const effectiveZoom = zoom ? Math.max(zoom, currentZoom > 14 ? currentZoom : zoom) : currentZoom;
+    map.flyTo(center, effectiveZoom, { duration: 0.8 });
   }, [center, map, zoom]);
   return null;
 }
@@ -172,6 +261,8 @@ export function LocationPickerMap({
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [targetZoom, setTargetZoom] = useState<number>(14);
   const [showResults, setShowResults] = useState(false);
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
+  const [pinnedConfirmation, setPinnedConfirmation] = useState<string | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
 
   // Fallback initial position if 0 or invalid
@@ -184,6 +275,22 @@ export function LocationPickerMap({
       setBuilding(lguDestination);
     }
   }, [lguDestination, building]);
+
+  // If destinationAddress passed with parts, auto-populate street/barangay if blank
+  useEffect(() => {
+    if (destinationAddress && (!street && !barangay)) {
+      const parts = destinationAddress.split(',').map(p => p.trim());
+      if (parts.length >= 4) {
+        if (!building && parts[0]) setBuilding(parts[0]);
+        if (parts.length >= 5) {
+          if (!street && parts[1]) setStreet(parts[1]);
+          if (!barangay && parts[2]) setBarangay(parts[2]);
+        } else {
+          if (!barangay && parts[1]) setBarangay(parts[1]);
+        }
+      }
+    }
+  }, [destinationAddress, building, street, barangay]);
 
   // Helper to compile structured address string
   const compileAddress = (
@@ -238,6 +345,26 @@ export function LocationPickerMap({
     }
   }, [municipality, selectedMunicipality]);
 
+  const findNearestLgu = (targetLat: number, targetLng: number, prov?: string): LguRecord | null => {
+    let list = dbLgus;
+    if (prov) {
+      const filtered = dbLgus.filter(l => l.province?.toLowerCase() === prov.toLowerCase());
+      if (filtered.length > 0) list = filtered;
+    }
+    let best: LguRecord | null = null;
+    let minDist = Infinity;
+    for (const item of list) {
+      if (typeof item.latitude === 'number' && typeof item.longitude === 'number') {
+        const d = Math.hypot(item.latitude - targetLat, item.longitude - targetLng);
+        if (d < minDist) {
+          minDist = d;
+          best = item;
+        }
+      }
+    }
+    return best;
+  };
+
   const handleProvinceSelect = (newProv: string) => {
     setSelectedProvince(newProv);
     setBoundaryWarning(null);
@@ -247,7 +374,12 @@ export function LocationPickerMap({
     const lgu = findMatchingLgu(dbLgus, newMun, newProv);
     const newLat = lgu?.latitude || validLat;
     const newLng = lgu?.longitude || validLng;
-    updateAddressFields(building, street, barangay, district, newMun, newProv, newLat, newLng);
+    const nextBuilding = isSpecific ? `${newMun} Evacuation Center` : building;
+    if (isSpecific) {
+      setBuilding(nextBuilding);
+      onLguDestinationChange?.(nextBuilding);
+    }
+    updateAddressFields(nextBuilding, street, barangay, district, newMun, newProv, newLat, newLng);
   };
 
   const handleMunicipalitySelect = (newMun: string) => {
@@ -256,30 +388,139 @@ export function LocationPickerMap({
     const lgu = findMatchingLgu(dbLgus, newMun, selectedProvince);
     const newLat = lgu?.latitude || validLat;
     const newLng = lgu?.longitude || validLng;
-    updateAddressFields(building, street, barangay, district, newMun, selectedProvince, newLat, newLng);
+    const nextBuilding = isSpecific ? `${newMun} Evacuation Center` : building;
+    if (isSpecific) {
+      setBuilding(nextBuilding);
+      onLguDestinationChange?.(nextBuilding);
+    }
+    updateAddressFields(nextBuilding, street, barangay, district, newMun, selectedProvince, newLat, newLng);
+  };
+
+  const applyCoordinatesAndReverseGeocode = async (lat: number, lng: number) => {
+    // 1. Check boundary within Panay
+    let activeProv = selectedProvince;
+    const panayProvinces: PanayProvince[] = ['Iloilo', 'Capiz', 'Aklan', 'Antique', 'Guimaras'];
+    if (!isPointInProvince(lat, lng, selectedProvince)) {
+      const matchedOther = panayProvinces.find(p => isPointInProvince(lat, lng, p));
+      if (matchedOther) {
+        activeProv = matchedOther;
+        setSelectedProvince(matchedOther);
+        setBoundaryWarning(null);
+      } else {
+        setBoundaryWarning(`Coordinates are outside Panay Island. Pin repositioned within ${selectedProvince}.`);
+        markerRef.current?.setLatLng([validLat, validLng]);
+        return;
+      }
+    } else {
+      setBoundaryWarning(null);
+    }
+
+    // 2. Immediate local LGU matching (0ms latency for smooth UX)
+    const nearest = findNearestLgu(lat, lng, activeProv);
+    let resolvedMuni = nearest?.municipality || selectedMunicipality || 'Oton';
+    let resolvedProv = nearest?.province || activeProv;
+    let resolvedBuilding = isSpecific
+      ? (nearest ? `${nearest.municipality} Evacuation Center` : building || 'Municipal Evacuation Center')
+      : (nearest?.lguName || `${resolvedMuni} Municipal Hall`);
+    let resolvedStreet = street || '';
+    let resolvedBarangay = barangay || '';
+    let resolvedDistrict = district || 'NA';
+
+    setSelectedProvince(resolvedProv);
+    setSelectedMunicipality(resolvedMuni);
+    if (isSpecific) {
+      setBuilding(resolvedBuilding);
+      onLguDestinationChange?.(resolvedBuilding);
+    }
+    updateAddressFields(
+      resolvedBuilding,
+      resolvedStreet,
+      resolvedBarangay,
+      resolvedDistrict,
+      resolvedMuni,
+      resolvedProv,
+      lat,
+      lng
+    );
+
+    // 3. Asynchronous reverse geocode via OpenStreetMap / Photon for precision
+    setIsResolvingAddress(true);
+    try {
+      const rev = await fetchReverseGeocode(lat, lng);
+      if (rev) {
+        const matchedP = matchProvinceName(rev.province, provinces);
+        if (matchedP) {
+          resolvedProv = matchedP;
+          setSelectedProvince(matchedP);
+        }
+
+        const muniList = municipalitiesByProvince[resolvedProv] || [];
+        const matchedM = matchMunicipalityName(rev.municipality, muniList);
+        if (matchedM) {
+          resolvedMuni = matchedM;
+          setSelectedMunicipality(matchedM);
+        } else if (rev.municipality && !rev.municipality.toLowerCase().includes('province')) {
+          resolvedMuni = rev.municipality;
+          setSelectedMunicipality(rev.municipality);
+        }
+
+        if (rev.building && rev.building.trim()) {
+          resolvedBuilding = rev.building.trim();
+        } else if (isSpecific && !resolvedBuilding) {
+          resolvedBuilding = `${resolvedMuni} Evacuation Center`;
+        }
+
+        if (rev.street && rev.street.trim()) {
+          resolvedStreet = rev.street.trim();
+        }
+
+        if (rev.barangay && rev.barangay.trim()) {
+          resolvedBarangay = rev.barangay.trim();
+        }
+
+        if (rev.district && rev.district.trim()) {
+          resolvedDistrict = rev.district.trim();
+        }
+
+        setBuilding(resolvedBuilding);
+        setStreet(resolvedStreet);
+        setBarangay(resolvedBarangay);
+        setDistrict(resolvedDistrict);
+        setSelectedProvince(resolvedProv);
+        setSelectedMunicipality(resolvedMuni);
+        onLguDestinationChange?.(resolvedBuilding);
+
+        updateAddressFields(
+          resolvedBuilding,
+          resolvedStreet,
+          resolvedBarangay,
+          resolvedDistrict,
+          resolvedMuni,
+          resolvedProv,
+          lat,
+          lng
+        );
+
+        setPinnedConfirmation(`${resolvedBuilding}, ${resolvedMuni}`);
+        setTimeout(() => setPinnedConfirmation(null), 4000);
+      }
+    } catch {
+      // Local fallback already in place
+    } finally {
+      setIsResolvingAddress(false);
+    }
   };
 
   const handleMarkerDragEnd = () => {
     const marker = markerRef.current;
     if (marker) {
       const latLng = marker.getLatLng();
-      if (!isPointInProvince(latLng.lat, latLng.lng, selectedProvince)) {
-        setBoundaryWarning(`Pin must remain within ${selectedProvince}. Repositioning inside boundary.`);
-        marker.setLatLng([validLat, validLng]);
-        return;
-      }
-      setBoundaryWarning(null);
-      updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, latLng.lat, latLng.lng);
+      applyCoordinatesAndReverseGeocode(latLng.lat, latLng.lng);
     }
   };
 
   const handleMapClick = (lat: number, lng: number) => {
-    if (!isPointInProvince(lat, lng, selectedProvince)) {
-      setBoundaryWarning(`Coordinates are outside ${selectedProvince}. Please click inside ${selectedProvince}.`);
-      return;
-    }
-    setBoundaryWarning(null);
-    updateAddressFields(building, street, barangay, district, selectedMunicipality, selectedProvince, lat, lng);
+    applyCoordinatesAndReverseGeocode(lat, lng);
   };
 
   // Universal building-level search using Photon + Nominatim with Panay directory fallback
@@ -423,7 +664,7 @@ export function LocationPickerMap({
   const selectSearchResult = (item: SearchResultItem) => {
     let matchedProv = selectedProvince;
     if (item.prov) {
-      const foundProv = provinces.find((p) => item.prov?.toLowerCase().includes(p.toLowerCase()));
+      const foundProv = matchProvinceName(item.prov, provinces);
       if (foundProv) matchedProv = foundProv;
     }
     setSelectedProvince(matchedProv);
@@ -431,21 +672,47 @@ export function LocationPickerMap({
     let matchedMuni = selectedMunicipality;
     if (item.muni) {
       const muniList = municipalitiesByProvince[matchedProv] || [];
-      const foundMuni = muniList.find(
-        (m) => item.muni?.toLowerCase().includes(m.toLowerCase()) || m.toLowerCase().includes(item.muni!.toLowerCase())
-      );
+      const foundMuni = matchMunicipalityName(item.muni, muniList);
       if (foundMuni) {
         matchedMuni = foundMuni;
       } else {
         matchedMuni = item.muni;
       }
+    } else {
+      const nearest = findNearestLgu(item.lat, item.lng, matchedProv);
+      if (nearest) {
+        matchedMuni = nearest.municipality;
+        matchedProv = nearest.province;
+      }
     }
     setSelectedMunicipality(matchedMuni);
 
-    const nextBuilding = item.building || item.label.split(',')[0].trim();
-    const nextStreet = item.street || street;
-    const nextBarangay = item.barangay || barangay;
-    const nextDistrict = item.district || district;
+    let nextBuilding = item.building || item.label.split(',')[0].trim();
+    let nextStreet = item.street || '';
+    let nextBarangay = item.barangay || '';
+    let nextDistrict = item.district || 'NA';
+
+    // If street or barangay missing, enrich with reverse geocode
+    if (!nextStreet || !nextBarangay) {
+      fetchReverseGeocode(item.lat, item.lng).then(rev => {
+        if (rev) {
+          if (!nextStreet && rev.street) setStreet(rev.street);
+          if (!nextBarangay && rev.barangay) setBarangay(rev.barangay);
+          if (rev.district && rev.district !== 'NA') setDistrict(rev.district);
+          if (!item.building && rev.building) setBuilding(rev.building);
+          updateAddressFields(
+            (!item.building && rev.building) ? rev.building : nextBuilding,
+            (!nextStreet && rev.street) ? rev.street : nextStreet,
+            (!nextBarangay && rev.barangay) ? rev.barangay : nextBarangay,
+            (rev.district && rev.district !== 'NA') ? rev.district : nextDistrict,
+            matchedMuni,
+            matchedProv,
+            item.lat,
+            item.lng
+          );
+        }
+      }).catch(() => {});
+    }
 
     setBuilding(nextBuilding);
     onLguDestinationChange?.(nextBuilding);
@@ -468,6 +735,8 @@ export function LocationPickerMap({
     );
     setSearchQuery(item.label);
     setShowResults(false);
+    setPinnedConfirmation(`Pinned: ${nextBuilding}, ${matchedMuni}`);
+    setTimeout(() => setPinnedConfirmation(null), 4000);
   };
 
   const resetToMunicipalityCenter = () => {
@@ -503,6 +772,18 @@ export function LocationPickerMap({
           Destination Municipality
         </label>
         <div className="flex items-center gap-2">
+          {isResolvingAddress && (
+            <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded flex items-center gap-1 animate-pulse">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              Resolving address...
+            </span>
+          )}
+          {pinnedConfirmation && !isResolvingAddress && (
+            <span className="text-[10px] font-semibold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded flex items-center gap-1">
+              <Check className="w-2.5 h-2.5" />
+              Auto-populated
+            </span>
+          )}
           <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">
             Spotlight: {selectedProvince}
           </span>
@@ -637,7 +918,7 @@ export function LocationPickerMap({
               Compiled Destination Address:
             </label>
             <div className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 truncate select-all">
-              {destinationAddress || 'Building, Barangay, Municipality, Province'}
+              {destinationAddress || compileAddress(building, street, barangay, district, selectedMunicipality, selectedProvince) || 'Building, Barangay, Municipality, Province'}
             </div>
           </div>
         </div>
@@ -705,10 +986,10 @@ export function LocationPickerMap({
         </div>
       )}
 
-      {/* Mini-Map Search Bar - Rendered in specific mode */}
+      {/* Mini-Map Search Bar with Pin/Choose button after search */}
       {isSpecific && (
         <div className="relative">
-          <div className="flex gap-1.5">
+          <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
               <input
@@ -725,39 +1006,89 @@ export function LocationPickerMap({
                 className="w-full rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-xs text-gray-700 focus:border-[#2500ba] focus:outline-none"
               />
             </div>
-            <button
-              type="button"
-              onClick={() => handleSearch()}
-              disabled={isSearching}
-              className="rounded-lg bg-[#2500ba] px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
-            >
-              {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Search'}
-            </button>
-            <button
-              type="button"
-              onClick={resetToMunicipalityCenter}
-              title="Snap to Municipal Center"
-              className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1 cursor-pointer"
-            >
-              <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
-              <span className="hidden sm:inline">Center</span>
-            </button>
+            <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap">
+              <button
+                type="button"
+                onClick={() => handleSearch()}
+                disabled={isSearching}
+                className="rounded-lg bg-[#2500ba] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-800 transition disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+              >
+                {isSearching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Search'}
+              </button>
+
+              {/* Dedicated button after search to pin the location */}
+              {searchResults.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => selectSearchResult(searchResults[0])}
+                  title="Pin this searched location on map and auto-populate address"
+                  className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  <span>Pin Location</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={resetToMunicipalityCenter}
+                title="Snap to Municipal Center"
+                className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 transition flex items-center gap-1 cursor-pointer"
+              >
+                <Crosshair className="h-3.5 w-3.5 text-[#2500ba]" />
+                <span className="hidden sm:inline">Center</span>
+              </button>
+            </div>
           </div>
 
-          {/* Search Results Dropdown */}
+          {/* Search Results Dropdown with dedicated button to pin or choose that location */}
           {showResults && searchResults.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-[1000] mt-1 rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
-              {searchResults.map((result, idx) => (
+            <div className="absolute left-0 right-0 top-full z-[1000] mt-1.5 max-h-72 overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-2xl space-y-1.5">
+              <div className="flex items-center justify-between px-2 py-1 text-[11px] text-gray-500 font-semibold border-b border-gray-100 pb-1.5">
+                <span>Select a location to pin on map ({searchResults.length} matches):</span>
                 <button
-                  key={`${result.label}-${idx}`}
                   type="button"
-                  onClick={() => selectSearchResult(result)}
-                  className="w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition flex items-center gap-2"
+                  onClick={() => setShowResults(false)}
+                  className="text-gray-400 hover:text-gray-600 text-xs font-medium cursor-pointer"
                 >
-                  <MapPin className="h-3 w-3 text-[#2500ba] flex-shrink-0" />
-                  <span className="truncate">{result.label}</span>
+                  Close
                 </button>
+              </div>
+              {searchResults.map((result, idx) => (
+                <div
+                  key={`${result.label}-${idx}`}
+                  className="p-2.5 rounded-lg border border-gray-100 hover:border-blue-300 hover:bg-blue-50/60 transition flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 text-[#2500ba] flex-shrink-0" />
+                      <p className="text-xs font-bold text-gray-900 truncate">
+                        {result.building || result.label.split(',')[0]}
+                      </p>
+                    </div>
+                    <p className="text-[11px] text-gray-600 truncate mt-0.5 pl-5">
+                      {[result.street, result.barangay, result.muni, result.prov].filter(Boolean).join(', ') || result.label}
+                    </p>
+                    <span className="inline-block text-[10px] font-mono text-gray-400 pl-5">
+                      {result.lat.toFixed(5)}, {result.lng.toFixed(5)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => selectSearchResult(result)}
+                    className="flex-shrink-0 px-3 py-1.5 bg-[#2500ba] hover:bg-blue-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>Choose Location</span>
+                  </button>
+                </div>
               ))}
+            </div>
+          )}
+
+          {showResults && searchResults.length === 0 && !isSearching && searchQuery.trim() && (
+            <div className="absolute left-0 right-0 top-full z-[1000] mt-1.5 rounded-xl border border-gray-200 bg-white p-3 shadow-lg text-xs text-gray-500 text-center">
+              No matching landmark or evacuation site found for &quot;{searchQuery}&quot;. Click on map to pin coordinates directly.
             </div>
           )}
         </div>

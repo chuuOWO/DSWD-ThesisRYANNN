@@ -254,8 +254,8 @@ export function AddReleaseModal({
     if (resolvedProv) setSelectedProvince(resolvedProv);
     if (resolvedMuni) setSelectedMunicipality(resolvedMuni);
 
-    if (errors.municipality || errors.province) {
-      setErrors(prev => ({ ...prev, municipality: '', province: '' }));
+    if (errors.municipality || errors.province || errors.destinationAddress) {
+      setErrors(prev => ({ ...prev, municipality: '', province: '', destinationAddress: '' }));
     }
   };
 
