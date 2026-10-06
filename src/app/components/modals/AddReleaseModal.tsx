@@ -5,6 +5,7 @@ import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, Ki
 import { LocationPickerMap } from '../design/LocationPickerMap';
 import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
 import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
+import { getLguStockForCategory } from '../../lib/lguSync';
 import { parseIncidentInfo, formatIncidentCode, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
 
 export interface ReleaseForm {
@@ -303,19 +304,7 @@ export function AddReleaseModal({
 
     if (formData.sourceType === 'LGU') {
       if (!sourceLguRecord) return 0;
-      const stock = sourceLguRecord.currentStock;
-      if (stock && formData.fnfiCategory in stock) {
-        return stock[formData.fnfiCategory] || 0;
-      }
-      const catLower = formData.fnfiCategory.toLowerCase();
-      if (catLower.includes('food pack')) return sourceLguRecord.foodPacks ?? 0;
-      if (catLower.includes('hygiene')) return sourceLguRecord.hygieneKits ?? 0;
-      if (catLower.includes('family kit')) return sourceLguRecord.familyKits ?? 0;
-      if (catLower.includes('sleeping')) return sourceLguRecord.sleepingKits ?? 0;
-      if (catLower.includes('kitchen')) return sourceLguRecord.kitchenKits ?? 0;
-      if (catLower.includes('sack')) return sourceLguRecord.laminatedSacks ?? 0;
-      if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) return sourceLguRecord.rtef ?? 0;
-      return 0;
+      return getLguStockForCategory(sourceLguRecord, formData.fnfiCategory);
     }
 
     return 0;
@@ -703,37 +692,66 @@ export function AddReleaseModal({
                   </p>
                 )}
 
-                {/* Source LGU Live Balances */}
+                {/* Source LGU Live Balances matching LGU Monitor */}
                 {sourceMunicipality && sourceLguRecord && (
-                  <div className="rounded-xl border border-purple-200 bg-purple-50/70 p-3.5 space-y-2">
-                    <div className="flex items-center justify-between">
+                  <div className="rounded-xl border border-purple-200 bg-purple-50/70 p-4 space-y-3">
+                    <div className="flex items-start justify-between">
                       <div className="flex items-center gap-2">
                         <Building2 className="w-4 h-4 text-purple-700" />
-                        <span className="text-xs font-bold text-purple-950">
-                          Source LGU On-Hand Inventory ({sourceLguRecord.municipality}, {sourceLguRecord.province})
-                        </span>
+                        <div>
+                          <p className="text-xs font-bold text-purple-950">
+                            {sourceLguRecord.municipality}, {sourceLguRecord.province}
+                          </p>
+                          <p className="text-[11px] text-purple-700">
+                            {sourceLguRecord.lguName}
+                          </p>
+                        </div>
                       </div>
-                      <span className="text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded border border-purple-200">
-                        Live Stock
+                      <span className="text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full border border-purple-200">
+                        {Object.values(sourceLguRecord.currentStock || {}).reduce((sum, v) => sum + (Number(v) || 0), 0).toLocaleString()} Items On-Hand
                       </span>
                     </div>
+
+                    {/* Category Breakdown Grid matching LGU Monitor */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-2xs">
+                      <div className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-2xs">
                         <p className="text-[10px] text-gray-500 font-semibold">Food Packs</p>
-                        <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.foodPacks ?? 0).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-purple-950 font-mono">{(Number(sourceLguRecord.currentStock?.['Food Pack'] ?? sourceLguRecord.foodPacks) || 0).toLocaleString()}</p>
                       </div>
-                      <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-2xs">
+                      <div className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-2xs">
                         <p className="text-[10px] text-gray-500 font-semibold">Hygiene Kits</p>
-                        <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.hygieneKits ?? 0).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-purple-950 font-mono">{(Number(sourceLguRecord.currentStock?.['Hygiene Kit'] ?? sourceLguRecord.hygieneKits) || 0).toLocaleString()}</p>
                       </div>
-                      <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-2xs">
+                      <div className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-2xs">
                         <p className="text-[10px] text-gray-500 font-semibold">Family Kits</p>
-                        <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.familyKits ?? 0).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-purple-950 font-mono">{(Number(sourceLguRecord.currentStock?.['Family Kit'] ?? sourceLguRecord.familyKits) || 0).toLocaleString()}</p>
                       </div>
-                      <div className="bg-white rounded-lg p-2 border border-purple-100 shadow-2xs">
+                      <div className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-2xs">
                         <p className="text-[10px] text-gray-500 font-semibold">Sleeping Kits</p>
-                        <p className="text-sm font-bold text-purple-950 font-mono">{(sourceLguRecord.sleepingKits ?? 0).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-purple-950 font-mono">{(Number(sourceLguRecord.currentStock?.['Sleeping Kit'] ?? sourceLguRecord.sleepingKits) || 0).toLocaleString()}</p>
                       </div>
+                    </div>
+
+                    {/* Additional Kit Categories if available */}
+                    {Object.entries(sourceLguRecord.currentStock || {})
+                      .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Food Packs', 'food pack', 'food packs', 'Hygiene Kit', 'Hygiene Kits', 'hygiene kit', 'hygiene kits', 'Family Kit', 'Family Kits', 'family kit', 'family kits', 'Sleeping Kit', 'Sleeping Kits', 'sleeping kit', 'sleeping kits'].includes(k))
+                      .length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {Object.entries(sourceLguRecord.currentStock || {})
+                          .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Food Packs', 'food pack', 'food packs', 'Hygiene Kit', 'Hygiene Kits', 'hygiene kit', 'hygiene kits', 'Family Kit', 'Family Kits', 'family kit', 'family kits', 'Sleeping Kit', 'Sleeping Kits', 'sleeping kit', 'sleeping kits'].includes(k))
+                          .map(([cat, qty]) => (
+                            <span key={cat} className="text-[10px] px-2 py-0.5 rounded bg-white text-purple-900 border border-purple-200 font-medium">
+                              {cat}: {Number(qty).toLocaleString()}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+
+                    {/* Operational Delivery Statistics matching LGU Monitor */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-purple-200/60 text-[11px] text-purple-800">
+                      <span>Total Delivered: <strong className="font-mono">{((sourceLguRecord as any).totalItemsReleased ?? 0).toLocaleString()}</strong></span>
+                      <span>Completed: <strong className="font-mono text-green-700">{(sourceLguRecord as any).completedDeliveries ?? 0}</strong></span>
+                      <span>Last Delivery: <strong className="font-mono">{(sourceLguRecord as any).lastDeliveryDate || 'N/A'}</strong></span>
                     </div>
                   </div>
                 )}

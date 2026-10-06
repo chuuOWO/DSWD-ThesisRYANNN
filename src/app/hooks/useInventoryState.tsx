@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   backendApi,
   type LguRecord,
+  type LguInput,
   type ProvinceRecord,
   type WarehouseRecord,
   type SupplySourceRecord,
   type KitTypeRecord
 } from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
+import { computeSynchronizedLgus, type SynchronizedLgu } from '../lib/lguSync';
 import {
   findMatchingLgu,
   normalizeLguName,
@@ -700,6 +702,56 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     });
   };
 
+  const editLgu = async (id: string, updates: Partial<LguInput>): Promise<{ ok: boolean; message: string }> => {
+    try {
+      setLgusList(prev => prev.map(lgu => {
+        if (lgu.id !== id) return lgu;
+        return {
+          ...lgu,
+          ...updates,
+          currentStock: updates.initialStock ? { ...lgu.currentStock, ...updates.initialStock } : lgu.currentStock
+        };
+      }));
+      await backendApi.updateLgu(id, updates);
+      return { ok: true, message: 'LGU profile updated successfully.' };
+    } catch (err: any) {
+      return { ok: false, message: err?.message || 'Failed to update LGU in database.' };
+    }
+  };
+
+  const addLgu = async (input: LguInput): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const res = await backendApi.createLgu(input);
+      const newRecord: LguRecord = {
+        id: res.id,
+        municipality: input.municipality,
+        province: input.province,
+        lguName: input.lguName,
+        latitude: input.latitude ?? 10.7870,
+        longitude: input.longitude ?? 122.3892,
+        contactPerson: input.contactPerson || '',
+        contactNumber: input.contactNumber || '',
+        remarks: input.remarks || '',
+        currentStock: input.initialStock || {},
+        foodPacks: input.initialStock?.['Food Pack'] || 0,
+        hygieneKits: input.initialStock?.['Hygiene Kit'] || 0,
+        familyKits: input.initialStock?.['Family Kit'] || 0,
+        sleepingKits: input.initialStock?.['Sleeping Kit'] || 0,
+        kitchenKits: input.initialStock?.['Kitchen Kit'] || 0,
+        laminatedSacks: input.initialStock?.['Laminated Sack'] || 0,
+        rtef: input.initialStock?.['RTEF'] || 0,
+        urgencyScore: 20,
+        priorityColor: 'Green',
+        recommendation: 'Stable baseline stock',
+        isActive: true
+      };
+      setLgusList(prev => [...prev, newRecord]);
+      return { ok: true, message: 'LGU created successfully.' };
+    } catch (err: any) {
+      return { ok: false, message: err?.message || 'Failed to create LGU in database.' };
+    }
+  };
+
   const addIncomingGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
     const nextIndex = incomingGoodsList.reduce((max, entry) => {
       const match = entry.id.match(/INC-\d{4}-(\d+)/i);
@@ -1378,13 +1430,25 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     });
   };
 
+  const synchronizedLgusList = useMemo<SynchronizedLgu[]>(() => {
+    return computeSynchronizedLgus({
+      masterLgus: lgusList,
+      outgoingReleases: outgoingReleasesList,
+      incomingGoods: incomingGoodsList,
+      lguPriorityReports: lguPriorityReports
+    });
+  }, [lgusList, outgoingReleasesList, incomingGoodsList, lguPriorityReports]);
+
   return {
     inventory,
     incomingGoodsList,
     outgoingReleasesList,
     lguPriorityReports,
     discrepancyReports,
-    lgusList,
+    lgusList: synchronizedLgusList,
+    synchronizedLgusList,
+    addLgu,
+    editLgu,
     provincesList,
     warehousesList,
     supplySourcesList,

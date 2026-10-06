@@ -4,7 +4,8 @@ import type { LGUPriorityReport, UserRole, OutgoingRelease, IncomingGoods } from
 import { EditLGUModal } from '../modals/EditLGUModal';
 import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
 import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
-import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
+import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
+import { computeSynchronizedLgus } from '../../lib/lguSync';
 
 export interface LGUDelivery {
   id: string;
@@ -112,113 +113,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     ? inventoryState.adminActionsEnabled
     : internalAdminActions;
 
-  // Dynamically compute live LGU list exclusively from master Supabase lgus table
+  // Dynamically compute live LGU list exclusively using unified synchronization helper
   const baseLguList = useMemo<LGUDelivery[]>(() => {
-    const releases = inventoryState?.outgoingReleasesList ?? [];
-    const incomingGoods = inventoryState?.incomingGoodsList ?? [];
-    const reports = inventoryState?.lguPriorityReports ?? [];
-    const masterLgus = (inventoryState?.lgusList && inventoryState.lgusList.length > 0)
-      ? inventoryState.lgusList
-      : DEFAULT_PANAY_LGUS;
-
-    const lguEntriesMap = new Map<string, LGUDelivery>();
-
-    masterLgus.forEach((lgu) => {
-      if (!lgu) return;
-      const muni = lgu.municipality || '';
-      const muniLower = muni.toLowerCase();
-      const lguReleases = releases.filter((r) => {
-        if (!r) return false;
-        const target = (r.lguName || '').toLowerCase();
-        const m = (r.municipality || '').toLowerCase();
-        return (r.lguId && r.lguId === lgu.id) || (muniLower && target.includes(muniLower)) || (muniLower && m === muniLower);
-      });
-
-      // Filter incoming goods that were stocked directly to this LGU
-      const lguIncomingDirect = incomingGoods.filter((inc) => {
-        if (!inc || inc.destinationType !== 'LGU') return false;
-        const dest = (inc.destination || '').toLowerCase();
-        return dest === muniLower || (muniLower && dest.includes(muniLower));
-      });
-
-      const report = reports.find((rep) => {
-        if (!rep) return false;
-        if (rep.lguId && lgu.id && rep.lguId === lgu.id) return true;
-        const repMuni = (rep.municipality || '').toLowerCase();
-        if (muniLower && repMuni === muniLower) return true;
-        const repName = (rep.lguName || '').toLowerCase();
-        return Boolean(muniLower && repName.includes(muniLower));
-      });
-
-      const totalReleased = lguReleases.reduce((sum, r) => sum + (Number(r.amountApproved) || Number(r.amountRequested) || 0), 0);
-      const deliveryCount = lguReleases.length;
-      const completed = lguReleases.filter((r) => ['Delivered', 'Accepted'].includes(r.deliveryStatus)).length;
-      const pending = lguReleases.filter((r) => ['Allocating', 'Approved', 'Packed', 'Released', 'In Transit'].includes(r.deliveryStatus)).length;
-      const lastDate = lguReleases[0]?.dateAllocated || (report ? report.reportedAt?.slice(0, 10) : 'N/A');
-
-      // Baseline stock from Supabase master table public.lgus
-      const stock: Record<string, number> = {
-        ...(lgu.currentStock && typeof lgu.currentStock === 'object' ? lgu.currentStock : {})
-      };
-
-      // Populate known kit categories from record columns if not in json map
-      if (lgu.foodPacks && !stock['Food Pack']) stock['Food Pack'] = Number(lgu.foodPacks);
-      if (lgu.hygieneKits && !stock['Hygiene Kit']) stock['Hygiene Kit'] = Number(lgu.hygieneKits);
-      if (lgu.familyKits && !stock['Family Kit']) stock['Family Kit'] = Number(lgu.familyKits);
-      if (lgu.sleepingKits && !stock['Sleeping Kit']) stock['Sleeping Kit'] = Number(lgu.sleepingKits);
-      if (lgu.kitchenKits && !stock['Kitchen Kit']) stock['Kitchen Kit'] = Number(lgu.kitchenKits);
-      if (lgu.laminatedSacks && !stock['Laminated Sacks']) stock['Laminated Sacks'] = Number(lgu.laminatedSacks);
-      if (lgu.rtef && !stock['Ready-to-Eat Food']) stock['Ready-to-Eat Food'] = Number(lgu.rtef);
-
-      // Track verified arrivals from completed deliveries and direct incoming goods
-      const arrivalsMap: Record<string, number> = {};
-      lguReleases.forEach((r) => {
-        if (!r) return;
-        if (['Delivered', 'Accepted'].includes(r.deliveryStatus) && r.fnfiCategory) {
-          arrivalsMap[r.fnfiCategory] = (arrivalsMap[r.fnfiCategory] || 0) + (Number(r.amountApproved) || Number(r.amountRequested) || 0);
-        }
-      });
-      lguIncomingDirect.forEach((inc) => {
-        if (!inc) return;
-        if (inc.fnfiCategory && Number(inc.quantity) > 0) {
-          arrivalsMap[inc.fnfiCategory] = (arrivalsMap[inc.fnfiCategory] || 0) + Number(inc.quantity);
-        }
-      });
-
-      // Synchronize: taking the maximum between the DB balance and completed arrivals
-      // guarantees immediate visibility of newly completed deliveries/incoming stock while avoiding double-counting
-      Object.entries(arrivalsMap).forEach(([cat, arrivalQty]) => {
-        stock[cat] = Math.max(Number(stock[cat]) || 0, arrivalQty);
-      });
-
-      // Override/augment from official LGU inventory priority reports if higher
-      if (report) {
-        if (report.foodPacks) stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(report.foodPacks));
-        if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(report.hygieneKits));
-        if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
-      }
-
-      const lguId = lgu.id || lgu.municipality || `lgu-${Math.random()}`;
-      lguEntriesMap.set(lguId, {
-        id: lguId,
-        lguName: lgu.lguName || `${muni} Municipal Office`,
-        municipality: muni,
-        province: lgu.province || 'Iloilo',
-        totalItemsReleased: totalReleased,
-        deliveryCount,
-        completedDeliveries: completed,
-        pendingDeliveries: pending,
-        lastDeliveryDate: lastDate,
-        contactPerson: lgu.contactPerson,
-        contactNumber: lgu.contactNumber,
-        remarks: lgu.remarks,
-        latitude: lgu.latitude,
-        longitude: lgu.longitude,
-        currentStock: stock
-      });
+    return computeSynchronizedLgus({
+      masterLgus: inventoryState?.lgusList,
+      outgoingReleases: inventoryState?.outgoingReleasesList,
+      incomingGoods: inventoryState?.incomingGoodsList,
+      lguPriorityReports: inventoryState?.lguPriorityReports
     });
-
-    return Array.from(lguEntriesMap.values());
   }, [inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, inventoryState?.lguPriorityReports, inventoryState?.lgusList]);
 
   // Province list with counts
@@ -233,7 +135,8 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     baseLguList.forEach(l => {
       if (l?.province) set.add(l.province.trim());
     });
-    return Array.from(set).sort();
+    const list = Array.from(set).sort();
+    return list.length > 0 ? list : [...REGIONAL_PROVINCES];
   }, [inventoryState?.provincesList, baseLguList]);
 
   const categoryOptions = useMemo(() => {
@@ -598,8 +501,8 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     <MapPin className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-sm text-gray-900 truncate" title={lgu.lguName}>{lgu.lguName}</h3>
-                    <p className="text-xs text-gray-600 mt-0.5">{lgu.municipality}, {lgu.province}</p>
+                    <h3 className="font-bold text-base text-gray-900 truncate" title={lgu.municipality}>{lgu.municipality}</h3>
+                    <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
                   </div>
                 </div>
                 <button
@@ -927,7 +830,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             setShowEmergencyModal(false);
             setEmergencyLguId(undefined);
           }}
-          lgusList={inventoryState?.lgusList && inventoryState.lgusList.length > 0 ? inventoryState.lgusList : DEFAULT_PANAY_LGUS}
+          lgusList={baseLguList}
           kitTypesList={inventoryState?.kitTypesList}
           initialLguId={emergencyLguId}
           onCorrectStock={async (lguId, newStock, reason) => {
