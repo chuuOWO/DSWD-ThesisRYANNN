@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
@@ -44,7 +44,7 @@ const statusLabels: Record<IncomingStatus, string> = {
   Rejected: 'Rejected'
 };
 
-const canEdit = (status: IncomingStatus) => ['Draft', 'Pending Verification'].includes(status);
+const canEdit = (status: IncomingStatus) => ['Draft', 'Pending Verification', 'Correction Requested'].includes(status);
 
 const friendlyResult = (message: string) =>
   message
@@ -149,7 +149,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       type,
       item,
       quantity: item.quantity,
-      note: item.correctionNote || item.incidentCode || ''
+      note: item.correctionNote || ''
     });
   };
 
@@ -384,15 +384,29 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                       </span>
                       <span className="font-semibold text-sm text-gray-900">{item.destination}</span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1.5">
-                      {item.incidentCode ? `RIS: ${item.incidentCode}` : 'No RIS recorded'}
-                    </p>
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">RIS Ref:</span>
+                      <span className={item.incidentCode ? "font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200" : "text-xs text-gray-400 italic"}>
+                        {item.incidentCode || 'No RIS recorded'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-4 py-4">
-                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[item.status]}`}>
-                      {statusLabels[item.status]}
-                    </span>
-                    {item.verifiedBy && <p className="text-xs text-gray-500 mt-2">Verified by {item.verifiedBy}</p>}
+                    <div className="flex items-center gap-2">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${statusStyles[item.status]}`}>
+                        {statusLabels[item.status]}
+                      </span>
+                    </div>
+                    {item.verifiedBy && <p className="text-xs text-gray-500 mt-1.5">Verified by {item.verifiedBy}</p>}
+                    {item.correctionNote && (
+                      <div className="mt-2 p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs shadow-xs max-w-xs">
+                        <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                          <span>Correction Note:</span>
+                        </div>
+                        <p className="mt-1 text-amber-900 font-medium whitespace-pre-wrap leading-relaxed">{item.correctionNote}</p>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     {item.destinationType === 'LGU' ? (

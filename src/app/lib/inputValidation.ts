@@ -37,3 +37,12 @@ export const sanitizePhone = (val: string): string => {
 export const sanitizeAlphanumeric = (val: string): string => {
   return val.replace(/[^a-zA-Z0-9-]/g, '');
 };
+
+/**
+ * Allows alphanumeric characters, spaces, hyphens, slashes, hashes, underscores, and periods.
+ * Used for RIS (Request and Issue Slip), delivery manifests, and incident references without breaking typing.
+ */
+export const sanitizeSlipReference = (val: string): string => {
+  return val.replace(/[^a-zA-Z0-9\s\-_/#.]/g, '');
+};
+

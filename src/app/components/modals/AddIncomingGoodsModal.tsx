@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { X, Calendar, Package, AlertCircle, Building2 } from 'lucide-react';
-import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
+import { sanitizeNumbersOnly, sanitizeSlipReference } from '../../lib/inputValidation';
 import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES, DEFAULT_PANAY_LGUS, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 
@@ -195,7 +195,8 @@ export function AddIncomingGoodsModal({
     if (validate()) {
       const submissionData = {
         ...formData,
-        destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination
+        destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination,
+        incidentCode: formData.incidentCode?.trim() || ''
       };
       onSubmit(submissionData);
     }
@@ -548,7 +549,7 @@ export function AddIncomingGoodsModal({
             <input
               type="text"
               value={formData.incidentCode}
-              onChange={(e) => handleChange('incidentCode', sanitizeAlphanumeric(e.target.value))}
+              onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value))}
               placeholder="e.g., RIS-2026-001, DSWD-RIS-042"
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />

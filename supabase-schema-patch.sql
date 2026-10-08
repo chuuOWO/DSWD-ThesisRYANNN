@@ -398,6 +398,7 @@ alter table public.incoming_manifests add column if not exists tx_hash text;
 alter table public.incoming_manifests add column if not exists batch_token_id text;
 alter table public.incoming_manifests add column if not exists minted_at text;
 alter table public.incoming_manifests add column if not exists wallet_address text;
+alter table public.incoming_manifests add column if not exists correction_note text;
 alter table public.incoming_manifests add column if not exists created_at timestamptz not null default now();
 
 -- Sequential manifest number generator

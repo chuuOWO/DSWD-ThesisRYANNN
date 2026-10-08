@@ -3,7 +3,7 @@ import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Buil
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
 import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
 import { LocationPickerMap } from '../design/LocationPickerMap';
-import { sanitizeNumbersOnly, sanitizeAlphanumeric } from '../../lib/inputValidation';
+import { sanitizeNumbersOnly, sanitizeAlphanumeric, sanitizeSlipReference } from '../../lib/inputValidation';
 import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { getLguStockForCategory } from '../../lib/lguSync';
 import { parseIncidentInfo, formatIncidentCode, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
@@ -470,7 +470,7 @@ export function AddReleaseModal({
               <input
                 type="text"
                 value={formData.incidentCode}
-                onChange={(e) => handleChange('incidentCode', sanitizeAlphanumeric(e.target.value.toUpperCase()))}
+                onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value.toUpperCase()))}
                 placeholder="e.g. INC-2026-FLOOD-01, DSWD-REL-042, TC-KRISTINE-2026"
                 className={`w-full px-4 py-2.5 border rounded-lg font-mono text-sm uppercase bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.incidentCode ? 'border-red-500' : 'border-gray-300'

@@ -31,7 +31,7 @@ interface InventoryItem {
 
 export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps) {
   const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [] } = inventoryState;
-  const [selectedWarehouse, setSelectedWarehouse] = useState('All');
+  const [selectedWarehouse, setSelectedWarehouse] = useState('All Specific Warehouses');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -127,25 +127,31 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const today = new Date();
   const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const displayData: InventoryItem[] = inventory.map(item => {
+  const displayData: InventoryItem[] = dynamicCategories.map(category => {
+    const item = inventory.find(i => i.category?.toLowerCase() === category.toLowerCase()) || {
+      category,
+      warehouseA: 0,
+      warehouseB: 0
+    };
     const released = outgoingReleasesList
-      .filter(release => release.fnfiCategory === item.category && releaseStatuses.includes(release.deliveryStatus))
-      .reduce((sum, release) => sum + (release.amountApproved || release.amountRequested), 0);
+      .filter(release => (release.fnfiCategory || '').toLowerCase() === category.toLowerCase() && releaseStatuses.includes(release.deliveryStatus))
+      .reduce((sum, release) => sum + (release.amountApproved || release.amountRequested || 0), 0);
     const expiringItems = incomingGoodsList
-      .filter(incoming => incoming.fnfiCategory === item.category && (incoming.status === 'Verified' || incoming.status === 'Minted'))
+      .filter(incoming => (incoming.fnfiCategory || '').toLowerCase() === category.toLowerCase() && (incoming.status === 'Verified' || incoming.status === 'Minted'))
       .filter(incoming => {
+        if (!incoming.expirationDate) return false;
         const expirationDate = new Date(incoming.expirationDate);
         return expirationDate <= thirtyDaysFromNow && expirationDate >= today;
       })
-      .reduce((sum, incoming) => sum + incoming.quantity, 0);
+      .reduce((sum, incoming) => sum + (incoming.quantity || 0), 0);
 
     return {
-      category: item.category,
-      warehouseA: item.warehouseA,
-      warehouseB: item.warehouseB,
-      totalStock: item.warehouseA + item.warehouseB,
+      category,
+      warehouseA: item.warehouseA || 0,
+      warehouseB: item.warehouseB || 0,
+      totalStock: (item.warehouseA || 0) + (item.warehouseB || 0),
       released,
-      available: item.warehouseA + item.warehouseB,
+      available: (item.warehouseA || 0) + (item.warehouseB || 0),
       expiringItems
     };
   });
@@ -166,14 +172,12 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     lguTotal: lguTotals[item.category] || 0,
     grandTotal: item.totalStock + (lguTotals[item.category] || 0),
     selectedWarehouseStock: (() => {
+      if (selectedWarehouse === 'All' || selectedWarehouse === 'All Specific Warehouses') return null;
       if (selectedWarehouse === 'Oton Main Warehouse') return item.warehouseA;
       if (selectedWarehouse === 'Pototan Main Warehouse') return item.warehouseB;
-      if (selectedWarehouse !== 'All Specific Warehouses') {
-        const lguRecord = lguWarehouseData.find((lgu) => lgu.warehouse === selectedWarehouse);
-        const value = lguRecord ? (lguRecord as Record<string, number | string>)[item.category] : 0;
-        return typeof value === 'number' ? value : 0;
-      }
-      return null;
+      const lguRecord = lguWarehouseData.find((lgu) => lgu.warehouse === selectedWarehouse);
+      const value = lguRecord ? (lguRecord as Record<string, number | string>)[item.category] : 0;
+      return typeof value === 'number' ? value : 0;
     })()
   }));
 
@@ -181,13 +185,13 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
     if (!matchesCategory) return false;
 
-    if (selectedWarehouse === 'All Specific Warehouses') return true;
-    if (selectedWarehouse === 'Oton Main Warehouse') return item.warehouseA > 0;
-    if (selectedWarehouse === 'Pototan Main Warehouse') return item.warehouseB > 0;
+    if (selectedWarehouse === 'All' || selectedWarehouse === 'All Specific Warehouses') return true;
+    if (selectedWarehouse === 'Oton Main Warehouse') return item.warehouseA > 0 || selectedCategory !== 'All';
+    if (selectedWarehouse === 'Pototan Main Warehouse') return item.warehouseB > 0 || selectedCategory !== 'All';
 
     const lguRecord = lguWarehouseData.find((lgu) => lgu.warehouse === selectedWarehouse);
     const value = lguRecord ? (lguRecord as Record<string, number | string>)[item.category] : 0;
-    return Number(value) > 0;
+    return Number(value) > 0 || selectedCategory !== 'All';
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -198,14 +202,14 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, currentPage, pageSize]);
 
-  const warehouseATotal = inventory.reduce((sum, item) => sum + item.warehouseA, 0);
-  const warehouseBTotal = inventory.reduce((sum, item) => sum + item.warehouseB, 0);
+  const warehouseATotal = displayData.reduce((sum, item) => sum + item.warehouseA, 0);
+  const warehouseBTotal = displayData.reduce((sum, item) => sum + item.warehouseB, 0);
   const totalMainWarehouse = warehouseATotal + warehouseBTotal;
   const totalLGUWarehouse = Object.values(lguTotals).reduce((sum, val) => sum + val, 0);
   const selectedSpecificTotal = combinedData.reduce((sum, item) => (
     sum + (typeof item.selectedWarehouseStock === 'number' ? item.selectedWarehouseStock : 0)
   ), 0);
-  const totalAvailable = selectedWarehouse !== 'All Specific Warehouses' ? selectedSpecificTotal :
+  const totalAvailable = (selectedWarehouse !== 'All' && selectedWarehouse !== 'All Specific Warehouses') ? selectedSpecificTotal :
                          selectedWarehouseType === 'Main' ? totalMainWarehouse :
                          selectedWarehouseType === 'LGU' ? totalLGUWarehouse :
                          totalMainWarehouse + totalLGUWarehouse;
@@ -213,7 +217,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const totalExpiring = displayData.reduce((sum, item) => sum + item.expiringItems, 0);
 
   const chartData = dynamicCategories.map(category => {
-    const inventoryItem = inventory.find(item => item.category === category);
+    const inventoryItem = displayData.find(item => item.category?.toLowerCase() === category.toLowerCase());
     const lguTotal = lguWarehouseData.reduce((sum, lgu) => {
       const value = (lgu as Record<string, number | string>)[category];
       return sum + (typeof value === 'number' ? value : 0);

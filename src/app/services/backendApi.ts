@@ -34,6 +34,15 @@ export interface IncomingUpdatePayload {
   batchTokenId?: string;
   mintedAt?: string;
   walletAddress?: string;
+  incidentCode?: string;
+  category?: string;
+  quantity?: number;
+  unitType?: string;
+  expirationDate?: string;
+  source?: string;
+  destinationType?: string;
+  destination?: string;
+  correctionNote?: string;
 }
 
 export interface ProvinceRecord {
@@ -555,6 +564,58 @@ export const backendApi = {
       return { ok: true };
     } catch (err) {
       console.error('Error in deductWarehouseStock:', err);
+      return { ok: false };
+    }
+  },
+
+  async addWarehouseStock(warehouseName: string, category: string, quantity: number): Promise<{ ok: boolean }> {
+    try {
+      const cleanName = warehouseName.replace(/main|warehouse/gi, '').trim();
+      const { data: wh } = await supabase
+        .from('warehouses')
+        .select('*')
+        .ilike('name', `%${cleanName}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!wh) {
+        console.warn(`Warehouse "${warehouseName}" not found for stock addition.`);
+        return { ok: false };
+      }
+
+      const catLower = category.toLowerCase();
+      const updates: Record<string, unknown> = {
+        updated_at: new Date().toISOString()
+      };
+
+      if (catLower.includes('food pack') || catLower === 'food pack') {
+        updates.food_packs = (wh.food_packs || 0) + quantity;
+      } else if (catLower.includes('hygiene') || catLower === 'hygiene kit') {
+        updates.hygiene_kits = (wh.hygiene_kits || 0) + quantity;
+      } else if (catLower.includes('sleeping') || catLower === 'sleeping kit') {
+        updates.sleeping_kits = (wh.sleeping_kits || 0) + quantity;
+      } else if (catLower.includes('kitchen') || catLower === 'kitchen kit') {
+        updates.kitchen_kits = (wh.kitchen_kits || 0) + quantity;
+      } else if (catLower.includes('family kit') || catLower === 'family kit') {
+        updates.family_kits = (wh.family_kits || 0) + quantity;
+      } else if (catLower.includes('sack') || catLower === 'laminated sack') {
+        updates.laminated_sacks = (wh.laminated_sacks || 0) + quantity;
+      } else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) {
+        updates.rtef = (wh.rtef || 0) + quantity;
+      }
+
+      const stockMap = { ...(wh.current_stock || {}) };
+      stockMap[category] = (stockMap[category] || 0) + quantity;
+      updates.current_stock = stockMap;
+
+      const { error } = await supabase.from('warehouses').update(updates).eq('id', wh.id);
+      if (error) {
+        console.error('Failed to add warehouse stock:', error.message);
+        return { ok: false };
+      }
+      return { ok: true };
+    } catch (err) {
+      console.error('Error in addWarehouseStock:', err);
       return { ok: false };
     }
   },
@@ -1159,13 +1220,31 @@ export const backendApi = {
       tx_hash: payload.txHash,
       batch_token_id: payload.batchTokenId,
       minted_at: payload.mintedAt,
-      wallet_address: payload.walletAddress
+      wallet_address: payload.walletAddress,
+      incident_code: payload.incidentCode,
+      category: payload.category,
+      quantity: payload.quantity,
+      unit_type: payload.unitType,
+      expiration_date: payload.expirationDate,
+      source: payload.source,
+      destination_type: payload.destinationType,
+      destination: payload.destination,
+      correction_note: payload.correctionNote
     });
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('incoming_manifests')
       .update(updates)
       .eq('manifest_number', manifestNumber);
+
+    if (error && (error.message?.includes('correction_note') || (error as any).code === '42703')) {
+      const { correction_note, ...rest } = updates;
+      const retry = await supabase
+        .from('incoming_manifests')
+        .update(rest)
+        .eq('manifest_number', manifestNumber);
+      error = retry.error;
+    }
 
     throwIfError(error, 'Failed to update incoming manifest');
     return { ok: true };

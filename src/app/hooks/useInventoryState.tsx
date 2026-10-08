@@ -204,6 +204,7 @@ type IncomingManifestRow = {
   batch_token_id?: string | null;
   minted_at?: string | null;
   wallet_address?: string | null;
+  correction_note?: string | null;
   created_at?: string | null;
 };
 
@@ -279,9 +280,10 @@ const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
     incidentCode: row.incident_code ?? '',
     status: isIncomingStatus(row.status) ? row.status : 'Draft',
     manifestHash: row.manifest_hash ?? '',
-  batchTokenId: row.batch_token_id ?? undefined,
-  blockchainTxHash: row.tx_hash ?? undefined,
-    mintedAt: row.minted_at ?? undefined
+    batchTokenId: row.batch_token_id ?? undefined,
+    blockchainTxHash: row.tx_hash ?? undefined,
+    mintedAt: row.minted_at ?? undefined,
+    correctionNote: row.correction_note ?? undefined
   } satisfies Omit<IncomingGoods, 'auditTrail'>;
 
   return {
@@ -437,6 +439,7 @@ const emptyInventoryItem = (category: string): InventoryItem => ({
 
 const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: KitTypeRecord[]): InventoryItem[] => {
   const categorySet = new Set<string>();
+  DEFAULT_KIT_TYPES.forEach(k => { if (k.name) categorySet.add(k.name.trim()); });
   kitTypes.forEach(k => { if (k.name) categorySet.add(k.name.trim()); });
   warehouses.forEach(wh => {
     if (wh.currentStock) {
@@ -614,15 +617,40 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const addStock = (category: string, warehouse: WarehouseName, quantity: number) => {
+    const isOton = warehouse.toLowerCase().includes('oton');
+    const isPototan = warehouse.toLowerCase().includes('pototan');
+
+    // 1. Update authoritative warehousesList state in memory
+    setWarehousesList(prev => prev.map(wh => {
+      const match = wh.name.toLowerCase().includes(isOton ? 'oton' : 'pototan');
+      if (!match) return wh;
+
+      const catLower = category.toLowerCase();
+      const updated = { ...wh };
+      if (catLower.includes('food pack') || catLower === 'food pack') updated.foodPacks = (updated.foodPacks || 0) + quantity;
+      else if (catLower.includes('hygiene') || catLower === 'hygiene kit') updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
+      else if (catLower.includes('sleeping') || catLower === 'sleeping kit') updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
+      else if (catLower.includes('kitchen') || catLower === 'kitchen kit') updated.kitchenKits = (updated.kitchenKits || 0) + quantity;
+      else if (catLower.includes('family kit') || catLower === 'family kit') updated.familyKits = (updated.familyKits || 0) + quantity;
+      else if (catLower.includes('sack') || catLower === 'laminated sack') updated.laminatedSacks = (updated.laminatedSacks || 0) + quantity;
+      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = (updated.rtef || 0) + quantity;
+
+      const currentMap = { ...(updated.currentStock || {}) };
+      currentMap[category] = (currentMap[category] || 0) + quantity;
+      updated.currentStock = currentMap;
+      return updated;
+    }));
+
+    // 2. Update inventory state immediately
     setInventory(prev => {
-      const existingItem = prev.find(item => item.category === category);
+      const existingItem = prev.find(item => item.category.toLowerCase() === category.toLowerCase());
       if (existingItem) {
         return prev.map(item =>
-          item.category === category
+          item.category.toLowerCase() === category.toLowerCase()
             ? {
                 ...item,
-                warehouseA: warehouse.toLowerCase().includes('oton') ? item.warehouseA + quantity : item.warehouseA,
-                warehouseB: warehouse.toLowerCase().includes('pototan') ? item.warehouseB + quantity : item.warehouseB,
+                warehouseA: isOton ? item.warehouseA + quantity : item.warehouseA,
+                warehouseB: isPototan ? item.warehouseB + quantity : item.warehouseB,
                 totalStock: (item.totalStock || 0) + quantity,
                 warehouseBreakdown: {
                   ...(item.warehouseBreakdown || {}),
@@ -636,30 +664,58 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         ...prev,
         {
           category,
-          warehouseA: warehouse.toLowerCase().includes('oton') ? quantity : 0,
-          warehouseB: warehouse.toLowerCase().includes('pototan') ? quantity : 0,
+          warehouseA: isOton ? quantity : 0,
+          warehouseB: isPototan ? quantity : 0,
           totalStock: quantity,
           warehouseBreakdown: { [warehouse]: quantity }
         }
       ];
     });
+
+    // 3. Persist to Supabase warehouses table
+    backendApi.addWarehouseStock(warehouse, category, quantity).catch(err => {
+      console.warn('backendApi.addWarehouseStock error:', err);
+    });
   };
 
   const deductStock = (category: string, warehouse: WarehouseName, quantity: number): boolean => {
-    const item = inventory.find(i => i.category === category);
+    const item = inventory.find(i => i.category.toLowerCase() === category.toLowerCase());
     if (!item) return false;
 
     const currentStock = item.warehouseBreakdown?.[warehouse] ??
       (warehouse.toLowerCase().includes('oton') ? item.warehouseA : item.warehouseB);
     if (currentStock < quantity) return false;
 
+    const isOton = warehouse.toLowerCase().includes('oton');
+    const isPototan = warehouse.toLowerCase().includes('pototan');
+
+    setWarehousesList(prev => prev.map(wh => {
+      const match = wh.name.toLowerCase().includes(isOton ? 'oton' : 'pototan');
+      if (!match) return wh;
+
+      const catLower = category.toLowerCase();
+      const updated = { ...wh };
+      if (catLower.includes('food pack') || catLower === 'food pack') updated.foodPacks = Math.max(0, (updated.foodPacks || 0) - quantity);
+      else if (catLower.includes('hygiene') || catLower === 'hygiene kit') updated.hygieneKits = Math.max(0, (updated.hygieneKits || 0) - quantity);
+      else if (catLower.includes('sleeping') || catLower === 'sleeping kit') updated.sleepingKits = Math.max(0, (updated.sleepingKits || 0) - quantity);
+      else if (catLower.includes('kitchen') || catLower === 'kitchen kit') updated.kitchenKits = Math.max(0, (updated.kitchenKits || 0) - quantity);
+      else if (catLower.includes('family kit') || catLower === 'family kit') updated.familyKits = Math.max(0, (updated.familyKits || 0) - quantity);
+      else if (catLower.includes('sack') || catLower === 'laminated sack') updated.laminatedSacks = Math.max(0, (updated.laminatedSacks || 0) - quantity);
+      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = Math.max(0, (updated.rtef || 0) - quantity);
+
+      const currentMap = { ...(updated.currentStock || {}) };
+      currentMap[category] = Math.max(0, (currentMap[category] || 0) - quantity);
+      updated.currentStock = currentMap;
+      return updated;
+    }));
+
     setInventory(prev =>
       prev.map(it =>
-        it.category === category
+        it.category.toLowerCase() === category.toLowerCase()
           ? {
               ...it,
-              warehouseA: warehouse.toLowerCase().includes('oton') ? Math.max(0, it.warehouseA - quantity) : it.warehouseA,
-              warehouseB: warehouse.toLowerCase().includes('pototan') ? Math.max(0, it.warehouseB - quantity) : it.warehouseB,
+              warehouseA: isOton ? Math.max(0, it.warehouseA - quantity) : it.warehouseA,
+              warehouseB: isPototan ? Math.max(0, it.warehouseB - quantity) : it.warehouseB,
               totalStock: Math.max(0, (it.totalStock || 0) - quantity),
               warehouseBreakdown: {
                 ...(it.warehouseBreakdown || {}),
@@ -669,6 +725,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           : it
       )
     );
+
+    backendApi.deductWarehouseStock(warehouse, category, quantity).catch(err => {
+      console.warn('backendApi.deductWarehouseStock error:', err);
+    });
 
     return true;
   };
@@ -871,6 +931,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     // If destination is an LGU, add directly to that LGU's inventory
     if (isLgu) {
       addLguStock(newGoods.destination, newGoods.fnfiCategory, newGoods.quantity);
+    } else if (newGoods.destinationType === 'Warehouse') {
+      const whName = isMainWarehouse(newGoods.destination)
+        ? newGoods.destination
+        : (normalizeWarehouseName(newGoods.destination) || 'Oton Main Warehouse');
+      addStock(newGoods.fnfiCategory, whName as WarehouseName, newGoods.quantity);
     }
 
     backendApi.createIncoming({
@@ -887,6 +952,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const updateIncomingGoods = (id: string, patch: Partial<IncomingGoods>) => {
+    const existing = incomingGoodsList.find(item => item.id === id);
+
     setIncomingGoodsList(prev => prev.map(item => {
       if (item.id !== id || item.status === 'Minted') return item;
       const updated = { ...item, ...patch };
@@ -896,6 +963,36 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         auditTrail: [audit('Edited', 'Pre-tokenization record edited to correct human encoding error.'), ...item.auditTrail]
       };
     }));
+
+    // Adjust stock difference if quantity changed
+    if (existing && patch.quantity !== undefined && patch.quantity !== existing.quantity) {
+      const diff = patch.quantity - existing.quantity;
+      const cat = patch.fnfiCategory || existing.fnfiCategory;
+      const dest = patch.destination || existing.destination;
+      const destType = patch.destinationType || existing.destinationType;
+      if (destType === 'Warehouse') {
+        const whName = isMainWarehouse(dest) ? dest : (normalizeWarehouseName(dest) || 'Oton Main Warehouse');
+        addStock(cat, whName as WarehouseName, diff);
+      } else if (destType === 'LGU') {
+        addLguStock(dest, cat, diff);
+      }
+    }
+
+    backendApi.updateIncoming(id, {
+      status: patch.status,
+      incidentCode: patch.incidentCode,
+      category: patch.fnfiCategory,
+      quantity: patch.quantity,
+      unitType: patch.unitType,
+      expirationDate: patch.expirationDate,
+      source: patch.source,
+      destinationType: patch.destinationType,
+      destination: patch.destination,
+      correctionNote: patch.correctionNote
+    }).catch(error => {
+      logBackendError('Update incoming goods')(error);
+      setIntegrationMode('mock');
+    });
   };
 
   const submitIncomingForVerification = (id: string) => {
@@ -1005,10 +1102,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const requestIncomingCorrection = (id: string, note: string) => {
+    const newReport: DiscrepancyReport = {
+      id: `DISC-${Date.now()}`,
+      reportType: 'Incoming',
+      manifestNumber: id,
+      note,
+      reportedAt: nowStamp()
+    };
+    setDiscrepancyReports(prev => [newReport, ...prev]);
+
     setIncomingGoodsList(prev => prev.map(item => item.id === id
       ? { ...item, status: 'Correction Requested', correctionNote: note, auditTrail: [audit('Correction Requested', note), ...item.auditTrail] }
       : item));
-    backendApi.updateIncoming(id, { status: 'Correction Requested' }).catch(error => {
+    backendApi.updateIncoming(id, { status: 'Correction Requested', correctionNote: note }).catch(error => {
       logBackendError('Request incoming correction')(error);
       setIntegrationMode('mock');
     });
@@ -1454,9 +1560,24 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const loadDashboard = () => {
       backendApi.getDashboard()
         .then(({ incoming, outgoing, discrepancyReports: discrepancyRows }) => {
-          setIncomingGoodsList(incoming.map(mapIncomingManifest));
-          setOutgoingReleasesList(outgoing.map(mapOutgoingRequest));
-          setDiscrepancyReports((discrepancyRows ?? []).map(mapDiscrepancyReport));
+          const discList = (discrepancyRows ?? []).map(mapDiscrepancyReport);
+          setDiscrepancyReports(discList);
+          setIncomingGoodsList(incoming.map(row => {
+            const mapped = mapIncomingManifest(row);
+            if (!mapped.correctionNote) {
+              const matchedDisc = discList.find(d => d.reportType === 'Incoming' && (d.manifestNumber === mapped.id || d.manifestNumber === row.manifest_number));
+              if (matchedDisc) mapped.correctionNote = matchedDisc.note;
+            }
+            return mapped;
+          }));
+          setOutgoingReleasesList(outgoing.map(row => {
+            const mapped = mapOutgoingRequest(row);
+            if (!mapped.correctionNote) {
+              const matchedDisc = discList.find(d => d.reportType === 'Outgoing' && (d.drNumber === mapped.drNumber || d.drNumber === row.dr_number));
+              if (matchedDisc) mapped.correctionNote = matchedDisc.note;
+            }
+            return mapped;
+          }));
           setIntegrationMode('backend');
         })
         .catch(() => setIntegrationMode('mock'));
@@ -1558,6 +1679,15 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const requestOutgoingCorrection = (drNumber: string, note: string) => {
+    const newReport: DiscrepancyReport = {
+      id: `DISC-${Date.now()}`,
+      reportType: 'Outgoing',
+      drNumber,
+      note,
+      reportedAt: nowStamp()
+    };
+    setDiscrepancyReports(prev => [newReport, ...prev]);
+
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? { ...item, deliveryStatus: 'Correction Requested', correctionNote: note, auditTrail: [makeAudit('Correction Requested', note), ...item.auditTrail] }
       : item));
