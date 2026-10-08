@@ -145,6 +145,27 @@ export const authApi = {
           await supabase.auth.signOut();
           throw new Error('ACCOUNT_REJECTED');
         }
+        if (profile.role !== 'dswd_admin' && profile.status !== 'verified') {
+          await supabase.auth.signOut();
+          throw new Error('ACCOUNT_PENDING');
+        }
+      } else {
+        const { data: rawProfile } = await supabase
+          .from('profiles')
+          .select('role, status')
+          .eq('id', data.user.id)
+          .maybeSingle();
+
+        if (rawProfile) {
+          if (rawProfile.status === 'rejected') {
+            await supabase.auth.signOut();
+            throw new Error('ACCOUNT_REJECTED');
+          }
+          if (rawProfile.role !== 'dswd_admin' && rawProfile.status !== 'verified') {
+            await supabase.auth.signOut();
+            throw new Error('ACCOUNT_PENDING');
+          }
+        }
       }
     }
     return data;
@@ -239,6 +260,11 @@ export const authApi = {
         console.warn('Profile upsert warning:', profileError);
       }
     }
+
+    // Sign out newly created user so they return cleanly to the login screen awaiting admin verification
+    try {
+      await supabase.auth.signOut();
+    } catch {}
 
     return data;
   },

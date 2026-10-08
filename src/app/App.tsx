@@ -42,64 +42,10 @@ export default function App() {
   const [walletMismatch, setWalletMismatch] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
-  const [isCheckingVerification, setIsCheckingVerification] = useState(false);
-  const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
-  const { session, profile, isLoading, signOut, refreshProfile } = useAuth();
+  const { session, profile, isLoading, signOut } = useAuth();
   const inventoryState = useInventoryState(Boolean(session), profile);
 
   const requestSignOut = () => setIsLogoutConfirmOpen(true);
-
-  const handleCheckVerification = async () => {
-    setIsCheckingVerification(true);
-    setVerificationFeedback(null);
-    try {
-      if (session?.user?.id) {
-        const freshProfile = await authApi.getProfile(session.user.id);
-        if (freshProfile) {
-          if (freshProfile.status === 'verified') {
-            setVerificationFeedback('Account verified! Refreshing your session...');
-            await refreshProfile();
-            return;
-          } else if (freshProfile.status === 'rejected') {
-            setVerificationFeedback('Account registration was declined. Please contact your coordinator.');
-            return;
-          }
-        }
-      }
-      if (profile?.email) {
-        const dbStatus = await authApi.checkProfileStatusByEmail(profile.email);
-        if (dbStatus === 'verified') {
-          setVerificationFeedback('Account verified! Refreshing your session...');
-          await refreshProfile();
-          return;
-        } else if (dbStatus === 'rejected') {
-          setVerificationFeedback('Account registration was declined. Please contact your coordinator.');
-          return;
-        }
-      }
-      setVerificationFeedback('Account is currently awaiting administrator review. Please check back shortly.');
-    } catch {
-      setVerificationFeedback('Unable to check verification status. Please check your connection.');
-    } finally {
-      setIsCheckingVerification(false);
-    }
-  };
-
-  // Background poller to automatically unlock verified accounts within seconds
-  useEffect(() => {
-    if (!session?.user?.id || profile?.status === 'verified') return;
-
-    const interval = setInterval(async () => {
-      try {
-        const fresh = await authApi.getProfile(session.user.id);
-        if (fresh && fresh.status === 'verified') {
-          await refreshProfile();
-        }
-      } catch {}
-    }, 3500);
-
-    return () => clearInterval(interval);
-  }, [session?.user?.id, profile?.status]);
 
   const refreshWalletRole = async () => {
     const address = await blockchain.getConnectedWalletAddress();
@@ -200,52 +146,10 @@ export default function App() {
     return <AuthPage />;
   }
 
-  // Strict Login Gate: Unapproved/Pending accounts cannot view operational interfaces
-  if (profile.status !== 'verified') {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-slate-800 border border-amber-500/30 rounded-2xl p-6 shadow-2xl text-center space-y-4">
-          <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <h2 className="text-lg font-bold text-white">Account Awaiting Verification</h2>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            Your account ({profile.email}) is currently awaiting administrator review and approval. Once verified, you will be granted access to the DSWD relief operations system.
-          </p>
-
-          {verificationFeedback && (
-            <div className={`p-2.5 rounded-xl text-xs font-semibold ${
-              verificationFeedback.includes('verified')
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-            }`}>
-              {verificationFeedback}
-            </div>
-          )}
-
-          <div className="space-y-2 pt-2">
-            <button
-              onClick={handleCheckVerification}
-              disabled={isCheckingVerification}
-              className="w-full py-2.5 px-4 rounded-xl bg-[#2500ba] hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2"
-            >
-              {isCheckingVerification && (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-              <span>{isCheckingVerification ? 'Checking Status...' : 'Check Verification Status'}</span>
-            </button>
-            <button
-              onClick={() => signOut()}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition cursor-pointer"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  // Non-verified accounts cannot access operational interfaces
+  if (profile.status !== 'verified' && profile.role !== 'dswd_admin') {
+    void signOut();
+    return <AuthPage />;
   }
 
   const activeProfile: UserProfile = profile;

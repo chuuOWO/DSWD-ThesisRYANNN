@@ -45,10 +45,8 @@ export function AuthPage() {
   const { refreshProfile } = useAuth();
 
   // Mode for authentication flow
-  // Mobile uses: 'landpage' -> 'login' | 'signup' | 'awaiting_verification'
-  // Desktop straight up uses: 'login' | 'signup' | 'awaiting_verification'
-  const [mobileScreen, setMobileScreen] = useState<'landpage' | 'login' | 'signup' | 'awaiting_verification'>('landpage');
-  const [desktopMode, setDesktopMode] = useState<'login' | 'signup' | 'awaiting_verification'>('login');
+  const [mobileScreen, setMobileScreen] = useState<'landpage' | 'login' | 'signup'>('landpage');
+  const [desktopMode, setDesktopMode] = useState<'login' | 'signup'>('login');
 
   const role: UserRole = 'receiver';
   const [email, setEmail] = useState('');
@@ -62,112 +60,9 @@ export function AuthPage() {
   const [workIdFileName, setWorkIdFileName] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState('');
   const [truckId] = useState(generateTruckId);
-  const [submittedEmail, setSubmittedEmail] = useState(() => {
-    try {
-      return sessionStorage.getItem('dswd_last_registered_email') || '';
-    } catch {
-      return '';
-    }
-  });
   const [showPassword, setShowPassword] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
-
-  const getActiveAwaitingEmail = () => {
-    if (submittedEmail?.trim()) return submittedEmail.trim();
-    if (email?.trim()) return email.trim();
-    try {
-      const stored = sessionStorage.getItem('dswd_last_registered_email');
-      if (stored?.trim()) return stored.trim();
-    } catch {}
-    return '';
-  };
-
-  // Status check states for awaiting_verification
-  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
-  const [statusCheckFeedback, setStatusCheckFeedback] = useState<string | null>(null);
-
-  const handleCheckStatus = async () => {
-    const targetEmail = getActiveAwaitingEmail();
-    if (!targetEmail) {
-      setStatusCheckFeedback('No registration email found. Returning to login screen...');
-      setTimeout(() => {
-        setDesktopMode('login');
-        setMobileScreen('login');
-      }, 1200);
-      return;
-    }
-    setIsCheckingStatus(true);
-    setStatusCheckFeedback(null);
-    try {
-      const status = await authApi.checkProfileStatusByEmail(targetEmail);
-      if (status === 'verified') {
-        setStatusCheckFeedback('Account is approved! Redirecting to login...');
-        setTimeout(() => {
-          setEmail(targetEmail);
-          setDesktopMode('login');
-          setMobileScreen('login');
-        }, 1200);
-      } else if (status === 'rejected') {
-        setStatusCheckFeedback('Registration was declined. Please contact your administrator.');
-      } else {
-        setStatusCheckFeedback('Account is currently awaiting administrator review and approval.');
-      }
-    } catch {
-      setStatusCheckFeedback('Unable to check verification status. Please verify your connection.');
-    } finally {
-      setIsCheckingStatus(false);
-    }
-  };
-
-  // Real-time Supabase status listener
-  useEffect(() => {
-    const targetEmail = getActiveAwaitingEmail();
-    if (!targetEmail || (desktopMode !== 'awaiting_verification' && mobileScreen !== 'awaiting_verification')) {
-      return;
-    }
-
-    const channel = supabase
-      .channel(`profile-status-${targetEmail.trim().toLowerCase()}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `email=eq.${targetEmail.trim().toLowerCase()}`
-        },
-        (payload) => {
-          if (payload.new && (payload.new as any).status === 'verified') {
-            setStatusCheckFeedback('Account approved! Redirecting to login...');
-            setTimeout(() => {
-              setEmail(targetEmail);
-              setDesktopMode('login');
-              setMobileScreen('login');
-            }, 1200);
-          }
-        }
-      )
-      .subscribe();
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const status = await authApi.checkProfileStatusByEmail(targetEmail);
-        if (status === 'verified') {
-          setStatusCheckFeedback('Account approved! Redirecting to login...');
-          setTimeout(() => {
-            setEmail(targetEmail);
-            setDesktopMode('login');
-            setMobileScreen('login');
-          }, 800);
-        }
-      } catch {}
-    }, 3500);
-
-    return () => {
-      clearInterval(pollInterval);
-      void supabase.removeChannel(channel);
-    };
-  }, [submittedEmail, email, desktopMode, mobileScreen]);
+  const [isSignUpSuccessModalOpen, setIsSignUpSuccessModalOpen] = useState(false);
 
   // Work ID Image Upload Handler (reads, resizes, and base64 encodes)
   const handleWorkIdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -218,13 +113,19 @@ export function AuthPage() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const transitionMobileTo = (nextScreen: 'landpage' | 'login' | 'signup' | 'awaiting_verification') => {
+  const transitionMobileTo = (nextScreen: 'landpage' | 'login' | 'signup') => {
     setErrorMessage(null);
     setIsMobileTransitioning(true);
     setTimeout(() => {
       setMobileScreen(nextScreen);
       setIsMobileTransitioning(false);
     }, 200);
+  };
+
+  const handleSignUpSuccessDismiss = () => {
+    setIsSignUpSuccessModalOpen(false);
+    setDesktopMode('login');
+    setMobileScreen('login');
   };
 
   const handleLogin = async (event: FormEvent) => {
@@ -239,6 +140,10 @@ export function AuthPage() {
       await authApi.signIn(email.trim(), password);
       await refreshProfile();
     } catch (authErr: any) {
+      if (authErr?.message === 'ACCOUNT_PENDING') {
+        setErrorMessage('Your account is awaiting administrator review and approval. Please wait for verification before logging in.');
+        return;
+      }
       if (authErr?.message === 'ACCOUNT_REJECTED') {
         setErrorMessage('Account registration was declined by the administrator. Please contact your coordinator.');
         return;
@@ -290,13 +195,16 @@ export function AuthPage() {
         walletAddress: walletAddress.trim() || undefined
       });
 
-      const cleanEmail = email.trim();
-      setSubmittedEmail(cleanEmail);
-      try {
-        sessionStorage.setItem('dswd_last_registered_email', cleanEmail);
-      } catch {}
-      setMobileScreen('awaiting_verification');
-      setDesktopMode('awaiting_verification');
+      setPassword('');
+      setFirstName('');
+      setLastName('');
+      setPhoneNumber('');
+      setJobPosition('');
+      setWorkIdUrl(null);
+      setWorkIdFileName(null);
+      setWalletAddress('');
+
+      setIsSignUpSuccessModalOpen(true);
     } catch (error) {
       setErrorMessage(formatUserErrorMessage(error, 'Registration failed. Please try again.'));
     } finally {
@@ -656,65 +564,7 @@ export function AuthPage() {
                 </form>
               )}
 
-              {/* DESKTOP MODE: AWAITING VERIFICATION */}
-              {desktopMode === 'awaiting_verification' && (
-                <div className="mt-8 space-y-4 text-center">
-                  <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto ring-8 ring-amber-100/50">
-                    <Clock className="w-8 h-8 animate-pulse" />
-                  </div>
 
-                  <h2 className="text-2xl font-black text-[#10069f] tracking-tight">
-                    WAITING FOR VERIFICATION
-                  </h2>
-
-                  <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-                    Your account has been submitted and is currently awaiting administrator review. You will be able to log in once verified.
-                  </p>
-
-                  {getActiveAwaitingEmail() && (
-                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700">
-                      <Mail className="w-3.5 h-3.5 text-blue-600" />
-                      <span>{getActiveAwaitingEmail()}</span>
-                    </div>
-                  )}
-
-                  {statusCheckFeedback && (
-                    <div className={`p-2.5 rounded-xl text-xs font-semibold ${
-                      statusCheckFeedback.includes('approved') || statusCheckFeedback.includes('verified')
-                        ? 'bg-green-50 text-green-800 border border-green-200'
-                        : 'bg-amber-50 text-amber-800 border border-amber-200'
-                    }`}>
-                      {statusCheckFeedback}
-                    </div>
-                  )}
-
-                  <div className="pt-2 space-y-2">
-                    <button
-                      type="button"
-                      onClick={handleCheckStatus}
-                      disabled={isCheckingStatus}
-                      className="w-full py-3 rounded-2xl bg-white border-2 border-[#10069f] text-[#10069f] hover:bg-blue-50 font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
-                      <span>{isCheckingStatus ? 'Checking Status...' : 'Check Verification Status'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setErrorMessage(null);
-                        setStatusCheckFeedback(null);
-                        setPassword('');
-                        setDesktopMode('login');
-                        setMobileScreen('login');
-                      }}
-                      className="w-full py-3 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-xs shadow-md shadow-blue-900/20 transition-all hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
-                    >
-                      Back to Login
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Desktop Help & Info Button */}
@@ -1221,105 +1071,6 @@ export function AuthPage() {
           </div>
         )}
 
-        {/* ----------------------------------------------------
-            MOBILE SCREEN 4: AWAITING VERIFICATION
-            ---------------------------------------------------- */}
-        {mobileScreen === 'awaiting_verification' && (
-          <div
-            className={`w-full min-h-screen flex flex-col justify-between bg-white relative z-10 transition-all duration-300 transform ${
-              isMobileTransitioning
-                ? 'opacity-0 scale-95 translate-y-3'
-                : 'opacity-100 scale-100 translate-y-0'
-            }`}
-          >
-            {/* Top Area with Watercolor Wash + DSWD Logo */}
-            <div
-              className="w-full h-[220px] p-6 flex flex-col justify-between relative flex-shrink-0"
-              style={mobileWatercolorStyle}
-            >
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setIsHelpOpen(true)}
-                  className="w-8 h-8 rounded-full border border-[#10069f]/30 flex items-center justify-center text-[#10069f] font-bold text-sm hover:bg-white/60 transition cursor-pointer"
-                  title="Help"
-                >
-                  ?
-                </button>
-              </div>
-
-              <div className="flex justify-center pb-2">
-                <div className="w-16 h-16 rounded-xl bg-white border-2 border-yellow-400 p-2 shadow-md flex items-center justify-center">
-                  <img
-                    src={dswdLogo}
-                    alt="DSWD Logo"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom White Card */}
-            <div className="flex-1 bg-white px-7 pt-8 pb-8 flex flex-col justify-between rounded-t-[32px] -mt-6 relative z-10 shadow-lg text-center">
-              <div className="my-auto space-y-4">
-                <div className="w-16 h-16 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto ring-8 ring-amber-100/50">
-                  <Clock className="w-8 h-8 animate-pulse" />
-                </div>
-
-                <h2 className="text-xl font-black text-[#10069f] tracking-tight">
-                  WAITING FOR VERIFICATION
-                </h2>
-
-                <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-                  Your account has been submitted and is currently awaiting administrator review. You will be able to log in once verified.
-                </p>
-
-                {getActiveAwaitingEmail() && (
-                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700">
-                    <Mail className="w-3.5 h-3.5 text-blue-600" />
-                    <span>{getActiveAwaitingEmail()}</span>
-                  </div>
-                )}
-
-                {statusCheckFeedback && (
-                  <div className={`p-2.5 rounded-xl text-xs font-semibold ${
-                    statusCheckFeedback.includes('approved') || statusCheckFeedback.includes('verified')
-                      ? 'bg-green-50 text-green-800 border border-green-200'
-                      : 'bg-amber-50 text-amber-800 border border-amber-200'
-                  }`}>
-                    {statusCheckFeedback}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={handleCheckStatus}
-                  disabled={isCheckingStatus}
-                  className="w-full py-3.5 rounded-2xl bg-white border-2 border-[#10069f] text-[#10069f] hover:bg-blue-50 font-bold text-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
-                  <span>{isCheckingStatus ? 'Checking Status...' : 'Check Verification Status'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setErrorMessage(null);
-                    setStatusCheckFeedback(null);
-                    setPassword('');
-                    setDesktopMode('login');
-                    transitionMobileTo('login');
-                  }}
-                  className="w-full py-3.5 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-sm shadow-lg shadow-blue-900/30 transition-all active:scale-[0.98] cursor-pointer"
-                >
-                  Back to Login
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* 5-Dots Loading Screen */}
@@ -1328,6 +1079,42 @@ export function AuthPage() {
         title={loadingTitle}
         subtitle={loadingSubtitle}
       />
+
+      {/* Sign Up Success Modal */}
+      {isSignUpSuccessModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl text-center space-y-4 border border-slate-100">
+            <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto ring-8 ring-emerald-100/50">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+
+            <h3 className="text-xl font-black text-slate-800 tracking-tight">
+              Sign Up Successful
+            </h3>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Your account has been submitted and is currently awaiting administrator review. Please wait for verification before logging in.
+            </p>
+
+            {email && (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700">
+                <Mail className="w-3.5 h-3.5 text-blue-600" />
+                <span>{email.trim()}</span>
+              </div>
+            )}
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleSignUpSuccessDismiss}
+                className="w-full py-3.5 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-xs shadow-md shadow-blue-900/20 transition-all hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
+              >
+                OK, Back to Login
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Clean Minimalist Help (?) Modal */}
       {isHelpOpen && (
