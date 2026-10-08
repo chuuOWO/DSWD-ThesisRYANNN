@@ -179,6 +179,21 @@ create table if not exists public.lgus (
   longitude double precision not null default 122.3892,
   remarks text default '',
   is_active boolean not null default true,
+  food_packs integer not null default 0,
+  hygiene_kits integer not null default 0,
+  sleeping_kits integer not null default 0,
+  kitchen_kits integer not null default 0,
+  family_kits integer not null default 0,
+  laminated_sacks integer not null default 0,
+  rtef integer not null default 0,
+  affected_families integer not null default 0,
+  damage_index integer not null default 0,
+  max_stock integer not null default 3000,
+  current_stock jsonb default '{}'::jsonb,
+  urgency_score integer default 0,
+  priority_color text default 'Green',
+  recommendation text default '',
+  last_reported_at timestamptz default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint uq_lgus_muni_prov unique (municipality, province)
@@ -200,12 +215,14 @@ alter table public.lgus add column if not exists kitchen_kits integer not null d
 alter table public.lgus add column if not exists family_kits integer not null default 0;
 alter table public.lgus add column if not exists laminated_sacks integer not null default 0;
 alter table public.lgus add column if not exists rtef integer not null default 0;
+alter table public.lgus add column if not exists affected_families integer not null default 0;
+alter table public.lgus add column if not exists damage_index integer not null default 0;
+alter table public.lgus add column if not exists max_stock integer not null default 3000;
 alter table public.lgus add column if not exists current_stock jsonb default '{}'::jsonb;
 alter table public.lgus add column if not exists urgency_score integer default 0;
 alter table public.lgus add column if not exists priority_color text default 'Green';
 alter table public.lgus add column if not exists recommendation text default '';
 alter table public.lgus add column if not exists last_reported_at timestamptz default now();
-alter table public.lgus add column if not exists current_stock jsonb default '{}'::jsonb;
 alter table public.lgus add column if not exists created_at timestamptz default now();
 alter table public.lgus add column if not exists updated_at timestamptz default now();
 
@@ -325,26 +342,31 @@ on conflict (municipality, province) do update set
   latitude = excluded.latitude,
   longitude = excluded.longitude;
 
--- Backfill lgus stock from latest lgu_inventory_reports
-with latest_reports as (
-  select distinct on (coalesce(lgu_id, l.id))
-    coalesce(rpt.lgu_id, l.id) as target_lgu_id,
-    rpt.food_packs,
-    rpt.hygiene_kits,
-    rpt.family_kits,
-    rpt.reported_at
-  from public.lgu_inventory_reports rpt
-  left join public.lgus l on lower(trim(rpt.municipality)) = lower(trim(l.municipality))
-  order by coalesce(lgu_id, l.id), rpt.reported_at desc
-)
-update public.lgus l
-set
-  food_packs = lr.food_packs,
-  hygiene_kits = lr.hygiene_kits,
-  family_kits = lr.family_kits,
-  last_reported_at = lr.reported_at
-from latest_reports lr
-where l.id = lr.target_lgu_id;
+-- Backfill lgus stock from latest lgu_inventory_reports (if table already exists)
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'lgu_inventory_reports') then
+    with latest_reports as (
+      select distinct on (coalesce(rpt.lgu_id, l.id))
+        coalesce(rpt.lgu_id, l.id) as target_lgu_id,
+        rpt.food_packs,
+        rpt.hygiene_kits,
+        rpt.family_kits,
+        rpt.reported_at
+      from public.lgu_inventory_reports rpt
+      left join public.lgus l on lower(trim(rpt.municipality)) = lower(trim(l.municipality))
+      order by coalesce(lgu_id, l.id), rpt.reported_at desc
+    )
+    update public.lgus l
+    set
+      food_packs = lr.food_packs,
+      hygiene_kits = lr.hygiene_kits,
+      family_kits = lr.family_kits,
+      last_reported_at = lr.reported_at
+    from latest_reports lr
+    where l.id = lr.target_lgu_id;
+  end if;
+end $$;
 
 update public.lgus
 set current_stock = jsonb_build_object(
