@@ -91,28 +91,87 @@ export const authApi = {
     return data;
   },
 
-  async getProfile(userId: string): Promise<UserProfile | null> {
+  async getProfile(userId?: string | null, email?: string | null): Promise<UserProfile | null> {
     try {
-      let { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      // 1. Direct query by userId if provided
+      if (userId) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
 
-      if (!data) {
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData?.user?.email) {
-          const res = await supabase
-            .from('profiles')
-            .select('*')
-            .ilike('email', userData.user.email)
-            .maybeSingle();
-          data = res.data;
+        if (data) {
+          return mapProfile(data);
         }
       }
 
-      if (data) {
-        return mapProfile(data);
+      // 2. Query by email if provided
+      const cleanEmail = email?.trim().toLowerCase();
+      if (cleanEmail) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+
+        if (data) {
+          return mapProfile(data);
+        }
+      }
+
+      // 3. Fallback to Supabase Auth user session details
+      const { data: authData } = await supabase.auth.getUser();
+      const authUser = authData?.user;
+      if (authUser) {
+        if (authUser.id && authUser.id !== userId) {
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', authUser.id)
+            .maybeSingle();
+          if (data) return mapProfile(data);
+        }
+
+        const authEmail = authUser.email?.trim().toLowerCase();
+        if (authEmail && authEmail !== cleanEmail) {
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .ilike('email', authEmail)
+            .maybeSingle();
+          if (data) return mapProfile(data);
+        }
+
+        // 4. If user exists in Auth but is missing profile row in public.profiles (e.g. legacy/reset), auto-provision row
+        const meta = authUser.user_metadata || {};
+        const metaRole = normalizeRole(meta.role);
+        const metaStatus = metaRole === 'dswd_admin' ? 'verified' : normalizeStatus(meta.status);
+        const targetEmail = (authUser.email || cleanEmail || '').trim().toLowerCase();
+        const fullName = meta.full_name || `${meta.first_name || ''} ${meta.last_name || ''}`.trim() || targetEmail;
+
+        const { data: created } = await supabase
+          .from('profiles')
+          .upsert({
+            id: authUser.id,
+            email: targetEmail,
+            full_name: fullName,
+            first_name: meta.first_name || '',
+            last_name: meta.last_name || '',
+            phone_number: meta.phone_number || '',
+            job_position: meta.job_position || '',
+            work_id_url: meta.work_id_url || null,
+            role: metaRole,
+            truck_id: metaRole === 'receiver' ? meta.truck_id || null : null,
+            wallet_address: meta.wallet_address || null,
+            status: metaStatus
+          })
+          .select()
+          .maybeSingle();
+
+        if (created) {
+          return mapProfile(created);
+        }
       }
     } catch (err) {
       console.warn('getProfile error:', err);
@@ -136,41 +195,39 @@ export const authApi = {
   },
 
   async signIn(email: string, password: string) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    const cleanEmail = email.trim().toLowerCase();
+    const { data, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
     if (error) throw new Error(formatUserErrorMessage(error));
+
     if (data.user) {
-      const profile = await this.getProfile(data.user.id);
+      // Find user profile by user ID or email
+      const profile = await this.getProfile(data.user.id, data.user.email || cleanEmail);
+
       if (profile) {
         if (profile.status === 'rejected') {
           await supabase.auth.signOut();
           throw new Error('ACCOUNT_REJECTED');
         }
-        if (profile.role !== 'dswd_admin' && profile.status !== 'verified') {
+
+        // Only block unverified accounts if strictly pending and not an administrator
+        if (profile.role !== 'dswd_admin' && profile.status === 'pending') {
           await supabase.auth.signOut();
           throw new Error('ACCOUNT_PENDING');
         }
       } else {
-        const { data: rawProfile } = await supabase
-          .from('profiles')
-          .select('role, status')
-          .eq('id', data.user.id)
-          .maybeSingle();
-
-        if (rawProfile) {
-          if (rawProfile.status === 'rejected') {
-            await supabase.auth.signOut();
-            throw new Error('ACCOUNT_REJECTED');
-          }
-          if (rawProfile.role !== 'dswd_admin' && rawProfile.status !== 'verified') {
-            await supabase.auth.signOut();
-            throw new Error('ACCOUNT_PENDING');
-          }
-        } else {
+        // Fallback to checking the database profiles table status by email
+        const status = await this.checkProfileStatusByEmail(cleanEmail);
+        if (status === 'rejected') {
+          await supabase.auth.signOut();
+          throw new Error('ACCOUNT_REJECTED');
+        }
+        if (status === 'pending') {
           await supabase.auth.signOut();
           throw new Error('ACCOUNT_PENDING');
         }
       }
     }
+
     return data;
   },
 

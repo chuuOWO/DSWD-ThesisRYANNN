@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const nextProfile = await authApi.getProfile(nextSession.user.id);
+    const nextProfile = await authApi.getProfile(nextSession.user.id, nextSession.user.email);
     setProfile(nextProfile);
   };
 
