@@ -52,6 +52,7 @@ export interface SignReleaseInput {
   from: string;
   to: string;
   gps: string;
+  signerWallet?: string;
 }
 
 export interface ConfirmReceiptInput {
@@ -59,6 +60,7 @@ export interface ConfirmReceiptInput {
   handoverContractId: string;
   destination: string;
   gps: string;
+  signerWallet?: string;
 }
 
 export const generateBatchTokenId = (): string => {
@@ -370,9 +372,26 @@ export const blockchain = {
     }
   },
 
-  async requireConnectedWalletRole(expectedRole: AuthorizedRole): Promise<string> {
+  async assertUserWalletMatch(registeredWallet?: string | null): Promise<string> {
+    const signer = await getSigner();
+    const activeAddress = await signer.getAddress();
+    if (!registeredWallet) {
+      return activeAddress;
+    }
+    if (activeAddress.toLowerCase() !== registeredWallet.trim().toLowerCase()) {
+      throw new Error(`Wallet Mismatch: Account is locked to MetaMask address ${registeredWallet}. Your active MetaMask address is ${activeAddress}. Please switch accounts in MetaMask.`);
+    }
+    return activeAddress;
+  },
+
+  async requireConnectedWalletRole(expectedRole: AuthorizedRole, expectedWallet?: string | null): Promise<string> {
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
+
+    if (expectedWallet && walletAddress.toLowerCase() !== expectedWallet.trim().toLowerCase()) {
+      throw new Error(`Wallet Mismatch: This account is bound to MetaMask address ${expectedWallet}. Your active MetaMask address is ${walletAddress}. Please switch to your registered wallet.`);
+    }
+
     const actualRole = await resolveWalletRoleFromDb(walletAddress);
 
     if (actualRole !== expectedRole) {
@@ -591,6 +610,10 @@ export const blockchain = {
       const signer = await getSigner();
       const walletAddress = await signer.getAddress();
 
+      if (input.signerWallet && walletAddress.toLowerCase() !== input.signerWallet.trim().toLowerCase()) {
+        throw new Error(`Wallet Mismatch: Account is locked to MetaMask address ${input.signerWallet}. Your active MetaMask address is ${walletAddress}. Please switch accounts in MetaMask.`);
+      }
+
       if (handoverContractAddress) {
         if (isMobileBrowser() && !window.ethereum) {
           setTimeout(() => {
@@ -682,6 +705,10 @@ export const blockchain = {
     const task = (async (): Promise<BlockchainProof> => {
       const signer = await getSigner();
       const walletAddress = await signer.getAddress();
+
+      if (input.signerWallet && walletAddress.toLowerCase() !== input.signerWallet.trim().toLowerCase()) {
+        throw new Error(`Wallet Mismatch: Account is locked to MetaMask address ${input.signerWallet}. Your active MetaMask address is ${walletAddress}. Please switch accounts in MetaMask.`);
+      }
 
       if (handoverContractAddress) {
         if (isMobileBrowser() && !window.ethereum) {

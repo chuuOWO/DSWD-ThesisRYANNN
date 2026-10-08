@@ -9,6 +9,7 @@ import {
 } from '../lib/lguMatching';
 import { evaluatePriorityIndicator } from '../lib/priorityLogic';
 import { normalizeCategoryName } from '../lib/lguSync';
+import { formatUserErrorMessage } from '../lib/errorUtils';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -285,7 +286,7 @@ export type TruckerReleaseRecord = ReceiverReleaseRecord;
 
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatUserErrorMessage(error);
     throw new Error(`${context}: ${message}`);
   }
 };
@@ -307,8 +308,8 @@ export const backendApi = {
       supabase.from('kit_types').select('*').eq('is_active', true).order('name', { ascending: true })
     ]);
 
-    throwIfError(incomingResult.error, 'Failed to fetch incoming manifests');
-    throwIfError(outgoingResult.error, 'Failed to fetch outgoing requests');
+    throwIfError(incomingResult.error, 'Unable to load incoming manifests');
+    throwIfError(outgoingResult.error, 'Unable to load outgoing requests');
 
     if (lguReportsResult.error) {
       console.warn('LGU inventory reports are not available yet. Run supabase-schema-patch.sql to create lgu_inventory_reports.', lguReportsResult.error);
@@ -1392,7 +1393,7 @@ export const backendApi = {
       .maybeSingle();
 
     if (error) {
-      throwIfError(error, 'Failed to fetch batch counter');
+      throwIfError(error, 'Unable to load batch counter');
     }
 
     if (!data) {
@@ -1591,7 +1592,7 @@ export const backendApi = {
     }
 
     const { data, error } = await query;
-    throwIfError(error, 'Failed to fetch receiver releases');
+    throwIfError(error, 'Unable to load receiver releases');
     return (data ?? []) as ReceiverReleaseRecord[];
   },
 

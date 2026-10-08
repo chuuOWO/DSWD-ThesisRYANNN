@@ -18,6 +18,7 @@ import { blockchain } from '../../services/blockchain';
 import { supabase } from '../../lib/supabase';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { sanitizeTextOnly } from '../../lib/inputValidation';
+import { formatUserErrorMessage } from '../../lib/errorUtils';
 import dswdLogo from '../../../imports/dswdlogo.png';
 import dswdBuilding from '../../../imports/dswd_building.png';
 
@@ -200,17 +201,11 @@ export function AuthPage() {
       await authApi.signIn(email.trim(), password);
       await refreshProfile();
     } catch (authErr: any) {
-      if (authErr?.message === 'PENDING_VERIFICATION') {
-        setSubmittedEmail(email.trim());
-        setMobileScreen('awaiting_verification');
-        setDesktopMode('awaiting_verification');
-        return;
-      }
       if (authErr?.message === 'ACCOUNT_REJECTED') {
         setErrorMessage('Account registration was declined by the administrator. Please contact your coordinator.');
         return;
       }
-      setErrorMessage(authErr instanceof Error ? authErr.message : 'Invalid credentials. Please try again.');
+      setErrorMessage(formatUserErrorMessage(authErr, 'Invalid credentials. Please try again.'));
     } finally {
       setIsLoadingModalOpen(false);
     }
@@ -261,7 +256,7 @@ export function AuthPage() {
       setMobileScreen('awaiting_verification');
       setDesktopMode('awaiting_verification');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Registration failed. Please try again.');
+      setErrorMessage(formatUserErrorMessage(error, 'Registration failed. Please try again.'));
     } finally {
       setIsLoadingModalOpen(false);
     }

@@ -21,7 +21,8 @@ import {
   Truck,
   UserRound,
   X,
-  ExternalLink
+  ExternalLink,
+  LogOut
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -35,6 +36,7 @@ import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
+import { formatUserErrorMessage } from '../../lib/errorUtils';
 
 interface BarcodeDetectorResult {
   rawValue?: string;
@@ -1263,7 +1265,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         batchQuantities: payload.batchQuantities || [payload.quantity],
         from: payload.from || 'DSWD Logistics Hub',
         to: payload.to || 'Assigned LGU',
-        gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`
+        gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
+        signerWallet: profile?.walletAddress || undefined
       }, (stage, txHash) => {
         setMetaMaskStage(stage);
         if (txHash) {
@@ -1376,7 +1379,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         console.warn('Handover check failed:', checkErr);
       }
 
-      const msg = err?.message || 'MetaMask transaction was cancelled or reverted on Sepolia.';
+      const msg = formatUserErrorMessage(err, 'MetaMask transaction was cancelled or reverted on Sepolia.');
       setMetaMaskSignError(msg);
     } finally {
       isExecutingCustodyRef.current = false;
@@ -1467,15 +1470,13 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         <header className="z-10 flex items-center justify-between bg-[#2500ba] px-5 py-3.5 text-white shadow-sm">
           <div className="flex items-center gap-3">
             <div className="relative group flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsProfileModalOpen(true)}
-                className={`relative flex h-9 w-9 items-center justify-center rounded-full hover:opacity-90 active:scale-95 transition flex-shrink-0 cursor-pointer ${
+              <div
+                className={`relative flex h-9 w-9 items-center justify-center rounded-full select-none flex-shrink-0 ${
                   !profile?.walletAddress
                     ? 'border-2 border-red-500 ring-2 ring-red-400/60 bg-red-950/30'
                     : 'border border-white/70 bg-white/10'
                 }`}
-                title={!profile?.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to edit profile"}
+                title={!profile?.walletAddress ? "You need to open profile settings and link MetaMask." : profile?.fullName || 'Receiver Profile'}
               >
                 {profile?.avatarUrl ? (
                   <img
@@ -1493,20 +1494,16 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     <AlertTriangle className="w-2 h-2" />
                   </span>
                 )}
-              </button>
+              </div>
               {!profile?.walletAddress && (
                 <div className="absolute top-full mt-2 left-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                  You need to open profile and link it to MetaMask.
+                  You need to open profile settings and link MetaMask.
                   <div className="absolute -top-1 left-3 border-4 border-transparent border-b-red-900" />
                 </div>
               )}
             </div>
-            <div
-              onClick={() => setIsProfileModalOpen(true)}
-              className="cursor-pointer"
-              title="Click to edit profile"
-            >
-              <p className="text-[11px] font-semibold flex items-center gap-1.5 hover:underline">
+            <div>
+              <p className="text-[11px] font-semibold flex items-center gap-1.5">
                 <span>Receiver View</span>
                 <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Profile</span>
               </p>
@@ -1521,10 +1518,21 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               type="button"
               onClick={() => setIsProfileModalOpen(true)}
               className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition cursor-pointer"
-              title="Profile Settings"
+              title="Settings"
             >
-              <Settings size={14} />
+              <Settings size={15} />
             </button>
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/25 hover:bg-red-500/40 border border-red-400/40 text-white text-[11px] font-bold transition cursor-pointer active:scale-95"
+                title="Sign Out"
+              >
+                <LogOut size={13} />
+                <span>Sign Out</span>
+              </button>
+            )}
           </div>
         </header>
 

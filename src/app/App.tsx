@@ -121,6 +121,17 @@ export default function App() {
     );
   }
 
+  if (session && !profile) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="rounded-lg bg-white border border-gray-200 px-6 py-4 text-sm font-bold text-gray-700 shadow-sm flex items-center gap-3">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#2500ba] border-t-transparent" />
+          <span>Loading officer profile...</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!session || !profile) {
     return <AuthPage />;
   }
@@ -139,12 +150,20 @@ export default function App() {
           <p className="text-xs text-slate-300 leading-relaxed">
             Your account ({profile.email}) is currently awaiting administrator review and approval. Once verified, you will be granted access to the DSWD relief operations system.
           </p>
-          <button
-            onClick={() => signOut()}
-            className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition cursor-pointer"
-          >
-            Sign Out
-          </button>
+          <div className="space-y-2 pt-2">
+            <button
+              onClick={() => refreshProfile()}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#2500ba] hover:bg-blue-700 text-white text-xs font-bold transition cursor-pointer"
+            >
+              Check Verification Status
+            </button>
+            <button
+              onClick={() => signOut()}
+              className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition cursor-pointer"
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
       </div>
     );

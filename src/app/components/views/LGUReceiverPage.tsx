@@ -18,7 +18,8 @@ import {
   ScanLine,
   Settings,
   Truck,
-  X
+  X,
+  LogOut
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -30,6 +31,7 @@ import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
+import { formatUserErrorMessage } from '../../lib/errorUtils';
 
 interface LGUReceiverPageProps {
   profile: UserProfile;
@@ -511,7 +513,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       setIsEditingStock(false);
       setToastMessage({ type: 'success', text: 'LGU inventory updated and synchronized with Supabase.' });
     } catch (err) {
-      setToastMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update LGU stock.' });
+      setToastMessage({ type: 'error', text: formatUserErrorMessage(err, 'Unable to update LGU stock. Please check your connection.') });
     } finally {
       setIsSavingStock(false);
     }
@@ -705,7 +707,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       setIsProcessing(false);
       setToastMessage({
         type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to record shipment receipt.'
+        text: formatUserErrorMessage(err, 'Unable to record shipment receipt. Please check your connection.')
       });
     }
   };
@@ -724,15 +726,13 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         <header className="z-10 flex items-center justify-between bg-[#2500ba] px-5 py-3.5 text-white shadow-sm">
           <div className="flex items-center gap-3">
             <div className="relative group flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsProfileModalOpen(true)}
-                className={`relative flex h-9 w-9 items-center justify-center rounded-full hover:opacity-90 active:scale-95 transition flex-shrink-0 cursor-pointer ${
+              <div
+                className={`relative flex h-9 w-9 items-center justify-center rounded-full select-none flex-shrink-0 ${
                   !profile?.walletAddress
                     ? 'border-2 border-red-500 ring-2 ring-red-400/60 bg-red-950/30'
                     : 'border border-white/70 bg-white/10'
                 }`}
-                title={!profile?.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to edit profile"}
+                title={!profile?.walletAddress ? "You need to open profile settings and link MetaMask." : profile?.fullName || 'LGU Officer Profile'}
               >
                 {profile?.avatarUrl ? (
                   <img
@@ -750,20 +750,16 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     <AlertTriangle className="w-2 h-2" />
                   </span>
                 )}
-              </button>
+              </div>
               {!profile?.walletAddress && (
                 <div className="absolute top-full mt-2 left-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                  You need to open profile and link it to MetaMask.
+                  You need to open profile settings and link MetaMask.
                   <div className="absolute -top-1 left-3 border-4 border-transparent border-b-red-900" />
                 </div>
               )}
             </div>
-            <div
-              onClick={() => setIsProfileModalOpen(true)}
-              className="cursor-pointer"
-              title="Click to edit profile"
-            >
-              <p className="text-[11px] font-semibold flex items-center gap-1.5 hover:underline">
+            <div>
+              <p className="text-[11px] font-semibold flex items-center gap-1.5">
                 <span>Receiver View</span>
                 <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Profile</span>
               </p>
@@ -783,10 +779,21 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               type="button"
               onClick={() => setIsProfileModalOpen(true)}
               className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition cursor-pointer"
-              title="Profile Settings"
+              title="Settings"
             >
-              <Settings size={14} />
+              <Settings size={15} />
             </button>
+            {onSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/25 hover:bg-red-500/40 border border-red-400/40 text-white text-[11px] font-bold transition cursor-pointer active:scale-95"
+                title="Sign Out"
+              >
+                <LogOut size={13} />
+                <span>Sign Out</span>
+              </button>
+            )}
           </div>
         </header>
 

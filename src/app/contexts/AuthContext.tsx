@@ -57,10 +57,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
-      loadProfile(nextSession).catch((error) => {
-        console.error('Failed to load profile after auth change', error);
+      if (nextSession?.user) {
+        loadProfile(nextSession).catch((error) => {
+          console.error('Failed to load profile after auth change', error);
+        });
+      } else {
         setProfile(null);
-      });
+      }
     });
 
     return () => {

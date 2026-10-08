@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { formatUserErrorMessage } from '../lib/errorUtils';
 
 export type UserRole = 'dswd_admin' | 'receiver';
 export type AccountStatus = 'pending' | 'verified' | 'rejected';
@@ -171,14 +172,10 @@ export const authApi = {
 
   async signIn(email: string, password: string) {
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(formatUserErrorMessage(error));
     if (data.user) {
       const profile = await this.getProfile(data.user.id);
       if (profile) {
-        if (profile.status === 'pending') {
-          await supabase.auth.signOut();
-          throw new Error('PENDING_VERIFICATION');
-        }
         if (profile.status === 'rejected') {
           await supabase.auth.signOut();
           throw new Error('ACCOUNT_REJECTED');
