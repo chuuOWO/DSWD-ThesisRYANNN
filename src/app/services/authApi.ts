@@ -165,6 +165,9 @@ export const authApi = {
             await supabase.auth.signOut();
             throw new Error('ACCOUNT_PENDING');
           }
+        } else {
+          await supabase.auth.signOut();
+          throw new Error('ACCOUNT_PENDING');
         }
       }
     }
