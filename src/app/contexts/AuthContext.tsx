@@ -53,10 +53,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
+    try {
+      const { data: refreshData } = await supabase.auth.refreshSession();
+      if (refreshData?.session) {
+        setSession(refreshData.session);
+        await loadProfile(refreshData.session);
+        return;
+      }
+    } catch (err) {
+      console.warn('refreshSession fallback:', err);
+    }
     const { data } = await supabase.auth.getSession();
     setSession(data.session);
     await loadProfile(data.session);
   };
+
+  // Real-time listener for current user's profile changes (e.g. admin verification approval)
+  useEffect(() => {
+    const currentUserId = session?.user?.id;
+    if (!currentUserId) return;
+
+    const channel = supabase
+      .channel(`user-profile-sync-${currentUserId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${currentUserId}`
+        },
+        () => {
+          loadProfile(session).catch((err) => {
+            console.error('Failed to sync profile after update:', err);
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id]);
 
   useEffect(() => {
     let isMounted = true;

@@ -62,17 +62,40 @@ export function AuthPage() {
   const [workIdFileName, setWorkIdFileName] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState('');
   const [truckId] = useState(generateTruckId);
-  const [submittedEmail, setSubmittedEmail] = useState('');
+  const [submittedEmail, setSubmittedEmail] = useState(() => {
+    try {
+      return sessionStorage.getItem('dswd_last_registered_email') || '';
+    } catch {
+      return '';
+    }
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+
+  const getActiveAwaitingEmail = () => {
+    if (submittedEmail?.trim()) return submittedEmail.trim();
+    if (email?.trim()) return email.trim();
+    try {
+      const stored = sessionStorage.getItem('dswd_last_registered_email');
+      if (stored?.trim()) return stored.trim();
+    } catch {}
+    return '';
+  };
 
   // Status check states for awaiting_verification
   const [isCheckingStatus, setIsCheckingStatus] = useState(false);
   const [statusCheckFeedback, setStatusCheckFeedback] = useState<string | null>(null);
 
   const handleCheckStatus = async () => {
-    const targetEmail = submittedEmail || email;
-    if (!targetEmail) return;
+    const targetEmail = getActiveAwaitingEmail();
+    if (!targetEmail) {
+      setStatusCheckFeedback('No registration email found. Returning to login screen...');
+      setTimeout(() => {
+        setDesktopMode('login');
+        setMobileScreen('login');
+      }, 1200);
+      return;
+    }
     setIsCheckingStatus(true);
     setStatusCheckFeedback(null);
     try {
@@ -98,7 +121,7 @@ export function AuthPage() {
 
   // Real-time Supabase status listener
   useEffect(() => {
-    const targetEmail = submittedEmail || email;
+    const targetEmail = getActiveAwaitingEmail();
     if (!targetEmail || (desktopMode !== 'awaiting_verification' && mobileScreen !== 'awaiting_verification')) {
       return;
     }
@@ -252,7 +275,11 @@ export function AuthPage() {
         walletAddress: walletAddress.trim() || undefined
       });
 
-      setSubmittedEmail(email.trim());
+      const cleanEmail = email.trim();
+      setSubmittedEmail(cleanEmail);
+      try {
+        sessionStorage.setItem('dswd_last_registered_email', cleanEmail);
+      } catch {}
       setMobileScreen('awaiting_verification');
       setDesktopMode('awaiting_verification');
     } catch (error) {
@@ -629,10 +656,10 @@ export function AuthPage() {
                     Your account has been submitted and is currently awaiting administrator review. You will be able to log in once verified.
                   </p>
 
-                  {submittedEmail && (
+                  {getActiveAwaitingEmail() && (
                     <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700">
                       <Mail className="w-3.5 h-3.5 text-blue-600" />
-                      <span>{submittedEmail}</span>
+                      <span>{getActiveAwaitingEmail()}</span>
                     </div>
                   )}
 
@@ -661,8 +688,10 @@ export function AuthPage() {
                       type="button"
                       onClick={() => {
                         setErrorMessage(null);
+                        setStatusCheckFeedback(null);
                         setPassword('');
                         setDesktopMode('login');
+                        setMobileScreen('login');
                       }}
                       className="w-full py-3 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-xs shadow-md shadow-blue-900/20 transition-all hover:scale-[1.01] active:scale-[0.98] cursor-pointer"
                     >
@@ -1230,10 +1259,10 @@ export function AuthPage() {
                   Your account has been submitted and is currently awaiting administrator review. You will be able to log in once verified.
                 </p>
 
-                {submittedEmail && (
+                {getActiveAwaitingEmail() && (
                   <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-700">
                     <Mail className="w-3.5 h-3.5 text-blue-600" />
-                    <span>{submittedEmail}</span>
+                    <span>{getActiveAwaitingEmail()}</span>
                   </div>
                 )}
 
@@ -1263,7 +1292,9 @@ export function AuthPage() {
                   type="button"
                   onClick={() => {
                     setErrorMessage(null);
+                    setStatusCheckFeedback(null);
                     setPassword('');
+                    setDesktopMode('login');
                     transitionMobileTo('login');
                   }}
                   className="w-full py-3.5 rounded-2xl bg-[#10069f] hover:bg-[#0c0480] text-white font-bold text-sm shadow-lg shadow-blue-900/30 transition-all active:scale-[0.98] cursor-pointer"

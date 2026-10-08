@@ -7,7 +7,7 @@ import { ConfirmLogoutModal } from './components/modals/ConfirmLogoutModal';
 import { MetaMaskMismatchModal } from './components/modals/MetaMaskMismatchModal';
 import { useInventoryState, type UserRole } from './hooks/useInventoryState';
 import { useAuth } from './contexts/AuthContext';
-import { type UserProfile } from './services/authApi';
+import { authApi, type UserProfile } from './services/authApi';
 import { blockchain } from './services/blockchain';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -42,10 +42,35 @@ export default function App() {
   const [walletMismatch, setWalletMismatch] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
+  const [isCheckingVerification, setIsCheckingVerification] = useState(false);
+  const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
   const { session, profile, isLoading, signOut, refreshProfile } = useAuth();
   const inventoryState = useInventoryState(Boolean(session), profile);
 
   const requestSignOut = () => setIsLogoutConfirmOpen(true);
+
+  const handleCheckVerification = async () => {
+    setIsCheckingVerification(true);
+    setVerificationFeedback(null);
+    try {
+      await refreshProfile();
+      if (profile?.email) {
+        const dbStatus = await authApi.checkProfileStatusByEmail(profile.email);
+        if (dbStatus === 'verified') {
+          setVerificationFeedback('Account verified! Refreshing your session...');
+          await refreshProfile();
+        } else if (dbStatus === 'rejected') {
+          setVerificationFeedback('Account registration was declined. Please contact your coordinator.');
+        } else {
+          setVerificationFeedback('Account is currently awaiting administrator review. Please check back shortly.');
+        }
+      }
+    } catch {
+      setVerificationFeedback('Unable to check verification status. Please check your connection.');
+    } finally {
+      setIsCheckingVerification(false);
+    }
+  };
 
   const refreshWalletRole = async () => {
     const address = await blockchain.getConnectedWalletAddress();
@@ -160,16 +185,32 @@ export default function App() {
           <p className="text-xs text-slate-300 leading-relaxed">
             Your account ({profile.email}) is currently awaiting administrator review and approval. Once verified, you will be granted access to the DSWD relief operations system.
           </p>
+
+          {verificationFeedback && (
+            <div className={`p-2.5 rounded-xl text-xs font-semibold ${
+              verificationFeedback.includes('verified')
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              {verificationFeedback}
+            </div>
+          )}
+
           <div className="space-y-2 pt-2">
             <button
-              onClick={() => refreshProfile()}
-              className="w-full py-2.5 px-4 rounded-xl bg-[#2500ba] hover:bg-blue-700 text-white text-xs font-bold transition cursor-pointer"
+              onClick={handleCheckVerification}
+              disabled={isCheckingVerification}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#2500ba] hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer flex items-center justify-center gap-2"
             >
-              Check Verification Status
+              {isCheckingVerification && (
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              )}
+              <span>{isCheckingVerification ? 'Checking Status...' : 'Check Verification Status'}</span>
             </button>
             <button
               onClick={() => signOut()}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition cursor-pointer"
+              disabled={isCheckingVerification}
+              className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
             >
               Sign Out
             </button>
