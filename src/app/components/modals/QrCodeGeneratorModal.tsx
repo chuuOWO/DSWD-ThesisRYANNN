@@ -105,7 +105,7 @@ export function QrCodeGeneratorModal({
       blockchain: {
         status: 'Direct Manifest Scan',
         network: 'Sepolia Testnet (Chain ID 11155111)',
-        contractAddress: (import.meta as any).env?.VITE_HANDOVER_CONTRACT_ADDRESS || '0x91c976fFee18761d8331d759D24987Ab65ec486A1',
+        contractAddress: (import.meta as any).env?.VITE_HANDOVER_CONTRACT_ADDRESS || '0x4ca82b943107a32a3e3fe05a2ad057f602d496e5',
         tokenStandard: 'ERC-1155 Multi-Token Relief Handover',
         merkleRootHash: `0x${Array.from(currentRelease.drNumber + qty).reduce((acc, char) => acc + char.charCodeAt(0).toString(16), '').padEnd(64, 'a').slice(0, 64)}`,
         txHash: currentRelease.blockchainTxHash || null
