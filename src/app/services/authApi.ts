@@ -58,6 +58,8 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
   const fName = row.first_name ? String(row.first_name) : null;
   const lName = row.last_name ? String(row.last_name) : null;
   const computedFullName = (fName || lName) ? `${fName || ''} ${lName || ''}`.trim() : '';
+  const resolvedRole = normalizeRole(row.role);
+  const resolvedStatus = resolvedRole === 'dswd_admin' ? 'verified' : normalizeStatus(row.status);
 
   return {
     id: String(row.id),
@@ -69,13 +71,13 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
     phoneNumber: row.phone_number ? String(row.phone_number) : null,
     jobPosition: row.job_position ? String(row.job_position) : null,
     workIdUrl: row.work_id_url ? String(row.work_id_url) : null,
-    role: normalizeRole(row.role),
+    role: resolvedRole,
     truckId: row.truck_id ? String(row.truck_id) : null,
     lguName: row.lgu_name ? String(row.lgu_name) : null,
     walletAddress: row.wallet_address ? String(row.wallet_address) : null,
     avatarUrl: row.avatar_url ? String(row.avatar_url) : null,
     createdAt: row.created_at ? String(row.created_at) : null,
-    status: normalizeStatus(row.status)
+    status: resolvedStatus
   };
 };
 
@@ -105,6 +107,34 @@ export const authApi = {
             .ilike('email', userData.user.email)
             .maybeSingle();
           data = res.data;
+        }
+
+        // If public.profiles row is still missing, synthesize from Supabase Auth user metadata
+        if (!data && userData?.user) {
+          const u = userData.user;
+          const meta = (u.user_metadata || {}) as Record<string, unknown>;
+          const rawRole = meta.role || 'receiver';
+          const isAdmin = String(rawRole).toLowerCase().includes('admin');
+          const resolvedStatus = isAdmin ? 'verified' : (meta.status === 'verified' ? 'verified' : 'pending');
+          const syntheticRow = {
+            id: u.id,
+            email: u.email || '',
+            full_name: String(meta.full_name || meta.fullName || u.email?.split('@')[0] || 'DSWD Officer'),
+            first_name: meta.first_name ? String(meta.first_name) : null,
+            last_name: meta.last_name ? String(meta.last_name) : null,
+            phone_number: meta.phone_number ? String(meta.phone_number) : null,
+            job_position: meta.job_position ? String(meta.job_position) : null,
+            role: isAdmin ? 'dswd_admin' : 'receiver',
+            status: resolvedStatus,
+            truck_id: meta.truck_id ? String(meta.truck_id) : null,
+            lgu_name: meta.lgu_name ? String(meta.lgu_name) : null,
+            wallet_address: meta.wallet_address ? String(meta.wallet_address) : null,
+            avatar_url: meta.avatar_url ? String(meta.avatar_url) : null
+          };
+
+          // Self-heal: insert or update public.profiles so subsequent queries succeed
+          supabase.from('profiles').upsert(syntheticRow).catch(() => {});
+          return mapProfile(syntheticRow);
         }
       }
 

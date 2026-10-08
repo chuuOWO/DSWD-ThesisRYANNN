@@ -1155,6 +1155,21 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       auditTrail: [audit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
+
+    // Immediately deduct source stock upon dispatch if release is pre-approved or released
+    const approvedQty = status === 'Draft' || status === 'Allocating' ? 0 : (newRelease.amountApproved || newRelease.amountRequested || 0);
+    if (approvedQty > 0 && newRelease.deliveryMode !== 'Direct Delivery') {
+      if (isMainWarehouse(newRelease.warehouseSource)) {
+        backendApi.deductWarehouseStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty)
+          .catch(err => console.warn('Supabase deductWarehouseStock error:', err));
+        deductStock(newRelease.fnfiCategory, newRelease.warehouseSource, approvedQty);
+      } else if (newRelease.warehouseSource && (newRelease.sourceType === 'LGU' || !isMainWarehouse(newRelease.warehouseSource))) {
+        backendApi.deductLguStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty)
+          .catch(err => console.warn('Supabase deductLguStock error:', err));
+        deductLguStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty);
+      }
+    }
+
     backendApi.createOutgoing({
       ...newRelease,
       lguId: resolvedLguId,

@@ -25,13 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const nextProfile = await authApi.getProfile(nextSession.user.id);
-    if (!nextProfile || nextProfile.status !== 'verified') {
-      // Unapproved/pending accounts must NOT hold an active session
-      try {
-        await supabase.auth.signOut();
-      } catch {}
-      setSession(null);
-      setProfile(null);
+    if (!nextProfile) {
+      // If profile query fails temporarily, avoid destructive sign-out
       return;
     }
 

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import type { LguRecord } from '../../services/backendApi';
 
 interface InventoryState {
@@ -34,7 +33,6 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const [selectedWarehouse, setSelectedWarehouse] = useState('All Specific Warehouses');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // Dynamic categories gathered from inventory, incoming, and outgoing releases without fallbacks
   const dynamicCategories = useMemo(() => {
@@ -103,6 +101,20 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       const cat = release.fnfiCategory;
       if (cat) {
         record[cat] = (record[cat] || 0) + qty;
+      }
+    });
+
+    // 1b. Deduct outbound dispatches immediately from source LGU upon dispatch
+    outgoingReleasesList.forEach((release) => {
+      if (release.sourceType !== 'LGU' || release.deliveryStatus === 'Cancelled') return;
+      const rawSource = release.warehouseSource;
+      if (!rawSource) return;
+      const sourceLgu = cleanLguName(rawSource);
+      const record = ensureLgu(sourceLgu);
+      const qty = release.amountApproved || release.amountRequested || 0;
+      const cat = release.fnfiCategory;
+      if (cat && qty > 0) {
+        record[cat] = Math.max(0, (record[cat] || 0) - qty);
       }
     });
 
@@ -234,21 +246,8 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   // Low stock items (available < 500)
   const lowStockItems = displayData.filter(item => item.available < 500);
 
-  const handleSyncDatabase = () => {
-    setIsSyncing(true);
-    setTimeout(() => {
-      setIsSyncing(false);
-    }, 1600);
-  };
-
   return (
     <div className="space-y-6">
-      {/* 5-Dot Loading Modal for Admin Sync */}
-      <FiveDotsLoadingModal
-        isOpen={isSyncing}
-        title="Synchronizing Database Inventory"
-        subtitle="Refreshing minted batches, outgoing transfers, and LGU receipts..."
-      />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

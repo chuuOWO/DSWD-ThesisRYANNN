@@ -341,14 +341,11 @@ export const backendApi = {
         .select('*')
         .order('name', { ascending: true });
 
-      if (error || !data || data.length === 0) {
+      if (error) {
         return DEFAULT_PROVINCES;
       }
 
-      const activeProvinces = (data ?? []).filter((r: any) => r.is_active !== false);
-      if (activeProvinces.length === 0) return DEFAULT_PROVINCES;
-
-      return activeProvinces.map(row => ({
+      return (data ?? []).filter((r: any) => r.is_active !== false).map(row => ({
         id: String(row.id),
         name: String(row.name),
         region: String(row.region ?? 'Region VI (Western Visayas)'),
@@ -398,14 +395,13 @@ export const backendApi = {
         .select('*')
         .order('name', { ascending: true });
 
-      if (error || !data || data.length === 0) {
+      if (error) {
         return DEFAULT_WAREHOUSES;
       }
 
       const activeWh = (data ?? []).filter((r: any) => r.is_active !== false);
-      if (activeWh.length === 0) return DEFAULT_WAREHOUSES;
 
-    return (data ?? []).map(row => {
+      return activeWh.map(row => {
       const foodPacks = Number(row.food_packs ?? 0);
       const hygieneKits = Number(row.hygiene_kits ?? 0);
       const sleepingKits = Number(row.sleeping_kits ?? 0);
@@ -804,12 +800,11 @@ export const backendApi = {
         .select('*')
         .order('name', { ascending: true });
 
-      if (error || !data || data.length === 0) {
+      if (error) {
         return DEFAULT_SUPPLY_SOURCES;
       }
 
       const activeSources = (data ?? []).filter((r: any) => r.is_active !== false);
-      if (activeSources.length === 0) return DEFAULT_SUPPLY_SOURCES;
 
       return activeSources.map(row => ({
         id: String(row.id),
@@ -865,12 +860,11 @@ export const backendApi = {
         .select('*')
         .order('name', { ascending: true });
 
-      if (error || !data || data.length === 0) {
+      if (error) {
         return DEFAULT_KIT_TYPES;
       }
 
       const activeKits = (data ?? []).filter((r: any) => r.is_active !== false);
-      if (activeKits.length === 0) return DEFAULT_KIT_TYPES;
 
       return activeKits.map(row => ({
         id: String(row.id),
@@ -1726,11 +1720,15 @@ export const backendApi = {
     const channel = supabase
       .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lgus' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouses' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incoming_manifests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_requests' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_live_locations' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lgu_inventory_reports' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'discrepancy_reports' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'provinces' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_sources' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kit_types' }, onChange)
       .subscribe();
 
     return () => {

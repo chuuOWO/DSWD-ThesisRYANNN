@@ -711,7 +711,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   };
 
   return (
-    <main className="min-h-screen bg-[#e7e6ea] p-0 text-[#15132d] sm:p-5 flex items-center justify-center font-sans">
+    <main className="h-[100dvh] w-full bg-[#e7e6ea] p-0 text-[#15132d] sm:p-4 md:p-6 flex items-center justify-center font-sans overflow-hidden">
       {/* Comfy 5-Dot Loading Modal */}
       <FiveDotsLoadingModal
         isOpen={isProcessing}
@@ -719,7 +719,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         subtitle={`Updating ${effectiveLguName || 'LGU'} warehouse inventory in Supabase...`}
       />
 
-      <section className="mx-auto flex h-[100dvh] max-h-[100dvh] w-full max-w-[390px] flex-col overflow-hidden bg-white shadow-xl sm:h-[800px] sm:rounded-[28px] relative">
+      <section className="mx-auto flex h-full max-h-[100dvh] w-full max-w-full sm:max-w-lg md:max-w-xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[94dvh] sm:max-h-[920px] sm:rounded-3xl relative">
         {/* Header matching ReceiverPage */}
         <header className="z-10 flex items-center justify-between bg-[#2500ba] px-5 py-3.5 text-white shadow-sm">
           <div className="flex items-center gap-3">

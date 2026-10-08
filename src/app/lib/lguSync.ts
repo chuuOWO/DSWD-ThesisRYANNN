@@ -192,7 +192,14 @@ export function computeSynchronizedLgus(params: {
       stock[cat] = Math.max(Number(stock[cat]) || 0, arrivalQty);
     });
 
-    // 7. Deduct outbound dispatches where this LGU is the source
+    // 7. Priority report baseline if reported on-hand stock is higher
+    if (report) {
+      if (report.foodPacks) stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(report.foodPacks));
+      if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(report.hygieneKits));
+      if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
+    }
+
+    // 8. Deduct outbound dispatches immediately where this LGU is the source
     outboundReleases.forEach((r) => {
       if (r.fnfiCategory) {
         const canonical = normalizeCategoryName(r.fnfiCategory);
@@ -200,13 +207,6 @@ export function computeSynchronizedLgus(params: {
         stock[canonical] = Math.max(0, (Number(stock[canonical]) || 0) - dispatchQty);
       }
     });
-
-    // 8. Priority report override if reported on-hand stock is higher
-    if (report) {
-      if (report.foodPacks) stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(report.foodPacks));
-      if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(report.hygieneKits));
-      if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
-    }
 
     // 9. Consolidate into strictly unique canonical categories (no duplicate alias keys)
     const canonicalStock: Record<string, number> = {

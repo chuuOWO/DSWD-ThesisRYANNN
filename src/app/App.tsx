@@ -83,6 +83,22 @@ export default function App() {
     });
   }, [profile?.walletAddress]);
 
+  // Eagerly preload view modules after authentication to eliminate tab loading flicker
+  useEffect(() => {
+    if (session) {
+      void import('./components/views/DashboardView');
+      void import('./components/views/IncomingModule');
+      void import('./components/views/OutgoingModule');
+      void import('./components/views/InventoryMonitoring');
+      void import('./components/views/LGUMonitoring');
+      void import('./components/views/TruckTracking');
+      void import('./components/views/AccountManagement');
+      void import('./components/views/MasterDataView');
+      void import('./components/views/ReceiverPage');
+      void import('./components/views/LGUReceiverPage');
+    }
+  }, [session]);
+
   const handleConnectWallet = async () => {
     try {
       const connected = await blockchain.connectWallet();
