@@ -26,7 +26,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const nextProfile = await authApi.getProfile(nextSession.user.id);
     if (!nextProfile) {
-      // If profile query fails temporarily, avoid destructive sign-out
+      // If profile query fails or is pending creation, set a safe fallback
+      // to prevent an infinite loading screen lockup.
+      setProfile({
+        id: nextSession.user.id,
+        officialId: null,
+        email: nextSession.user.email || '',
+        fullName: String(nextSession.user.user_metadata?.full_name || nextSession.user.email?.split('@')[0] || 'Receiver'),
+        firstName: null,
+        lastName: null,
+        phoneNumber: null,
+        jobPosition: null,
+        workIdUrl: null,
+        role: 'receiver',
+        truckId: null,
+        lguName: null,
+        walletAddress: null,
+        avatarUrl: null,
+        createdAt: null,
+        status: 'pending'
+      });
       return;
     }
 

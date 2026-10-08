@@ -123,10 +123,20 @@ export default function App() {
 
   if (session && !profile) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="rounded-lg bg-white border border-gray-200 px-6 py-4 text-sm font-bold text-gray-700 shadow-sm flex items-center gap-3">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#2500ba] border-t-transparent" />
-          <span>Loading officer profile...</span>
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="rounded-2xl bg-white border border-gray-200 px-6 py-5 text-sm font-bold text-gray-700 shadow-md flex flex-col items-center gap-3 max-w-sm w-full text-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#2500ba] border-t-transparent" />
+          <span>Loading account profile...</span>
+          <p className="text-xs text-gray-500 font-normal">
+            Verifying your account credentials and role assignments.
+          </p>
+          <button
+            type="button"
+            onClick={() => signOut()}
+            className="text-xs text-red-600 hover:text-red-700 underline font-semibold cursor-pointer pt-1"
+          >
+            Cancel and Return to Sign In
+          </button>
         </div>
       </div>
     );
