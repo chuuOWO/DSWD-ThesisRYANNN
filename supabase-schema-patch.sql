@@ -1039,7 +1039,7 @@ update public.profiles set role = 'receiver' where role in ('trucker', 'lgu');
 alter table public.profiles add constraint profiles_role_check check (role in ('dswd_admin', 'receiver'));
 
 alter table public.profiles drop constraint if exists profiles_status_check;
-update public.profiles set status = 'verified' where status is null;
+update public.profiles set status = 'verified' where status is null or role = 'dswd_admin';
 alter table public.profiles add constraint profiles_status_check check (status in ('pending', 'verified', 'rejected'));
 
 -- Trigger: Automatically handle auth user profile creation
@@ -1050,11 +1050,16 @@ security definer set search_path = public
 as $$
 declare
   resolved_role text;
+  resolved_status text;
   is_lgu_rec boolean;
 begin
   resolved_role := case
     when lower(coalesce(new.raw_user_meta_data->>'role', '')) in ('admin', 'dswd_admin') then 'dswd_admin'
     else 'receiver'
+  end;
+  resolved_status := case
+    when resolved_role = 'dswd_admin' then 'verified'
+    else coalesce(new.raw_user_meta_data->>'status', 'pending')
   end;
   is_lgu_rec := (new.raw_user_meta_data->>'lgu_name' is not null and trim(new.raw_user_meta_data->>'lgu_name') != '');
 
@@ -1093,7 +1098,7 @@ begin
     new.raw_user_meta_data->>'lgu_name',
     new.raw_user_meta_data->>'wallet_address',
     new.raw_user_meta_data->>'avatar_url',
-    coalesce(new.raw_user_meta_data->>'status', 'pending')
+    resolved_status
   )
   on conflict (id) do update set
     official_id = coalesce(public.profiles.official_id, excluded.official_id),
@@ -1109,7 +1114,10 @@ begin
     lgu_name = coalesce(excluded.lgu_name, public.profiles.lgu_name),
     wallet_address = coalesce(excluded.wallet_address, public.profiles.wallet_address),
     avatar_url = coalesce(excluded.avatar_url, public.profiles.avatar_url),
-    status = coalesce(excluded.status, public.profiles.status);
+    status = case
+      when excluded.role = 'dswd_admin' then 'verified'
+      else coalesce(excluded.status, public.profiles.status)
+    end;
 
   return new;
 end;
@@ -1140,6 +1148,9 @@ begin
   if not exists (
     select 1 from public.profiles
     where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) and not exists (
+    select 1 from auth.users
+    where id = auth.uid() and lower(coalesce(raw_user_meta_data->>'role', '')) in ('dswd_admin', 'admin')
   ) then
     raise exception 'Unauthorized: Only DSWD administrators can verify accounts.';
   end if;
@@ -1163,6 +1174,9 @@ begin
   if not exists (
     select 1 from public.profiles
     where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) and not exists (
+    select 1 from auth.users
+    where id = auth.uid() and lower(coalesce(raw_user_meta_data->>'role', '')) in ('dswd_admin', 'admin')
   ) then
     raise exception 'Unauthorized: Only DSWD administrators can delete accounts.';
   end if;
