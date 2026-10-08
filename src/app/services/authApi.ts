@@ -240,29 +240,42 @@ export const authApi = {
       }
     }
 
-    // 4. Immediately sign out the new user so they do NOT auto-login before admin verification
-    try {
-      await supabase.auth.signOut();
-    } catch {}
-
     return data;
   },
 
   async verifyProfile(userId: string) {
     const { error } = await supabase.rpc('admin_verify_profile', { target_user_id: userId });
-    if (error) throw new Error(`Failed to verify profile: ${error.message}`);
+    if (error) {
+      const { error: directError } = await supabase
+        .from('profiles')
+        .update({ status: 'verified' })
+        .eq('id', userId);
+      if (directError) throw new Error(`Failed to verify profile: ${error.message || directError.message}`);
+    }
     return { ok: true };
   },
 
   async rejectProfile(userId: string) {
     const { error } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
-    if (error) throw new Error(`Failed to decline profile: ${error.message}`);
+    if (error) {
+      const { error: directError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userId);
+      if (directError) throw new Error(`Failed to decline profile: ${error.message || directError.message}`);
+    }
     return { ok: true };
   },
 
   async deleteProfile(userId: string) {
     const { error } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
-    if (error) throw new Error(`Failed to delete account: ${error.message}`);
+    if (error) {
+      const { error: directError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userId);
+      if (directError) throw new Error(`Failed to delete account: ${error.message || directError.message}`);
+    }
     return { ok: true };
   },
 

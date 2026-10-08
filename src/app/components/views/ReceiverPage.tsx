@@ -659,7 +659,20 @@ export interface ReceiverPageProps {
 export function ReceiverPage(props: ReceiverPageProps) {
   const receiverId = useMemo(() => getReceiverIdentifier(props.profile), [props.profile]);
   const [isMobile, setIsMobile] = useState(checkIsMobileDevice);
-  const [devBypassMobile, setDevBypassMobile] = useState(false);
+  const [devBypassMobile, setDevBypassMobile] = useState(() => {
+    try {
+      return sessionStorage.getItem('dswd_receiver_desktop_bypass') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleBypassMobile = () => {
+    try {
+      sessionStorage.setItem('dswd_receiver_desktop_bypass', 'true');
+    } catch {}
+    setDevBypassMobile(true);
+  };
 
   useEffect(() => {
     const handleResize = () => setIsMobile(checkIsMobileDevice());
@@ -687,13 +700,24 @@ export function ReceiverPage(props: ReceiverPageProps) {
             <p>1. Open this page (<strong>/receiver</strong>) on your smartphone browser (Chrome or Safari).</p>
             <p>2. Allow location permissions when prompted to enable real-time satellite tracking.</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setDevBypassMobile(true)}
-            className="w-full py-2.5 px-4 bg-white/15 hover:bg-white/25 border border-white/20 rounded-xl text-xs font-semibold text-slate-200 transition"
-          >
-            Developer Testing: Continue in Browser
-          </button>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={handleBypassMobile}
+              className="w-full py-3 px-4 bg-[#2500ba] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
+            >
+              Continue to Receiver Dashboard (Desktop Mode)
+            </button>
+            {props.onSignOut && (
+              <button
+                type="button"
+                onClick={props.onSignOut}
+                className="w-full py-2.5 px-4 bg-white/10 hover:bg-white/20 border border-white/20 text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                Sign Out
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );

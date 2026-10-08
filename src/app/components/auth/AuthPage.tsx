@@ -149,7 +149,22 @@ export function AuthPage() {
       )
       .subscribe();
 
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await authApi.checkProfileStatusByEmail(targetEmail);
+        if (status === 'verified') {
+          setStatusCheckFeedback('Account approved! Redirecting to login...');
+          setTimeout(() => {
+            setEmail(targetEmail);
+            setDesktopMode('login');
+            setMobileScreen('login');
+          }, 800);
+        }
+      } catch {}
+    }, 3500);
+
     return () => {
+      clearInterval(pollInterval);
       void supabase.removeChannel(channel);
     };
   }, [submittedEmail, email, desktopMode, mobileScreen]);

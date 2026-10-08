@@ -29,16 +29,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshProfile = async () => {
-    try {
-      const { data: refreshData } = await supabase.auth.refreshSession();
-      if (refreshData?.session) {
-        setSession(refreshData.session);
-        await loadProfile(refreshData.session);
-        return;
-      }
-    } catch (err) {
-      console.warn('refreshSession fallback:', err);
-    }
     const { data } = await supabase.auth.getSession();
     setSession(data.session);
     await loadProfile(data.session);

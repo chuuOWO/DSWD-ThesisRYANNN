@@ -53,24 +53,53 @@ export default function App() {
     setIsCheckingVerification(true);
     setVerificationFeedback(null);
     try {
-      await refreshProfile();
+      if (session?.user?.id) {
+        const freshProfile = await authApi.getProfile(session.user.id);
+        if (freshProfile) {
+          if (freshProfile.status === 'verified') {
+            setVerificationFeedback('Account verified! Refreshing your session...');
+            await refreshProfile();
+            return;
+          } else if (freshProfile.status === 'rejected') {
+            setVerificationFeedback('Account registration was declined. Please contact your coordinator.');
+            return;
+          }
+        }
+      }
       if (profile?.email) {
         const dbStatus = await authApi.checkProfileStatusByEmail(profile.email);
         if (dbStatus === 'verified') {
           setVerificationFeedback('Account verified! Refreshing your session...');
           await refreshProfile();
+          return;
         } else if (dbStatus === 'rejected') {
           setVerificationFeedback('Account registration was declined. Please contact your coordinator.');
-        } else {
-          setVerificationFeedback('Account is currently awaiting administrator review. Please check back shortly.');
+          return;
         }
       }
+      setVerificationFeedback('Account is currently awaiting administrator review. Please check back shortly.');
     } catch {
       setVerificationFeedback('Unable to check verification status. Please check your connection.');
     } finally {
       setIsCheckingVerification(false);
     }
   };
+
+  // Background poller to automatically unlock verified accounts within seconds
+  useEffect(() => {
+    if (!session?.user?.id || profile?.status === 'verified') return;
+
+    const interval = setInterval(async () => {
+      try {
+        const fresh = await authApi.getProfile(session.user.id);
+        if (fresh && fresh.status === 'verified') {
+          await refreshProfile();
+        }
+      } catch {}
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [session?.user?.id, profile?.status]);
 
   const refreshWalletRole = async () => {
     const address = await blockchain.getConnectedWalletAddress();
@@ -209,8 +238,7 @@ export default function App() {
             </button>
             <button
               onClick={() => signOut()}
-              disabled={isCheckingVerification}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-bold transition cursor-pointer"
+              className="w-full py-2.5 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition cursor-pointer"
             >
               Sign Out
             </button>
