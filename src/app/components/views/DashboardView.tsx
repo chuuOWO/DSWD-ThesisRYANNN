@@ -57,6 +57,9 @@ import {
   type PriorityLevel
 } from '../../lib/priorityLogic';
 
+import type { UserProfile } from '../../services/authApi';
+import { AnalyticsReportPdfModal } from '../modals/AnalyticsReportPdfModal';
+
 interface DashboardState {
   inventory: InventoryItem[];
   incomingGoodsList: IncomingGoods[];
@@ -72,6 +75,7 @@ interface DashboardState {
 interface DashboardViewProps {
   inventoryState: DashboardState;
   onNavigate: (view: string) => void;
+  adminProfile?: UserProfile | null;
 }
 
 const priorityClasses: Record<PriorityColor, string> = {
@@ -86,7 +90,7 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps) {
+export function DashboardView({ inventoryState, onNavigate, adminProfile }: DashboardViewProps) {
   const {
     inventory = [],
     incomingGoodsList = [],
@@ -98,6 +102,7 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
   } = inventoryState;
 
   const [showWarehouseOverview, setShowWarehouseOverview] = useState(false);
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
 
   // Analytics Filters State
   const [timeFilter, setTimeFilter] = useState<'all' | 'monthly' | 'quarterly'>('all');
@@ -744,8 +749,18 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setIsExportPdfOpen(true)}
+              className="text-xs text-white bg-[#2500ba] hover:bg-blue-700 font-bold px-3 py-1.5 rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5 active:scale-95"
+              title="Export filtered operational analytics as printable PDF report"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Export as PDF</span>
+            </button>
+
+            <button
+              type="button"
               onClick={resetFilters}
-              className="text-xs text-gray-500 hover:text-gray-800 font-semibold px-2.5 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 transition cursor-pointer flex items-center gap-1"
+              className="text-xs text-gray-500 hover:text-gray-800 font-semibold px-2.5 py-1.5 rounded-xl border border-gray-200 hover:bg-gray-50 transition cursor-pointer flex items-center gap-1"
             >
               <RefreshCw className="w-3 h-3" />
               <span>Reset Filters</span>
@@ -1654,6 +1669,23 @@ export function DashboardView({ inventoryState, onNavigate }: DashboardViewProps
           </div>
         )}
       </div>
+
+      {/* Analytics & Operational PDF Export Modal */}
+      <AnalyticsReportPdfModal
+        isOpen={isExportPdfOpen}
+        onClose={() => setIsExportPdfOpen(false)}
+        timeFilter={timeFilter}
+        selectedQuarter={selectedQuarter}
+        selectedMonth={selectedMonth}
+        selectedDisasterFilter={selectedDisasterFilter}
+        selectedLguFilter={selectedLguFilter}
+        selectedCategoryFilter={selectedCategoryFilter}
+        filteredReleases={filteredReleases}
+        allReleases={outgoingReleasesList}
+        inventory={inventory}
+        lgusList={effectiveLgus}
+        adminProfile={adminProfile}
+      />
     </div>
   );
 }

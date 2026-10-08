@@ -214,7 +214,7 @@ export default function App() {
         return <MasterDataView />;
       case 'dashboard':
       default:
-        return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} />;
+        return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} adminProfile={activeProfile} />;
     }
   };
 
