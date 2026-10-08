@@ -83,21 +83,20 @@ export default function App() {
     });
   }, [profile?.walletAddress]);
 
-  // Eagerly preload view modules after authentication to eliminate tab loading flicker
+  // Preload primary view modules after authentication
   useEffect(() => {
     if (session) {
-      void import('./components/views/DashboardView');
-      void import('./components/views/IncomingModule');
-      void import('./components/views/OutgoingModule');
-      void import('./components/views/InventoryMonitoring');
-      void import('./components/views/LGUMonitoring');
-      void import('./components/views/TruckTracking');
-      void import('./components/views/AccountManagement');
-      void import('./components/views/MasterDataView');
-      void import('./components/views/ReceiverPage');
-      void import('./components/views/LGUReceiverPage');
+      import('./components/views/DashboardView').catch(() => {});
+      import('./components/views/ReceiverPage').catch(() => {});
+      import('./components/views/LGUReceiverPage').catch(() => {});
     }
   }, [session]);
+
+  useEffect(() => {
+    if (session || profile) {
+      console.log('[DSWD App State] Session:', session?.user?.email, '| Profile:', profile?.email, '| Role:', profile?.role, '| Status:', profile?.status);
+    }
+  }, [session, profile]);
 
   const handleConnectWallet = async () => {
     try {

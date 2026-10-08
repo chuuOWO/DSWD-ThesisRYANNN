@@ -136,10 +136,14 @@ export function AuthPage() {
     setLoadingSubtitle('Verifying your account details...');
     setIsLoadingModalOpen(true);
 
+    console.log('[DSWD Auth] Starting login for:', email.trim());
     try {
-      await authApi.signIn(email.trim(), password);
+      const res = await authApi.signIn(email.trim(), password);
+      console.log('[DSWD Auth] Sign-in successful for user ID:', res.user?.id, 'email:', res.user?.email);
       await refreshProfile();
+      console.log('[DSWD Auth] Profile refreshed successfully');
     } catch (authErr: any) {
+      console.error('[DSWD Auth] Login failed with error:', authErr);
       if (authErr?.message === 'ACCOUNT_PENDING') {
         setErrorMessage('Your account is awaiting administrator review and approval. Please wait for verification before logging in.');
         return;
