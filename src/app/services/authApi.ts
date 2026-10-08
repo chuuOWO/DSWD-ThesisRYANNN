@@ -109,45 +109,10 @@ export const authApi = {
             .maybeSingle();
           data = res.data;
         }
-
-        // If public.profiles row is still missing, synthesize from Supabase Auth user metadata
-        if (!data && userData?.user) {
-          const u = userData.user;
-          const meta = (u.user_metadata || {}) as Record<string, unknown>;
-          const rawRole = meta.role || 'receiver';
-          const isAdmin = String(rawRole).toLowerCase().includes('admin');
-          const resolvedStatus = isAdmin ? 'verified' : (meta.status === 'verified' ? 'verified' : 'pending');
-          const syntheticRow = {
-            id: u.id,
-            email: u.email || '',
-            full_name: String(meta.full_name || meta.fullName || u.email?.split('@')[0] || 'DSWD Officer'),
-            first_name: meta.first_name ? String(meta.first_name) : null,
-            last_name: meta.last_name ? String(meta.last_name) : null,
-            phone_number: meta.phone_number ? String(meta.phone_number) : null,
-            job_position: meta.job_position ? String(meta.job_position) : null,
-            role: isAdmin ? 'dswd_admin' : 'receiver',
-            status: resolvedStatus,
-            truck_id: meta.truck_id ? String(meta.truck_id) : null,
-            lgu_name: meta.lgu_name ? String(meta.lgu_name) : null,
-            wallet_address: meta.wallet_address ? String(meta.wallet_address) : null,
-            avatar_url: meta.avatar_url ? String(meta.avatar_url) : null
-          };
-
-          // Self-heal: insert or update public.profiles so subsequent queries succeed
-          supabase.from('profiles').upsert(syntheticRow).catch(() => {});
-          return mapProfile(syntheticRow);
-        }
       }
 
       if (data) {
-        const mapped = mapProfile(data);
-        if (!mapped.avatarUrl) {
-          const { data: userData } = await supabase.auth.getUser();
-          if (userData?.user?.user_metadata?.avatar_url) {
-            mapped.avatarUrl = String(userData.user.user_metadata.avatar_url);
-          }
-        }
-        return mapped;
+        return mapProfile(data);
       }
     } catch (err) {
       console.warn('getProfile error:', err);
