@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react';
 import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { LguRecord } from '../../services/backendApi';
+import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
 
 interface InventoryState {
   inventory: { category: string; warehouseA: number; warehouseB: number }[];
-  incomingGoodsList: { fnfiCategory: string; expirationDate: string; quantity: number; status: string }[];
-  outgoingReleasesList: { fnfiCategory: string; amountApproved: number; amountRequested: number; deliveryStatus: string; lguName?: string; municipality?: string }[];
-  lguPriorityReports: { lguName: string; municipality?: string; foodPacks: number; hygieneKits: number; familyKits: number }[];
+  incomingGoodsList: IncomingGoods[];
+  outgoingReleasesList: OutgoingRelease[];
+  lguPriorityReports: LGUPriorityReport[];
   lgusList?: LguRecord[];
   addStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => void;
   deductStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => boolean;
