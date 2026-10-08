@@ -1,15 +1,18 @@
 import { useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Printer,
   X,
   FileText,
-  Calendar,
   Filter,
   Building2,
   Package,
   ShieldCheck,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  TrendingUp,
+  Warehouse,
+  Lock
 } from 'lucide-react';
 import type {
   OutgoingRelease,
@@ -123,6 +126,28 @@ export function AnalyticsReportPdfModal({
     return set.size;
   }, [filteredReleases]);
 
+  const inTransitCount = useMemo(() => {
+    return filteredReleases.filter(r => r.deliveryStatus === 'In Transit').length;
+  }, [filteredReleases]);
+
+  const completedCount = useMemo(() => {
+    return filteredReleases.filter(r => r.deliveryStatus === 'Received').length;
+  }, [filteredReleases]);
+
+  // Warehouse Inventory Reserve Readiness
+  const warehouseStats = useMemo(() => {
+    const otonStock = inventory.reduce((sum, i) => sum + (Number(i.warehouseA) || 0), 0);
+    const pototanStock = inventory.reduce((sum, i) => sum + (Number(i.warehouseB) || 0), 0);
+    const totalReserve = otonStock + pototanStock;
+    const bufferCoverage = totalAllocated > 0 ? (totalReserve / totalAllocated).toFixed(1) : '100+';
+    return {
+      otonStock,
+      pototanStock,
+      totalReserve,
+      bufferCoverage
+    };
+  }, [inventory, totalAllocated]);
+
   // Section 2: Disaster Breakdown
   const disasterBreakdown = useMemo(() => {
     const map = new Map<string, { requested: number; allocated: number; count: number }>();
@@ -141,12 +166,13 @@ export function AnalyticsReportPdfModal({
         requested: stats.requested,
         allocated: stats.allocated,
         count: stats.count,
+        share: totalAllocated > 0 ? Math.round((stats.allocated / totalAllocated) * 1000) / 10 : 0,
         rate: stats.requested > 0 ? Math.min(100, Math.round((stats.allocated / stats.requested) * 1000) / 10) : 100
       }))
       .sort((a, b) => b.allocated - a.allocated);
-  }, [filteredReleases]);
+  }, [filteredReleases, totalAllocated]);
 
-  // Section 3: LGU Municipal Breakdown
+  // Section 4: LGU Municipal Breakdown
   const lguBreakdown = useMemo(() => {
     const map = new Map<string, { province: string; requested: number; allocated: number; count: number }>();
     filteredReleases.forEach((r) => {
@@ -166,12 +192,13 @@ export function AnalyticsReportPdfModal({
         requested: stats.requested,
         allocated: stats.allocated,
         count: stats.count,
+        share: totalAllocated > 0 ? Math.round((stats.allocated / totalAllocated) * 1000) / 10 : 0,
         rate: stats.requested > 0 ? Math.min(100, Math.round((stats.allocated / stats.requested) * 1000) / 10) : 100
       }))
       .sort((a, b) => b.allocated - a.allocated);
-  }, [filteredReleases]);
+  }, [filteredReleases, totalAllocated]);
 
-  // Section 4: Commodity Breakdown
+  // Section 5: Commodity Breakdown
   const commodityBreakdown = useMemo(() => {
     const map = new Map<string, { requested: number; allocated: number; count: number }>();
     filteredReleases.forEach((r) => {
@@ -187,448 +214,717 @@ export function AnalyticsReportPdfModal({
       .map(([category, stats]) => {
         const whItem = inventory.find(i => i.category.toLowerCase().includes(category.toLowerCase()));
         const whStock = whItem ? (whItem.totalStock ?? (whItem.warehouseA + whItem.warehouseB)) : 0;
+        const remainingBuffer = Math.max(0, whStock - stats.allocated);
         return {
           category,
           requested: stats.requested,
           allocated: stats.allocated,
           count: stats.count,
           whStock,
+          remainingBuffer,
           rate: stats.requested > 0 ? Math.min(100, Math.round((stats.allocated / stats.requested) * 1000) / 10) : 100
         };
       })
       .sort((a, b) => b.allocated - a.allocated);
   }, [filteredReleases, inventory]);
 
+  // Operational Observations Narrative
+  const operationalFindings = useMemo(() => {
+    const topDisaster = disasterBreakdown[0]?.reason || 'General Relief Augmentation';
+    const topDisasterShare = disasterBreakdown[0]?.share || 100;
+    const topLgu = lguBreakdown[0]?.municipality || 'Panay Municipalities';
+    const topLguShare = lguBreakdown[0]?.share || 100;
+    const topItem = commodityBreakdown[0]?.category || 'Family Food Pack';
+    const topItemAlloc = commodityBreakdown[0]?.allocated || 0;
+
+    return {
+      topDisaster,
+      topDisasterShare,
+      topLgu,
+      topLguShare,
+      topItem,
+      topItemAlloc
+    };
+  }, [disasterBreakdown, lguBreakdown, commodityBreakdown]);
+
   const handlePrint = () => {
     window.print();
   };
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static">
-      {/* Print-specific style rules */}
+  const portalContent = (
+    <div id="analytics-pdf-modal-portal">
+      {/* Print Stylesheet strictly suppressing #root and enforcing pristine multi-page A4 output */}
       <style>{`
         @media print {
-          body {
-            background: #fff !important;
-            color: #000 !important;
+          /* 1. Completely hide the main application root */
+          #root {
+            display: none !important;
+          }
+
+          /* 2. Reset html and body for clean A4 printing */
+          html, body {
+            background: #ffffff !important;
+            color: #000000 !important;
             margin: 0 !important;
             padding: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
           }
+
+          /* 3. Hide all interactive controls, overlays, scrollbars, backdrops */
           .no-print {
             display: none !important;
           }
-          #printable-report {
+
+          /* 4. Reset modal wrapper to static document flow */
+          #analytics-pdf-modal-portal {
+            position: static !important;
             display: block !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
             width: 100% !important;
-            max-width: 100% !important;
+            height: auto !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+            padding: 0 !important;
             margin: 0 !important;
-            padding: 12mm 15mm !important;
+          }
+
+          #analytics-pdf-modal-backdrop {
+            position: static !important;
+            background: transparent !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
+            overflow: visible !important;
+          }
+
+          #analytics-pdf-modal-container {
+            position: static !important;
+            max-width: 100% !important;
+            max-height: none !important;
             box-shadow: none !important;
             border: none !important;
             border-radius: 0 !important;
-            background: #fff !important;
+            background: #ffffff !important;
+            display: block !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
+
+          #printable-report-wrapper {
+            overflow: visible !important;
+            background: #ffffff !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+
+          /* 5. Page styling */
+          .print-page {
+            background: #ffffff !important;
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+            min-height: auto !important;
+          }
+
+          .print-page-break {
+            page-break-after: always !important;
+            break-after: page !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .page-break-avoid {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
           @page {
             size: A4 portrait;
             margin: 10mm 12mm;
           }
-          .page-break-avoid {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
         }
       `}</style>
 
-      <div className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden print:max-h-none print:shadow-none print:border-none print:rounded-none">
-        {/* Modal Controls Header (Hidden in Print) */}
-        <div className="no-print flex items-center justify-between px-6 py-4 bg-gray-900 text-white border-b border-gray-800 flex-shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-blue-600/30 border border-blue-500/40 text-blue-400">
-              <FileText className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-white tracking-wide">
-                Official Operations & Analytics PDF Export
-              </h2>
-              <p className="text-[11px] text-gray-400">
-                Generated from active dashboard filter parameters ({filteredReleases.length} records matched)
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2500ba] hover:bg-blue-700 text-white text-xs font-bold shadow-md transition active:scale-95 cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Print / Save as PDF</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition cursor-pointer"
-              title="Close Preview"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Document Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-100 print:bg-white print:p-0 print:overflow-visible">
-          <div
-            id="printable-report"
-            className="w-full max-w-4xl mx-auto bg-white p-8 sm:p-10 rounded-xl shadow-lg border border-gray-200 text-gray-900 space-y-6 print:shadow-none print:border-none print:p-0 print:rounded-none"
-          >
-            {/* 1. Official Republic of the Philippines Header */}
-            <div className="border-b-2 border-blue-900 pb-4">
-              <div className="flex items-center justify-between gap-4">
-                <img
-                  src="https://upload.wikimedia.org/wikipedia/commons/7/76/Seal_of_the_Department_of_Social_Welfare_and_Development.svg"
-                  alt="DSWD Seal"
-                  className="h-16 w-16 object-contain flex-shrink-0"
-                />
-                <div className="text-center flex-1">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-600">
-                    Republic of the Philippines
-                  </p>
-                  <h1 className="text-sm font-black text-blue-900 uppercase tracking-tight sm:text-base leading-tight">
-                    Department of Social Welfare and Development
-                  </h1>
-                  <p className="text-xs font-bold text-gray-800">
-                    Field Office VI &mdash; Western Visayas
-                  </p>
-                  <p className="text-[10px] text-gray-600">
-                    Disaster Response Management Division (DRMD) | M.H. del Pilar Street, Molo, Iloilo City
-                  </p>
-                </div>
-                <div className="text-right flex-shrink-0 hidden sm:block">
-                  <div className="inline-block border border-blue-900 px-2 py-1 rounded text-[9px] font-bold text-blue-900 uppercase">
-                    Official Audit Copy
-                  </div>
-                  <p className="text-[9px] font-mono text-gray-500 mt-1">DRMD-LOG-DOC</p>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Document Title Banner */}
-            <div className="text-center py-2 bg-blue-50/70 border border-blue-200 rounded-lg">
-              <h2 className="text-xs sm:text-sm font-black text-blue-950 uppercase tracking-wider">
-                Disaster Relief Logistics & Analytics Operations Report
-              </h2>
-              <p className="text-[11px] font-semibold text-blue-800 mt-0.5">
-                Harmonized Food and Non-Food Items (FNFI) Allocation & Distribution Audit
-              </p>
-            </div>
-
-            {/* 3. Report Metadata & Applied Filter Scope */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg text-[10px]">
-              <div>
-                <span className="block font-bold text-gray-500 uppercase">Document Reference</span>
-                <span className="font-mono font-bold text-gray-900">{reportRefNumber}</span>
+      {/* Screen Backdrop */}
+      <div
+        id="analytics-pdf-modal-backdrop"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static"
+      >
+        <div
+          id="analytics-pdf-modal-container"
+          className="relative w-full max-w-5xl max-h-[94vh] flex flex-col bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden print:max-h-none print:shadow-none print:border-none print:rounded-none"
+        >
+          {/* Modal Controls Header (Hidden in Print) */}
+          <div className="no-print flex items-center justify-between px-6 py-4 bg-gray-900 text-white border-b border-gray-800 flex-shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-blue-600/30 border border-blue-500/40 text-blue-400">
+                <FileText className="w-5 h-5" />
               </div>
               <div>
-                <span className="block font-bold text-gray-500 uppercase">Date & Time Generated</span>
-                <span className="font-semibold text-gray-900">{reportDate}</span>
-              </div>
-              <div>
-                <span className="block font-bold text-gray-500 uppercase">Reporting Officer</span>
-                <span className="font-semibold text-gray-900">{adminProfile?.fullName || 'DSWD System Administrator'}</span>
-              </div>
-              <div>
-                <span className="block font-bold text-gray-500 uppercase">Officer Designation</span>
-                <span className="font-semibold text-gray-900">{adminProfile?.jobPosition || 'Operations Administrator'}</span>
-              </div>
-            </div>
-
-            {/* Applied Filter Parameters Grid */}
-            <div className="p-3 border border-indigo-200 bg-indigo-50/50 rounded-lg text-[10px] space-y-1.5">
-              <div className="flex items-center gap-1.5 font-bold text-indigo-950 uppercase tracking-wider">
-                <Filter className="w-3 h-3 text-indigo-700" />
-                <span>Applied Filter Configuration (Active Query Scope)</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-gray-800">
-                <div className="bg-white p-2 rounded border border-indigo-100">
-                  <span className="block font-bold text-gray-500">Time Horizon:</span>
-                  <span className="font-semibold text-indigo-900">{filterScopeText.time}</span>
-                </div>
-                <div className="bg-white p-2 rounded border border-indigo-100">
-                  <span className="block font-bold text-gray-500">Disaster Incident:</span>
-                  <span className="font-semibold text-indigo-900">{filterScopeText.disaster}</span>
-                </div>
-                <div className="bg-white p-2 rounded border border-indigo-100">
-                  <span className="block font-bold text-gray-500">Destination LGU:</span>
-                  <span className="font-semibold text-indigo-900">{filterScopeText.lgu}</span>
-                </div>
-                <div className="bg-white p-2 rounded border border-indigo-100">
-                  <span className="block font-bold text-gray-500">FNFI Commodity:</span>
-                  <span className="font-semibold text-indigo-900">{filterScopeText.category}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Section: Executive KPI Metric Summary */}
-            <div className="space-y-2 page-break-avoid">
-              <h3 className="text-[11px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
-                <Package className="w-3.5 h-3.5 text-blue-800" />
-                <span>1. Executive Operational KPI Summary</span>
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                  <span className="block text-[10px] font-bold text-gray-500 uppercase">Total Goods Requested</span>
-                  <span className="text-base font-black text-gray-900">{totalRequested.toLocaleString()}</span>
-                  <span className="block text-[9px] text-gray-500 mt-0.5">Assessed Disaster Need</span>
-                </div>
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <span className="block text-[10px] font-bold text-blue-700 uppercase">Total Approved / Allocated</span>
-                  <span className="text-base font-black text-blue-900">{totalAllocated.toLocaleString()}</span>
-                  <span className="block text-[9px] text-blue-700 mt-0.5">Dispatched Relief Units</span>
-                </div>
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                  <span className="block text-[10px] font-bold text-emerald-700 uppercase">Fulfillment Rate</span>
-                  <span className="text-base font-black text-emerald-900">{fulfillmentRate}%</span>
-                  <span className="block text-[9px] text-emerald-700 mt-0.5">Demand Satisfaction</span>
-                </div>
-                <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-                  <span className="block text-[10px] font-bold text-purple-700 uppercase">LGUs Served</span>
-                  <span className="text-base font-black text-purple-900">{uniqueLgusServed}</span>
-                  <span className="block text-[9px] text-purple-700 mt-0.5">Across Panay Region</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Section: Disaster & Calamity Allocation Analysis */}
-            <div className="space-y-2 page-break-avoid">
-              <h3 className="text-[11px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
-                <span>2. Calamity & Disaster Distribution Breakdown</span>
-              </h3>
-              <div className="border border-gray-200 rounded-lg overflow-hidden text-[10px]">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[9px]">
-                      <th className="py-1.5 px-3">Disaster / Calamity Reason</th>
-                      <th className="py-1.5 px-3 text-center">Dispatches</th>
-                      <th className="py-1.5 px-3 text-right">Requested Qty</th>
-                      <th className="py-1.5 px-3 text-right">Allocated Qty</th>
-                      <th className="py-1.5 px-3 text-right">Fulfillment Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {disasterBreakdown.length > 0 ? (
-                      disasterBreakdown.map((row) => (
-                        <tr key={row.reason} className="hover:bg-gray-50/50">
-                          <td className="py-1.5 px-3 font-semibold text-gray-900">{row.reason}</td>
-                          <td className="py-1.5 px-3 text-center">{row.count}</td>
-                          <td className="py-1.5 px-3 text-right font-mono">{row.requested.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-950">{row.allocated.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-bold text-emerald-700">{row.rate}%</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-2 px-3 text-center text-gray-500 italic">
-                          No disaster releases matched the active filter criteria.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* 6. Section: Top LGU Recipient Municipalities */}
-            <div className="space-y-2 page-break-avoid">
-              <h3 className="text-[11px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5 text-indigo-700" />
-                <span>3. LGU Municipal Distribution Summary</span>
-              </h3>
-              <div className="border border-gray-200 rounded-lg overflow-hidden text-[10px]">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[9px]">
-                      <th className="py-1.5 px-3">Recipient LGU / Municipality</th>
-                      <th className="py-1.5 px-3">Province</th>
-                      <th className="py-1.5 px-3 text-center">Shipments</th>
-                      <th className="py-1.5 px-3 text-right">Requested Qty</th>
-                      <th className="py-1.5 px-3 text-right">Allocated Qty</th>
-                      <th className="py-1.5 px-3 text-right">Fulfillment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {lguBreakdown.length > 0 ? (
-                      lguBreakdown.slice(0, 10).map((row) => (
-                        <tr key={row.municipality} className="hover:bg-gray-50/50">
-                          <td className="py-1.5 px-3 font-semibold text-gray-900">{row.municipality}</td>
-                          <td className="py-1.5 px-3 text-gray-600">{row.province}</td>
-                          <td className="py-1.5 px-3 text-center">{row.count}</td>
-                          <td className="py-1.5 px-3 text-right font-mono">{row.requested.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-950">{row.allocated.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-bold text-emerald-700">{row.rate}%</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={6} className="py-2 px-3 text-center text-gray-500 italic">
-                          No municipal releases recorded in this period.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* 7. Section: Commodity Breakdown */}
-            <div className="space-y-2 page-break-avoid">
-              <h3 className="text-[11px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
-                <Package className="w-3.5 h-3.5 text-purple-700" />
-                <span>4. FNFI Relief Commodity Allocation Matrix</span>
-              </h3>
-              <div className="border border-gray-200 rounded-lg overflow-hidden text-[10px]">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[9px]">
-                      <th className="py-1.5 px-3">Relief Commodity Category</th>
-                      <th className="py-1.5 px-3 text-right">Current WH Stock</th>
-                      <th className="py-1.5 px-3 text-right">Requested Qty</th>
-                      <th className="py-1.5 px-3 text-right">Allocated Qty</th>
-                      <th className="py-1.5 px-3 text-right">Fulfillment</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {commodityBreakdown.length > 0 ? (
-                      commodityBreakdown.map((row) => (
-                        <tr key={row.category} className="hover:bg-gray-50/50">
-                          <td className="py-1.5 px-3 font-semibold text-gray-900">{row.category}</td>
-                          <td className="py-1.5 px-3 text-right font-mono text-gray-600">{row.whStock.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-mono">{row.requested.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-950">{row.allocated.toLocaleString()}</td>
-                          <td className="py-1.5 px-3 text-right font-bold text-emerald-700">{row.rate}%</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-2 px-3 text-center text-gray-500 italic">
-                          No commodity distribution records matched.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* 8. Section: Detailed Shipment Audit Ledger */}
-            <div className="space-y-2 page-break-avoid">
-              <h3 className="text-[11px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
-                <span>5. Itemized Release & Shipment Audit Ledger ({filteredReleases.length} Records)</span>
-              </h3>
-              <div className="border border-gray-200 rounded-lg overflow-hidden text-[9px]">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[8px]">
-                      <th className="py-1.5 px-2">DR Number</th>
-                      <th className="py-1.5 px-2">Date</th>
-                      <th className="py-1.5 px-2">Calamity / Incident</th>
-                      <th className="py-1.5 px-2">Destination LGU</th>
-                      <th className="py-1.5 px-2">Commodity</th>
-                      <th className="py-1.5 px-2 text-right">Req.</th>
-                      <th className="py-1.5 px-2 text-right">Alloc.</th>
-                      <th className="py-1.5 px-2 text-center">Status</th>
-                      <th className="py-1.5 px-2 font-mono">Blockchain Tx Hash</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredReleases.length > 0 ? (
-                      filteredReleases.slice(0, 30).map((r) => (
-                        <tr key={r.drNumber} className="hover:bg-gray-50/50">
-                          <td className="py-1.5 px-2 font-bold font-mono text-blue-900">{r.drNumber}</td>
-                          <td className="py-1.5 px-2 text-gray-600 whitespace-nowrap">{r.dateAllocated || 'N/A'}</td>
-                          <td className="py-1.5 px-2 text-gray-800">{r.reportReason || 'General Relief'}</td>
-                          <td className="py-1.5 px-2 font-semibold text-gray-900">{r.municipality || 'LGU'}</td>
-                          <td className="py-1.5 px-2 text-gray-800">{r.fnfiCategory}</td>
-                          <td className="py-1.5 px-2 text-right font-mono">{r.amountRequested}</td>
-                          <td className="py-1.5 px-2 text-right font-mono font-bold text-blue-900">{r.amountApproved || r.amountRequested}</td>
-                          <td className="py-1.5 px-2 text-center">
-                            <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-gray-100 text-gray-800 border border-gray-200">
-                              {r.deliveryStatus}
-                            </span>
-                          </td>
-                          <td className="py-1.5 px-2 font-mono text-gray-500 truncate max-w-[100px]">
-                            {r.blockchainTxHash ? `${r.blockchainTxHash.slice(0, 8)}...${r.blockchainTxHash.slice(-6)}` : 'On-Chain Ledger'}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={9} className="py-2 px-3 text-center text-gray-500 italic">
-                          No release records found matching active filter parameters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {filteredReleases.length > 30 && (
-                <p className="text-[9px] text-gray-500 italic text-right">
-                  Showing top 30 of {filteredReleases.length} matching records for print brevity.
+                <h2 className="text-sm font-bold text-white tracking-wide">
+                  Official Operations & Analytics PDF Export
+                </h2>
+                <p className="text-[11px] text-gray-400">
+                  Official 3-Page Document generated from active filter scope ({filteredReleases.length} records matched)
                 </p>
-              )}
-            </div>
-
-            {/* 9. Section: Certification & Sign-off Block */}
-            <div className="pt-6 border-t-2 border-gray-300 page-break-avoid">
-              <p className="text-[9px] text-gray-500 uppercase tracking-widest text-center font-bold mb-6">
-                Official Certification of Accountability & Records Verification
-              </p>
-              <div className="grid grid-cols-3 gap-6 text-center text-[10px]">
-                <div>
-                  <div className="border-b border-gray-800 h-10 mb-1 flex items-end justify-center pb-1">
-                    <span className="font-bold text-gray-900">{adminProfile?.fullName || 'DSWD System Administrator'}</span>
-                  </div>
-                  <span className="block font-bold text-gray-800 uppercase text-[9px]">Prepared By</span>
-                  <span className="text-gray-500 text-[9px]">{adminProfile?.jobPosition || 'Disaster Response Operations Officer'}</span>
-                </div>
-
-                <div>
-                  <div className="border-b border-gray-800 h-10 mb-1 flex items-end justify-center pb-1">
-                    <span className="font-bold text-gray-900">Regional Logistics Management Section</span>
-                  </div>
-                  <span className="block font-bold text-gray-800 uppercase text-[9px]">Verified & Audited By</span>
-                  <span className="text-gray-500 text-[9px]">Regional Warehouse Supervisor</span>
-                </div>
-
-                <div>
-                  <div className="border-b border-gray-800 h-10 mb-1 flex items-end justify-center pb-1">
-                    <span className="font-bold text-gray-900">Regional Director</span>
-                  </div>
-                  <span className="block font-bold text-gray-800 uppercase text-[9px]">Noted & Approved By</span>
-                  <span className="text-gray-500 text-[9px]">DSWD Regional Field Office VI</span>
-                </div>
               </div>
             </div>
 
-            {/* 10. Official Footer */}
-            <div className="pt-4 border-t border-gray-200 text-center text-[8px] text-gray-500 font-medium">
-              <p>
-                DSWD Blockchain-Secured Relief Operations & Incident Logistics Information System (Field Office VI)
-              </p>
-              <p className="font-mono text-gray-400 mt-0.5">
-                Cryptographic Audit Authenticity: SHA-256 Validated | System Generated Report Reference: {reportRefNumber}
-              </p>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#2500ba] hover:bg-blue-700 text-white text-xs font-bold shadow-md transition active:scale-95 cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print / Save as PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-xl transition cursor-pointer"
+                title="Close Preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
+          </div>
+
+          {/* Scrollable Document Content Wrapper */}
+          <div
+            id="printable-report-wrapper"
+            className="flex-1 overflow-y-auto p-4 sm:p-8 bg-gray-100 print:bg-white print:p-0 print:overflow-visible space-y-8 print:space-y-0"
+          >
+
+            {/* ========================================================
+                PAGE 1: Executive Operations, Scope & Disaster Impact
+               ======================================================== */}
+            <div className="print-page w-full max-w-4xl mx-auto bg-white p-8 sm:p-10 rounded-xl shadow-lg border border-gray-200 text-gray-900 space-y-5 print:shadow-none print:border-none print:p-0 print:rounded-none">
+              
+              {/* 1. Official Republic of the Philippines Header */}
+              <div className="border-b-2 border-blue-900 pb-3">
+                <div className="flex items-center justify-between gap-4">
+                  <img
+                    src="https://upload.wikimedia.org/wikipedia/commons/7/76/Seal_of_the_Department_of_Social_Welfare_and_Development.svg"
+                    alt="DSWD Seal"
+                    className="h-16 w-16 object-contain flex-shrink-0"
+                  />
+                  <div className="text-center flex-1">
+                    <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-600">
+                      Republic of the Philippines
+                    </p>
+                    <h1 className="text-sm font-black text-blue-900 uppercase tracking-tight sm:text-base leading-tight">
+                      Department of Social Welfare and Development
+                    </h1>
+                    <p className="text-xs font-bold text-gray-800">
+                      Field Office VI &mdash; Western Visayas
+                    </p>
+                    <p className="text-[10px] text-gray-600">
+                      Disaster Response Management Division (DRMD) | M.H. del Pilar Street, Molo, Iloilo City
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0 hidden sm:block">
+                    <div className="inline-block border border-blue-900 px-2 py-1 rounded text-[9px] font-bold text-blue-900 uppercase">
+                      Official Audit Copy
+                    </div>
+                    <p className="text-[9px] font-mono text-gray-500 mt-1">DRMD-LOG-DOC</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Document Title Banner */}
+              <div className="text-center py-2 bg-blue-50/70 border border-blue-200 rounded-lg">
+                <h2 className="text-xs sm:text-sm font-black text-blue-950 uppercase tracking-wider">
+                  Disaster Relief Logistics & Analytics Operations Report
+                </h2>
+                <p className="text-[11px] font-semibold text-blue-800 mt-0.5">
+                  Harmonized Food and Non-Food Items (FNFI) Allocation & Distribution Audit
+                </p>
+              </div>
+
+              {/* 3. Document & Logistical Metadata Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-[9px]">
+                <div>
+                  <span className="block font-bold text-gray-500 uppercase">Document Reference</span>
+                  <span className="font-mono font-bold text-gray-900">{reportRefNumber}</span>
+                </div>
+                <div>
+                  <span className="block font-bold text-gray-500 uppercase">Date & Time Generated</span>
+                  <span className="font-semibold text-gray-900">{reportDate}</span>
+                </div>
+                <div>
+                  <span className="block font-bold text-gray-500 uppercase">Reporting Officer</span>
+                  <span className="font-semibold text-gray-900">{adminProfile?.fullName || 'DSWD System Administrator'}</span>
+                </div>
+                <div>
+                  <span className="block font-bold text-gray-500 uppercase">Officer Designation</span>
+                  <span className="font-semibold text-gray-900">{adminProfile?.jobPosition || 'Disaster Response Operations Officer'}</span>
+                </div>
+              </div>
+
+              {/* 4. Applied Filter Parameters Grid */}
+              <div className="p-2.5 border border-indigo-200 bg-indigo-50/50 rounded-lg text-[9px] space-y-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-indigo-950 uppercase tracking-wider">
+                  <Filter className="w-3 h-3 text-indigo-700" />
+                  <span>Applied Operational Filter Configuration (Active Query Scope)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-gray-800">
+                  <div className="bg-white p-2 rounded border border-indigo-100">
+                    <span className="block font-bold text-gray-500 text-[8px] uppercase">Time Horizon</span>
+                    <span className="font-semibold text-indigo-900">{filterScopeText.time}</span>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-indigo-100">
+                    <span className="block font-bold text-gray-500 text-[8px] uppercase">Disaster Incident</span>
+                    <span className="font-semibold text-indigo-900">{filterScopeText.disaster}</span>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-indigo-100">
+                    <span className="block font-bold text-gray-500 text-[8px] uppercase">Destination LGU</span>
+                    <span className="font-semibold text-indigo-900">{filterScopeText.lgu}</span>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-indigo-100">
+                    <span className="block font-bold text-gray-500 text-[8px] uppercase">FNFI Commodity</span>
+                    <span className="font-semibold text-indigo-900">{filterScopeText.category}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. Section 1: Executive KPI Metrics */}
+              <div className="space-y-1.5 page-break-avoid">
+                <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-blue-800" />
+                  <span>1. Executive Operational KPI Summary</span>
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
+                  <div className="p-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+                    <span className="block text-[9px] font-bold text-gray-500 uppercase">Total Goods Requested</span>
+                    <span className="text-base font-black text-gray-900 font-mono">{totalRequested.toLocaleString()}</span>
+                    <span className="block text-[8px] text-gray-500 mt-0.5">Assessed Disaster Need</span>
+                  </div>
+                  <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                    <span className="block text-[9px] font-bold text-blue-700 uppercase">Total Approved / Allocated</span>
+                    <span className="text-base font-black text-blue-900 font-mono">{totalAllocated.toLocaleString()}</span>
+                    <span className="block text-[8px] text-blue-700 mt-0.5">Dispatched Relief Units</span>
+                  </div>
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <span className="block text-[9px] font-bold text-emerald-700 uppercase">Fulfillment Rate</span>
+                    <span className="text-base font-black text-emerald-900 font-mono">{fulfillmentRate}%</span>
+                    <span className="block text-[8px] text-emerald-700 mt-0.5">Demand Satisfaction</span>
+                  </div>
+                  <div className="p-2.5 bg-purple-50 border border-purple-200 rounded-lg">
+                    <span className="block text-[9px] font-bold text-purple-700 uppercase">LGUs Served</span>
+                    <span className="text-base font-black text-purple-900 font-mono">{uniqueLgusServed}</span>
+                    <span className="block text-[8px] text-purple-700 mt-0.5">Across Panay Region</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 6. Section 2: Calamity & Disaster Distribution Breakdown */}
+              <div className="space-y-1.5 page-break-avoid">
+                <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                  <span>2. Calamity & Disaster Distribution Breakdown</span>
+                </h3>
+                <div className="border border-gray-200 rounded-lg overflow-hidden text-[9px]">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[8px]">
+                        <th className="py-1.5 px-3">Disaster / Calamity Reason</th>
+                        <th className="py-1.5 px-3 text-center">Dispatches</th>
+                        <th className="py-1.5 px-3 text-right">Requested Qty</th>
+                        <th className="py-1.5 px-3 text-right">Allocated Qty</th>
+                        <th className="py-1.5 px-3 text-right">Fulfillment Rate</th>
+                        <th className="py-1.5 px-3 text-right">Share of Relief</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {disasterBreakdown.length > 0 ? (
+                        disasterBreakdown.map((row) => (
+                          <tr key={row.reason} className="hover:bg-gray-50/50">
+                            <td className="py-1.5 px-3 font-semibold text-gray-900">{row.reason}</td>
+                            <td className="py-1.5 px-3 text-center font-mono">{row.count}</td>
+                            <td className="py-1.5 px-3 text-right font-mono">{row.requested.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-950">{row.allocated.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-bold text-emerald-700">{row.rate}%</td>
+                            <td className="py-1.5 px-3 text-right font-mono text-gray-600">{row.share}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-2 px-3 text-center text-gray-500 italic">
+                            No disaster releases matched the active filter criteria.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* 7. Section 3: Regional Stock Readiness & Warehouse Reserve Buffer */}
+              <div className="space-y-1.5 page-break-avoid">
+                <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
+                  <Warehouse className="w-3.5 h-3.5 text-blue-700" />
+                  <span>3. Regional Warehouse Stock Readiness & Reserve Buffer</span>
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[9px]">
+                  <div className="p-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+                    <span className="block font-bold text-gray-600 uppercase text-[8px]">Oton Regional Main Hub</span>
+                    <span className="text-sm font-black text-gray-900 font-mono">{warehouseStats.otonStock.toLocaleString()}</span>
+                    <span className="block text-[8px] text-gray-500 mt-0.5">Active Central Inventory</span>
+                  </div>
+                  <div className="p-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+                    <span className="block font-bold text-gray-600 uppercase text-[8px]">Pototan Regional Secondary Hub</span>
+                    <span className="text-sm font-black text-gray-900 font-mono">{warehouseStats.pototanStock.toLocaleString()}</span>
+                    <span className="block text-[8px] text-gray-500 mt-0.5">Active Staging Inventory</span>
+                  </div>
+                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <span className="block font-bold text-emerald-800 uppercase text-[8px]">Total Regional Reserves Buffer</span>
+                    <span className="text-sm font-black text-emerald-900 font-mono">{warehouseStats.totalReserve.toLocaleString()}</span>
+                    <span className="block text-[8px] text-emerald-700 mt-0.5">Buffer Coverage: {warehouseStats.bufferCoverage}x of Current Allocation</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Page 1 Bottom Marker */}
+              <div className="pt-2 border-t border-gray-200 flex items-center justify-between text-[8px] text-gray-400">
+                <span>DSWD Field Office VI &bull; Disaster Response Management Division</span>
+                <span>Page 1 of 3 &bull; Ref: {reportRefNumber}</span>
+              </div>
+            </div>
+
+            {/* Print Page Break */}
+            <div className="print-page-break" />
+
+            {/* ========================================================
+                PAGE 2: Municipal Logistics & Commodity Allocation Matrix
+               ======================================================== */}
+            <div className="print-page w-full max-w-4xl mx-auto bg-white p-8 sm:p-10 rounded-xl shadow-lg border border-gray-200 text-gray-900 space-y-5 print:shadow-none print:border-none print:p-0 print:rounded-none">
+              
+              {/* Running Header for Page 2 */}
+              <div className="border-b border-gray-300 pb-2 flex items-center justify-between text-[9px] text-gray-600">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-blue-900">DSWD FIELD OFFICE VI</span>
+                  <span>&bull;</span>
+                  <span>Relief Operations & Analytics Audit Report</span>
+                </div>
+                <div className="font-mono text-gray-500">
+                  Ref: {reportRefNumber} | Page 2 of 3
+                </div>
+              </div>
+
+              {/* 8. Section 4: LGU Municipal Distribution Summary */}
+              <div className="space-y-1.5 page-break-avoid">
+                <div className="flex items-center justify-between border-b border-gray-300 pb-1">
+                  <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-700" />
+                    <span>4. LGU Municipal Distribution Summary ({lguBreakdown.length} Municipalities)</span>
+                  </h3>
+                  <span className="text-[8px] text-gray-500 font-mono">Sorted by Allocated Volume</span>
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden text-[9px]">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[8px]">
+                        <th className="py-1.5 px-3">Recipient LGU / Municipality</th>
+                        <th className="py-1.5 px-3">Province</th>
+                        <th className="py-1.5 px-3 text-center">Shipments</th>
+                        <th className="py-1.5 px-3 text-right">Requested Qty</th>
+                        <th className="py-1.5 px-3 text-right">Allocated Qty</th>
+                        <th className="py-1.5 px-3 text-right">Fulfillment</th>
+                        <th className="py-1.5 px-3 text-right">Regional Share</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {lguBreakdown.length > 0 ? (
+                        lguBreakdown.map((row) => (
+                          <tr key={row.municipality} className="hover:bg-gray-50/50">
+                            <td className="py-1.5 px-3 font-semibold text-gray-900">{row.municipality}</td>
+                            <td className="py-1.5 px-3 text-gray-600">{row.province}</td>
+                            <td className="py-1.5 px-3 text-center font-mono">{row.count}</td>
+                            <td className="py-1.5 px-3 text-right font-mono">{row.requested.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-950">{row.allocated.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-bold text-emerald-700">{row.rate}%</td>
+                            <td className="py-1.5 px-3 text-right font-mono text-gray-600">{row.share}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="py-2 px-3 text-center text-gray-500 italic">
+                            No municipal releases recorded matching query criteria.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    {lguBreakdown.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
+                          <td className="py-1.5 px-3" colSpan={2}>Total Municipal Allocations</td>
+                          <td className="py-1.5 px-3 text-center font-mono">{filteredReleases.length}</td>
+                          <td className="py-1.5 px-3 text-right font-mono">{totalRequested.toLocaleString()}</td>
+                          <td className="py-1.5 px-3 text-right font-mono text-blue-950">{totalAllocated.toLocaleString()}</td>
+                          <td className="py-1.5 px-3 text-right text-emerald-700">{fulfillmentRate}%</td>
+                          <td className="py-1.5 px-3 text-right font-mono">100.0%</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              {/* 9. Section 5: FNFI Relief Commodity Allocation Matrix */}
+              <div className="space-y-1.5 page-break-avoid">
+                <div className="flex items-center justify-between border-b border-gray-300 pb-1">
+                  <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-purple-700" />
+                    <span>5. FNFI Relief Commodity Allocation & Inventory Matrix</span>
+                  </h3>
+                  <span className="text-[8px] text-gray-500 font-mono">Warehouse Stock vs Outbound Demand</span>
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden text-[9px]">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[8px]">
+                        <th className="py-1.5 px-3">Relief Commodity Category</th>
+                        <th className="py-1.5 px-3 text-right">Current WH Stock</th>
+                        <th className="py-1.5 px-3 text-right">Requested Qty</th>
+                        <th className="py-1.5 px-3 text-right">Allocated Qty</th>
+                        <th className="py-1.5 px-3 text-right">Fulfillment</th>
+                        <th className="py-1.5 px-3 text-right">Remaining Buffer</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {commodityBreakdown.length > 0 ? (
+                        commodityBreakdown.map((row) => (
+                          <tr key={row.category} className="hover:bg-gray-50/50">
+                            <td className="py-1.5 px-3 font-semibold text-gray-900">{row.category}</td>
+                            <td className="py-1.5 px-3 text-right font-mono text-gray-600">{row.whStock.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-mono">{row.requested.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-mono font-bold text-blue-950">{row.allocated.toLocaleString()}</td>
+                            <td className="py-1.5 px-3 text-right font-bold text-emerald-700">{row.rate}%</td>
+                            <td className="py-1.5 px-3 text-right font-mono font-semibold text-indigo-900">{row.remainingBuffer.toLocaleString()}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="py-2 px-3 text-center text-gray-500 italic">
+                            No commodity distribution records matched.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* 10. Section 6: Logistical Observations & Operational Findings */}
+              <div className="space-y-1.5 page-break-avoid">
+                <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider border-b border-gray-300 pb-1 flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-blue-800" />
+                  <span>6. Logistical Observations & Operational Findings</span>
+                </h3>
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-[9px] space-y-2 text-gray-700">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <span className="block font-bold text-gray-900 text-[8px] uppercase">Primary Disaster Driver</span>
+                      <p className="mt-0.5">
+                        <span className="font-semibold text-blue-900">{operationalFindings.topDisaster}</span> accounted for the largest share of regional disaster assistance requests, representing <span className="font-bold">{operationalFindings.topDisasterShare}%</span> of total dispatched volume in the evaluated reporting scope.
+                      </p>
+                    </div>
+                    <div>
+                      <span className="block font-bold text-gray-900 text-[8px] uppercase">Priority Relief Recipient</span>
+                      <p className="mt-0.5">
+                        The municipality of <span className="font-semibold text-indigo-900">{operationalFindings.topLgu}</span> received the highest operational allocation ({operationalFindings.topLguShare}% of relief output), reflecting targeted evacuation and disaster support.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pt-2 border-t border-gray-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <span className="block font-bold text-gray-900 text-[8px] uppercase">Commodity Velocity</span>
+                      <p className="mt-0.5">
+                        <span className="font-semibold text-purple-900">{operationalFindings.topItem}</span> demonstrated the highest outbound velocity with {operationalFindings.topItemAlloc.toLocaleString()} units allocated from central inventory reserves.
+                      </p>
+                    </div>
+                    <div>
+                      <span className="block font-bold text-gray-900 text-[8px] uppercase">Regional Stock Buffer Assessment</span>
+                      <p className="mt-0.5">
+                        Central warehouses at Oton and Pototan maintain a consolidated reserve of <span className="font-bold text-emerald-800">{warehouseStats.totalReserve.toLocaleString()}</span> units, ensuring buffer stability for continuing augmentation mandates.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Page 2 Bottom Marker */}
+              <div className="pt-2 border-t border-gray-200 flex items-center justify-between text-[8px] text-gray-400">
+                <span>DSWD Field Office VI &bull; Disaster Response Management Division</span>
+                <span>Page 2 of 3 &bull; Ref: {reportRefNumber}</span>
+              </div>
+            </div>
+
+            {/* Print Page Break */}
+            <div className="print-page-break" />
+
+            {/* ========================================================
+                PAGE 3: Itemized Release Ledger & Official Certification
+               ======================================================== */}
+            <div className="print-page w-full max-w-4xl mx-auto bg-white p-8 sm:p-10 rounded-xl shadow-lg border border-gray-200 text-gray-900 space-y-5 print:shadow-none print:border-none print:p-0 print:rounded-none">
+              
+              {/* Running Header for Page 3 */}
+              <div className="border-b border-gray-300 pb-2 flex items-center justify-between text-[9px] text-gray-600">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-blue-900">DSWD FIELD OFFICE VI</span>
+                  <span>&bull;</span>
+                  <span>Relief Operations & Analytics Audit Report</span>
+                </div>
+                <div className="font-mono text-gray-500">
+                  Ref: {reportRefNumber} | Page 3 of 3
+                </div>
+              </div>
+
+              {/* 11. Section 7: Detailed Itemized Release Ledger */}
+              <div className="space-y-1.5 page-break-avoid">
+                <div className="flex items-center justify-between border-b border-gray-300 pb-1">
+                  <h3 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>7. Itemized Release & Shipment Audit Ledger ({filteredReleases.length} Records)</span>
+                  </h3>
+                  <span className="text-[8px] text-gray-500 font-mono">
+                    Active Transit: {inTransitCount} | Confirmed: {completedCount}
+                  </span>
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden text-[9px]">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[8px]">
+                        <th className="py-1.5 px-2">DR Number</th>
+                        <th className="py-1.5 px-2">Date</th>
+                        <th className="py-1.5 px-2">Calamity / Incident</th>
+                        <th className="py-1.5 px-2">Destination LGU</th>
+                        <th className="py-1.5 px-2">Commodity</th>
+                        <th className="py-1.5 px-2 text-right">Req.</th>
+                        <th className="py-1.5 px-2 text-right">Alloc.</th>
+                        <th className="py-1.5 px-2 text-center">Status</th>
+                        <th className="py-1.5 px-2 font-mono">Blockchain Tx Hash</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {filteredReleases.length > 0 ? (
+                        filteredReleases.slice(0, 25).map((r) => (
+                          <tr key={r.drNumber} className="hover:bg-gray-50/50">
+                            <td className="py-1.5 px-2 font-bold font-mono text-blue-900">{r.drNumber}</td>
+                            <td className="py-1.5 px-2 text-gray-600 whitespace-nowrap">{r.dateAllocated || 'N/A'}</td>
+                            <td className="py-1.5 px-2 text-gray-800">{r.reportReason || 'General Relief'}</td>
+                            <td className="py-1.5 px-2 font-semibold text-gray-900">{r.municipality || 'LGU'}</td>
+                            <td className="py-1.5 px-2 text-gray-800">{r.fnfiCategory}</td>
+                            <td className="py-1.5 px-2 text-right font-mono">{r.amountRequested}</td>
+                            <td className="py-1.5 px-2 text-right font-mono font-bold text-blue-900">{r.amountApproved || r.amountRequested}</td>
+                            <td className="py-1.5 px-2 text-center">
+                              <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-gray-100 text-gray-800 border border-gray-200">
+                                {r.deliveryStatus}
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-2 font-mono text-gray-500 truncate max-w-[100px]">
+                              {r.blockchainTxHash ? `${r.blockchainTxHash.slice(0, 8)}...${r.blockchainTxHash.slice(-6)}` : 'On-Chain Ledger'}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="py-2 px-3 text-center text-gray-500 italic">
+                            No release records found matching active filter parameters.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {filteredReleases.length > 25 && (
+                  <p className="text-[8px] text-gray-500 italic text-right">
+                    Showing top 25 of {filteredReleases.length} matching ledger records for print brevity.
+                  </p>
+                )}
+              </div>
+
+              {/* 12. Section 8: Blockchain Cryptographic Ledger Verification */}
+              <div className="p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-[9px] space-y-1 page-break-avoid">
+                <div className="flex items-center gap-1.5 font-bold text-gray-800 uppercase tracking-wider text-[8px]">
+                  <Lock className="w-3 h-3 text-blue-700" />
+                  <span>8. Blockchain Cryptographic Ledger Verification & Security Standard</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-gray-600">
+                  <div>
+                    <span className="block font-bold text-gray-700">Consensus Mechanism:</span>
+                    <span>EVM Smart Contract Multi-Sig Protocol</span>
+                  </div>
+                  <div>
+                    <span className="block font-bold text-gray-700">Custody Verification:</span>
+                    <span>Role-Based Custody Transfer & Receiver Sign-off</span>
+                  </div>
+                  <div>
+                    <span className="block font-bold text-gray-700">Ledger Immutability:</span>
+                    <span>SHA-256 State Authenticity Validated</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 13. Section 9: Official Certification & Sign-off Block */}
+              <div className="pt-4 border-t-2 border-gray-300 page-break-avoid space-y-4">
+                <p className="text-[9px] text-gray-500 uppercase tracking-widest text-center font-bold">
+                  Official Certification of Accountability & Records Verification
+                </p>
+                <div className="grid grid-cols-3 gap-4 text-center text-[10px]">
+                  <div>
+                    <div className="border-b border-gray-800 h-9 mb-1 flex items-end justify-center pb-1">
+                      <span className="font-bold text-gray-900">{adminProfile?.fullName || 'DSWD System Administrator'}</span>
+                    </div>
+                    <span className="block font-bold text-gray-800 uppercase text-[9px]">Prepared By</span>
+                    <span className="text-gray-500 text-[8px]">{adminProfile?.jobPosition || 'Disaster Response Operations Officer'}</span>
+                  </div>
+
+                  <div>
+                    <div className="border-b border-gray-800 h-9 mb-1 flex items-end justify-center pb-1">
+                      <span className="font-bold text-gray-900">Regional Logistics Management Section</span>
+                    </div>
+                    <span className="block font-bold text-gray-800 uppercase text-[9px]">Verified & Audited By</span>
+                    <span className="text-gray-500 text-[8px]">Regional Warehouse Supervisor</span>
+                  </div>
+
+                  <div>
+                    <div className="border-b border-gray-800 h-9 mb-1 flex items-end justify-center pb-1">
+                      <span className="font-bold text-gray-900">Regional Director</span>
+                    </div>
+                    <span className="block font-bold text-gray-800 uppercase text-[9px]">Noted & Approved By</span>
+                    <span className="text-gray-500 text-[8px]">DSWD Regional Field Office VI</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 14. Official Footer & Legal Notice */}
+              <div className="pt-3 border-t border-gray-200 text-center text-[8px] text-gray-500 font-medium space-y-0.5 page-break-avoid">
+                <p>
+                  DSWD Blockchain-Secured Relief Operations & Incident Logistics Information System (Field Office VI)
+                </p>
+                <p className="font-mono text-gray-400">
+                  Cryptographic Audit Authenticity: SHA-256 Validated | System Generated Report Reference: {reportRefNumber}
+                </p>
+                <p className="text-gray-400 text-[7px]">
+                  CONFIDENTIAL GOVERNMENT AUDIT RECORD &bull; UNAUTHORIZED REPRODUCTION OR MODIFICATION PROHIBITED
+                </p>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
     </div>
   );
-}
 
+  return createPortal(portalContent, document.body);
+}
