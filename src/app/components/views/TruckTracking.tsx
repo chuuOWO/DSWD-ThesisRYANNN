@@ -39,6 +39,7 @@ interface TruckRoute {
   truckName: string;
   driver: string;
   driverName?: string;
+  hasActiveProfile: boolean;
   status: TruckStatus;
   origin: string;
   destination: string;
@@ -179,6 +180,11 @@ const toTruckRoute = (
     (location.wallet_address && p.walletAddress && p.walletAddress.trim().toLowerCase() === location.wallet_address.trim().toLowerCase())
   );
   const driverName = matchingProfile?.fullName;
+  const hasActiveProfile = Boolean(
+    matchingProfile &&
+    matchingProfile.role === 'receiver' &&
+    (matchingProfile.status === 'verified' || !matchingProfile.status)
+  );
 
   const uniqueMap = new Map<string, ReceiverReleaseRecord>();
   // 1. Fresh releases from getReceiverReleases (direct query from outgoing_requests)
@@ -342,6 +348,7 @@ const toTruckRoute = (
     truckName: location.truck_id,
     driver: shortWallet(location.wallet_address),
     driverName,
+    hasActiveProfile,
     status,
     origin,
     destination,
@@ -818,8 +825,59 @@ export function TruckTracking({
     .filter(isActiveReceiverLocation)
     .filter((loc) => !isLguReceiverId(loc.truck_id))
     .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
-    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles, dbLgus)),
+    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles, dbLgus))
+    .filter((route) => {
+      // If profiles are loaded, only retain routes with an active receiver profile OR active packages
+      if (profiles.length > 0) {
+        const hasActivePackages = route.assignedPackagesList && route.assignedPackagesList.length > 0;
+        if (!route.hasActiveProfile && !hasActivePackages) {
+          return false;
+        }
+      }
+      return true;
+    }),
     [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles, dbLgus]);
+
+  // Opportunistic cleanup of orphan truck locations
+  useEffect(() => {
+    if (profiles.length === 0) return;
+    const orphanTruckIds: string[] = [];
+    Object.values(liveLocations).forEach((loc) => {
+      if (!loc.truck_id) return;
+      const matchingProfile = profiles.find((p) =>
+        (p.truckId && p.truckId.trim().toUpperCase() === loc.truck_id.trim().toUpperCase()) ||
+        (loc.wallet_address && p.walletAddress && p.walletAddress.trim().toLowerCase() === loc.wallet_address.trim().toLowerCase())
+      );
+      const hasActiveRelease = releases.some((r) =>
+        r.assigned_truck_id && r.assigned_truck_id.trim().toUpperCase() === loc.truck_id.trim().toUpperCase() &&
+        !['Delivered', 'Accepted', 'Distributed', 'Cancelled'].includes(r.delivery_status ?? '')
+      ) || outgoingReleasesList.some((r) =>
+        (r.assignedTruckId || r.assigned_truck_id) &&
+        (r.assignedTruckId || r.assigned_truck_id)?.trim().toUpperCase() === loc.truck_id.trim().toUpperCase() &&
+        !['Delivered', 'Accepted', 'Distributed', 'Cancelled'].includes(r.deliveryStatus ?? '')
+      );
+      if (!matchingProfile && !hasActiveRelease) {
+        orphanTruckIds.push(loc.truck_id);
+      }
+    });
+
+    if (orphanTruckIds.length > 0) {
+      orphanTruckIds.forEach((truckId) => {
+        backendApi.deleteTruckLiveLocation(truckId).catch(() => {});
+      });
+      setLiveLocations((current) => {
+        let changed = false;
+        const next = { ...current };
+        orphanTruckIds.forEach((id) => {
+          if (next[id]) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : current;
+      });
+    }
+  }, [profiles, liveLocations, releases, outgoingReleasesList]);
 
   useEffect(() => {
     if (!liveTruckRoutes.length) {

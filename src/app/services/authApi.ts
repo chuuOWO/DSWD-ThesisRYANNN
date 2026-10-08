@@ -343,6 +343,29 @@ export const authApi = {
   },
 
   async rejectProfile(userId: string) {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('truck_id, wallet_address')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profile?.truck_id) {
+        await supabase
+          .from('truck_live_locations')
+          .delete()
+          .ilike('truck_id', profile.truck_id.trim());
+      }
+      if (profile?.wallet_address) {
+        await supabase
+          .from('truck_live_locations')
+          .delete()
+          .ilike('wallet_address', profile.wallet_address.trim());
+      }
+    } catch (cleanupErr) {
+      console.warn('Failed to clean up associated truck live location on reject:', cleanupErr);
+    }
+
     const { error } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
     if (error) {
       const { error: directError } = await supabase
@@ -355,6 +378,29 @@ export const authApi = {
   },
 
   async deleteProfile(userId: string) {
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('truck_id, wallet_address')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profile?.truck_id) {
+        await supabase
+          .from('truck_live_locations')
+          .delete()
+          .ilike('truck_id', profile.truck_id.trim());
+      }
+      if (profile?.wallet_address) {
+        await supabase
+          .from('truck_live_locations')
+          .delete()
+          .ilike('wallet_address', profile.wallet_address.trim());
+      }
+    } catch (cleanupErr) {
+      console.warn('Failed to clean up associated truck live location on delete:', cleanupErr);
+    }
+
     const { error } = await supabase.rpc('admin_delete_profile', { target_user_id: userId });
     if (error) {
       const { error: directError } = await supabase

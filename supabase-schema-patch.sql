@@ -1672,6 +1672,78 @@ from public.profiles p
 where u.id = p.id;
 
 -- ==============================================================================
+-- 13. AUTOMATIC CLEANUP OF ORPHAN TRUCK LIVE LOCATIONS ON PROFILE DELETION
+-- ==============================================================================
+
+-- 13.1 Trigger function to remove truck_live_locations when profile is deleted
+create or replace function public.clean_orphan_truck_location_on_profile_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if OLD.truck_id is not null and trim(OLD.truck_id) <> '' then
+    delete from public.truck_live_locations where upper(trim(truck_id)) = upper(trim(OLD.truck_id));
+  end if;
+  if OLD.wallet_address is not null and trim(OLD.wallet_address) <> '' then
+    delete from public.truck_live_locations where lower(trim(wallet_address)) = lower(trim(OLD.wallet_address));
+  end if;
+  return OLD;
+end;
+$$;
+
+drop trigger if exists on_profile_deleted_clean_truck on public.profiles;
+create trigger on_profile_deleted_clean_truck
+after delete on public.profiles
+for each row
+execute function public.clean_orphan_truck_location_on_profile_delete();
+
+-- 13.2 Update admin_delete_profile function to also remove truck location
+create or replace function public.admin_delete_profile(target_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_truck_id text;
+  v_wallet_address text;
+begin
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) then
+    raise exception 'Unauthorized: Only DSWD administrators can delete accounts.';
+  end if;
+
+  select truck_id, wallet_address into v_truck_id, v_wallet_address
+  from public.profiles
+  where id = target_user_id;
+
+  if v_truck_id is not null and trim(v_truck_id) <> '' then
+    delete from public.truck_live_locations where upper(trim(truck_id)) = upper(trim(v_truck_id));
+  end if;
+
+  if v_wallet_address is not null and trim(v_wallet_address) <> '' then
+    delete from public.truck_live_locations where lower(trim(wallet_address)) = lower(trim(v_wallet_address));
+  end if;
+
+  delete from public.profiles
+  where id = target_user_id;
+
+  return true;
+end;
+$$;
+
+-- 13.3 One-time cleanup: remove any existing orphan truck locations without active profile or releases
+delete from public.truck_live_locations
+where truck_id not in (
+  select upper(trim(truck_id)) from public.profiles where truck_id is not null and trim(truck_id) <> ''
+)
+and (current_dr_number is null or current_dr_number = '');
+
+-- ==============================================================================
 -- END OF SCHEMA SCRIPT
 -- ==============================================================================
 

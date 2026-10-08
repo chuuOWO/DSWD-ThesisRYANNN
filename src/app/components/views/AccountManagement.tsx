@@ -455,6 +455,9 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
     if (!confirmDeleteUser) return;
     setIsProcessingAction(true);
     try {
+      if (confirmDeleteUser.truckId) {
+        await backendApi.deleteTruckLiveLocation(confirmDeleteUser.truckId).catch(() => {});
+      }
       await authApi.deleteProfile(confirmDeleteUser.id);
       setToastMessage({
         type: 'success',

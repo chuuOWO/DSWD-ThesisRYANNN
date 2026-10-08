@@ -1716,6 +1716,24 @@ export const backendApi = {
     return { ok: true };
   },
 
+  async deleteTruckLiveLocation(truckId: string): Promise<{ ok: boolean }> {
+    try {
+      const cleanId = truckId.trim();
+      const { error } = await supabase
+        .from('truck_live_locations')
+        .delete()
+        .eq('truck_id', cleanId);
+      if (error) {
+        console.warn('Failed to delete truck live location:', error.message);
+        return { ok: false };
+      }
+      return { ok: true };
+    } catch (err) {
+      console.warn('Error deleting truck live location:', err);
+      return { ok: false };
+    }
+  },
+
   subscribeDashboard(onChange: () => void) {
     const channelName = `dashboard-db-changes-${crypto.randomUUID().slice(0, 8)}`;
     const channel = supabase
