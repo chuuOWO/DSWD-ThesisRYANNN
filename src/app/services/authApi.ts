@@ -277,6 +277,8 @@ export const authApi = {
     }
 
     // 3. Create the auth user with pending verification status
+    // CRITICAL: NEVER pass workIdUrl (base64 image) into auth user_metadata!
+    // Supabase embeds user_metadata into the JWT access token, and a 70KB header exceeds Cloudflare's HTTP header limit (causing HTTP 520 / 431).
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password: payload.password,
@@ -287,7 +289,6 @@ export const authApi = {
           last_name: payload.lastName,
           phone_number: payload.phoneNumber || null,
           job_position: payload.jobPosition || null,
-          work_id_url: payload.workIdUrl || null,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
           wallet_address: payload.walletAddress || null,

@@ -1625,5 +1625,53 @@ create policy "Allow delete truck live locations"
   using (true);
 
 -- ==============================================================================
+-- 12. REAL-TIME AUTH METADATA SYNCHRONIZATION & TOKEN OPTIMIZATION
+-- ==============================================================================
+
+-- 12.1 Strip any oversized work_id_url base64 images from auth.users metadata
+-- to guarantee JWT access tokens remain lightweight (<1KB) and never exceed
+-- Cloudflare's HTTP header limits (preventing HTTP 520 / 431).
+update auth.users
+set raw_user_meta_data = raw_user_meta_data - 'work_id_url'
+where raw_user_meta_data ? 'work_id_url';
+
+-- 12.2 Auto-sync function: updates auth.users user_metadata when profile status changes
+create or replace function public.sync_profile_to_auth_metadata()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  update auth.users
+  set raw_user_meta_data = jsonb_set(
+    coalesce(raw_user_meta_data, '{}'::jsonb),
+    '{status}',
+    to_jsonb(new.status)
+  )
+  where id = new.id;
+  
+  return new;
+end;
+$$;
+
+drop trigger if exists on_profile_status_changed on public.profiles;
+create trigger on_profile_status_changed
+after update of status on public.profiles
+for each row
+execute function public.sync_profile_to_auth_metadata();
+
+-- 12.3 One-time backfill: sync all existing profile statuses into auth.users metadata
+update auth.users u
+set raw_user_meta_data = jsonb_set(
+  coalesce(u.raw_user_meta_data, '{}'::jsonb),
+  '{status}',
+  to_jsonb(p.status)
+)
+from public.profiles p
+where u.id = p.id;
+
+-- ==============================================================================
 -- END OF SCHEMA SCRIPT
 -- ==============================================================================
+
