@@ -5,27 +5,10 @@ import { EditLGUModal } from '../modals/EditLGUModal';
 import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
 import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
-import { computeSynchronizedLgus, getLguStockForCategory } from '../../lib/lguSync';
+import { computeSynchronizedLgus, getLguStockForCategory, type SynchronizedLgu } from '../../lib/lguSync';
 import { evaluatePriorityIndicator } from '../../lib/priorityLogic';
 
-export interface LGUDelivery {
-  id: string;
-  lguName: string;
-  municipality: string;
-  province: string;
-  totalItemsReleased: number;
-  deliveryCount: number;
-  completedDeliveries: number;
-  pendingDeliveries: number;
-  lastDeliveryDate: string;
-  contactPerson?: string;
-  contactNumber?: string;
-  remarks?: string;
-  latitude?: number;
-  longitude?: number;
-  maxStock?: number;
-  currentStock?: Record<string, number>;
-}
+export type LGUDelivery = SynchronizedLgu;
 
 interface RecentActivity {
   id: string;

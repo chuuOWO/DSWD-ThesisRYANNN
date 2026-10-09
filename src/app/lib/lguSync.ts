@@ -30,6 +30,8 @@ export interface SynchronizedLgu extends LguRecord {
   priorityColor: PriorityColor;
   priorityLevel?: PriorityLevel;
   maxStock: number;
+  affectedFamilies: number;
+  damageIndex: number;
   stockRate?: number;
   completionRate?: number;
   effectiveRate?: number;
@@ -217,13 +219,15 @@ export function computeSynchronizedLgus(params: {
     const rtef = canonicalStock['RTEF'] || 0;
 
     const maxStock = Number(lgu.maxStock) > 0 ? Number(lgu.maxStock) : 3000;
+    const affectedFamilies = Number(lgu.affectedFamilies ?? 0);
+    const damageIndex = Number(lgu.damageIndex ?? 0);
 
     const evalRes = evaluatePriorityIndicator({
       foodPacks,
       completedDeliveries: completed,
       pendingDeliveries: pending,
       totalDeliveries: deliveryCount,
-      affectedFamilies: lgu.affectedFamilies,
+      affectedFamilies,
       targetQuota: maxStock
     });
 
@@ -254,6 +258,8 @@ export function computeSynchronizedLgus(params: {
       laminatedSacks,
       rtef,
       maxStock,
+      affectedFamilies,
+      damageIndex,
       urgencyScore,
       priorityColor,
       priorityLevel: evalRes.priorityLevel,

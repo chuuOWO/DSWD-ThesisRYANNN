@@ -107,6 +107,7 @@ export interface OutgoingRelease {
 
 export interface LGUPriorityReport {
   id: string;
+  lguId?: string;
   municipality: string;
   province: string;
   lguName: string;
@@ -1641,6 +1642,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           });
           return {
             id: l.id,
+            lguId: l.id,
             municipality: l.municipality,
             province: l.province,
             lguName: l.lguName || `${l.municipality} Municipal Office`,
@@ -1688,6 +1690,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         });
         return {
           id: l.id,
+          lguId: l.id,
           municipality: l.municipality,
           province: l.province,
           lguName: l.lguName || `${l.municipality} Municipal Office`,
