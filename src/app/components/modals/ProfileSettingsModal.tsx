@@ -114,17 +114,28 @@ export function ProfileSettingsModal({
         }
       }
 
-      const walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
-      if (!walletAddress) throw new Error('Could not provision smart account address.');
+      let walletAddress: string | null = null;
+      if (typeof window !== 'undefined' && (window as any).ethereum) {
+        try {
+          const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
+          if (accounts?.[0]) walletAddress = accounts[0];
+        } catch {}
+      }
+
+      if (!walletAddress) {
+        walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
+      }
+
+      if (!walletAddress) throw new Error('Could not resolve wallet address.');
       const isLinked = await authApi.isWalletLinked(walletAddress, profile.id);
       if (isLinked) {
         throw new Error('This wallet is already bound to another account.');
       }
       await authApi.updateWalletAddress(profile.id, walletAddress);
       await refreshProfile();
-      setFeedbackMessage({ type: 'success', text: `Gasless smart account active: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
+      setFeedbackMessage({ type: 'success', text: `Sepolia testnet wallet active: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
     } catch (err) {
-      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update smart account.' });
+      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update wallet address.' });
     } finally {
       setIsLinkingWallet(false);
     }
@@ -572,20 +583,28 @@ export function ProfileSettingsModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-gray-700">
-                Gasless Smart Account
+                Sepolia Testnet Wallet
               </label>
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                <ShieldCheck size={10} className="text-emerald-600" />
-                Paymaster Sponsored
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                <ShieldCheck size={10} className="text-blue-600" />
+                Sepolia Testnet Active
               </span>
             </div>
             {profile.walletAddress ? (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
                   <span className="flex-1 font-semibold">{profile.walletAddress}</span>
+                  <button
+                    type="button"
+                    onClick={handleLinkWallet}
+                    disabled={isLinkingWallet}
+                    className="flex-shrink-0 px-2.5 py-1 text-[10px] font-bold bg-[#2500ba] text-white rounded-lg hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer"
+                  >
+                    {isLinkingWallet ? 'Linking...' : 'Update'}
+                  </button>
                 </div>
                 <p className="text-[10.5px] text-gray-500 leading-tight">
-                  ERC-4337 Smart Account provisioned on Sepolia. Dispatches and handover receipts execute with zero gas fees.
+                  Ethereum Sepolia Testnet (Chain ID 11155111). All on-chain batch tokens and custody handovers are recorded to this address.
                 </p>
               </div>
             ) : (
@@ -596,7 +615,7 @@ export function ProfileSettingsModal({
                   disabled={isLinkingWallet}
                   className="w-full py-2.5 px-4 rounded-xl border-2 border-dashed border-[#2500ba]/40 text-xs font-bold text-[#2500ba] hover:bg-[#2500ba]/5 disabled:opacity-50 transition cursor-pointer"
                 >
-                  {isLinkingWallet ? 'Provisioning Smart Account...' : 'Generate Gasless Smart Account'}
+                  {isLinkingWallet ? 'Connecting...' : 'Connect / Link Sepolia Wallet'}
                 </button>
               </div>
             )}

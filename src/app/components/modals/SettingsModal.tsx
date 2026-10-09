@@ -1288,18 +1288,18 @@ export function SettingsModal({
                   <div className="flex items-center gap-2">
                     <Wallet className="w-5 h-5 text-blue-400" />
                     <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">
-                      Gasless Smart Account (ERC-4337)
+                      Ethereum Sepolia Testnet (Chain ID 11155111)
                     </span>
                   </div>
                   <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                     activeWallet ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-red-500/20 text-red-300 border border-red-500/40'
                   }`}>
-                    {activeWallet ? 'Gasless Account Active' : 'Unprovisioned'}
+                    {activeWallet ? 'Sepolia Testnet Active' : 'Unprovisioned'}
                   </span>
                 </div>
 
                 <div>
-                  <p className="text-[11px] text-slate-300">Registered Smart Account Address:</p>
+                  <p className="text-[11px] text-slate-300">Registered Testnet Wallet Address:</p>
                   {activeWallet ? (
                     <div className="mt-1 flex items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 font-mono text-xs text-blue-100 break-all">
                       <span>{activeWallet}</span>
@@ -1314,20 +1314,26 @@ export function SettingsModal({
                     </div>
                   ) : (
                     <p className="mt-1 text-xs text-amber-200 font-semibold">
-                      No smart account provisioned yet. Generate an account to enable gasless signing on blockchain.
+                      No testnet wallet registered yet. Connect your wallet to enable on-chain signing.
                     </p>
                   )}
                 </div>
 
-                <div className="pt-2 flex items-center justify-between text-[11px] text-slate-300 border-t border-slate-800">
-                  <span>RBAC Role: <strong className="text-white">DSWD Administrator</strong></span>
-                  <span>Network: <strong className="text-blue-300">Sepolia / ERC-4337 Gasless</strong></span>
+                <div className="pt-2 flex flex-col gap-1 text-[11px] text-slate-300 border-t border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span>RBAC Role: <strong className="text-white">DSWD Administrator</strong></span>
+                    <span>Network: <strong className="text-blue-300">Ethereum Sepolia</strong></span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span>Contract: <a href="https://sepolia.etherscan.io/address/0xd2e957dda5a5099980a66ecc736b541590892588" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline font-mono">0xd2e9...2588</a></span>
+                    <span className="text-slate-400">Zero real money (Free testnet ETH)</span>
+                  </div>
                 </div>
               </div>
 
               {/* Account Provisioning Actions */}
               <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
-                <p className="text-xs font-bold text-gray-800">Account Provisioning</p>
+                <p className="text-xs font-bold text-gray-800">Sepolia Wallet Connection</p>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -1336,11 +1342,11 @@ export function SettingsModal({
                     className="px-4 py-2.5 rounded-xl bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                   >
                     <Wallet className="w-3.5 h-3.5" />
-                    <span>{activeWallet ? 'Regenerate Smart Account' : 'Provision Smart Account'}</span>
+                    <span>{activeWallet ? 'Re-sync Wallet Address' : 'Connect / Link Wallet'}</span>
                   </button>
                 </div>
                 <p className="text-[11px] text-gray-500">
-                  All transactions are sponsored via Alchemy Paymaster. No browser extensions or gas tokens are required.
+                  All transactions run on the official Ethereum Sepolia testnet. Zero real money is involved.
                 </p>
               </div>
             </div>

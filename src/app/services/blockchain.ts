@@ -1,7 +1,7 @@
 import { Contract, ethers, JsonRpcProvider } from 'ethers';
 import type { UserRole } from '../hooks/useInventoryState';
 import { supabase } from '../lib/supabase';
-import { executeGaslessCall, provisionSmartAccountAddress } from './embeddedWallet';
+import { provisionSmartAccountAddress } from './embeddedWallet';
 
 export interface BlockchainProof {
   hash: string;
@@ -155,6 +155,47 @@ const getReadOnlyProvider = () => {
   return new JsonRpcProvider(targetRpcUrl);
 };
 
+const getSigner = async () => {
+  const relayerKey = import.meta.env.VITE_SEPOLIA_RELAYER_PRIVATE_KEY?.trim();
+  if (relayerKey && relayerKey.length >= 64) {
+    const formattedKey = relayerKey.startsWith('0x') ? relayerKey : `0x${relayerKey}`;
+    const provider = getReadOnlyProvider();
+    return new ethers.Wallet(formattedKey, provider);
+  }
+
+  if (typeof window !== 'undefined' && (window as any).ethereum) {
+    const ethereum = (window as any).ethereum;
+    const provider = new ethers.BrowserProvider(ethereum);
+    try {
+      const currentNetwork = await provider.getNetwork();
+      if (Number(currentNetwork.chainId) !== targetChainId) {
+        await ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xaa36a7' }]
+        });
+      }
+    } catch (switchErr: any) {
+      if (switchErr.code === 4902) {
+        await ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [{
+            chainId: '0xaa36a7',
+            chainName: 'Sepolia',
+            nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
+            rpcUrls: [targetRpcUrl],
+            blockExplorerUrls: ['https://sepolia.etherscan.io']
+          }]
+        });
+      }
+    }
+
+    await ethereum.request({ method: 'eth_requestAccounts' });
+    return provider.getSigner();
+  }
+
+  throw new Error('Sepolia signer not found. Please set VITE_SEPOLIA_RELAYER_PRIVATE_KEY in .env or connect MetaMask.');
+};
+
 export const blockchain = {
   isConfigured(): boolean {
     return Boolean(contractAddress);
@@ -193,6 +234,13 @@ export const blockchain = {
   },
 
   async connectWallet(): Promise<{ walletAddress: string; role: UserRole }> {
+    const signer = await getSigner().catch(() => null);
+    if (signer) {
+      const walletAddress = await signer.getAddress();
+      const role = await resolveWalletRoleFromDb(walletAddress);
+      return { walletAddress, role };
+    }
+
     const { data } = await supabase.auth.getSession();
     const user = data.session?.user;
     if (!user) {
@@ -226,6 +274,11 @@ export const blockchain = {
   },
 
   async getConnectedWalletAddress(): Promise<string | null> {
+    const signer = await getSigner().catch(() => null);
+    if (signer) {
+      return signer.getAddress();
+    }
+
     const { data } = await supabase.auth.getSession();
     const user = data.session?.user;
     if (!user) return null;
@@ -317,32 +370,28 @@ export const blockchain = {
     }
 
     const task = (async (): Promise<BlockchainProof> => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const user = sessionData.session?.user;
-      if (!user) {
-        throw new Error('Authentication required for batch minting.');
-      }
-
       onStage?.('wallet');
-      const gasless = await executeGaslessCall({
-        userId: user.id,
-        email: user.email || '',
-        functionName: 'mintBatchToken',
-        args: [
-          input.manifestNumber,
-          input.batchTokenId,
-          input.manifestHash,
-          input.category,
-          BigInt(input.quantity),
-          input.destination
-        ]
-      });
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
 
-      onStage?.('mining', gasless.txHash);
+      onStage?.('mining');
+      const tx = await contract.mintBatchToken(
+        input.manifestNumber,
+        input.batchTokenId,
+        input.manifestHash,
+        input.category,
+        BigInt(input.quantity),
+        input.destination
+      );
+
+      onStage?.('mining', tx.hash);
+      const receipt = await tx.wait(1);
+
       return {
-        hash: gasless.txHash,
-        walletAddress: gasless.smartAccountAddress,
-        mode: gasless.mode === 'bundler_paymaster' ? 'contract' : 'signature'
+        hash: receipt?.hash || tx.hash,
+        walletAddress,
+        mode: 'contract'
       };
     })();
 
@@ -423,35 +472,31 @@ export const blockchain = {
     }
 
     const task = (async (): Promise<BlockchainProof> => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const user = sessionData.session?.user;
-      if (!user) {
-        throw new Error('Authentication required to sign release.');
-      }
-
       onStage?.('wallet');
-      const gasless = await executeGaslessCall({
-        userId: user.id,
-        email: user.email || '',
-        functionName: 'signRelease',
-        args: [
-          input.drNumber,
-          input.handoverContractId,
-          input.category,
-          BigInt(input.quantity),
-          input.batchTokenIds,
-          input.batchQuantities.map((q) => BigInt(q)),
-          input.from,
-          input.to,
-          input.gps
-        ]
-      });
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+      const contract = new Contract(handoverContractAddress, handoverAbi, signer);
 
-      onStage?.('mining', gasless.txHash);
+      onStage?.('mining');
+      const tx = await contract.signRelease(
+        input.drNumber,
+        input.handoverContractId,
+        input.category,
+        BigInt(input.quantity),
+        input.batchTokenIds,
+        input.batchQuantities.map((q) => BigInt(q)),
+        input.from,
+        input.to,
+        input.gps
+      );
+
+      onStage?.('mining', tx.hash);
+      const receipt = await tx.wait(1);
+
       return {
-        hash: gasless.txHash,
-        walletAddress: gasless.smartAccountAddress,
-        mode: gasless.mode === 'bundler_paymaster' ? 'contract' : 'signature'
+        hash: receipt?.hash || tx.hash,
+        walletAddress,
+        mode: 'contract'
       };
     })();
 
@@ -476,30 +521,26 @@ export const blockchain = {
     }
 
     const task = (async (): Promise<BlockchainProof> => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const user = sessionData.session?.user;
-      if (!user) {
-        throw new Error('Authentication required to confirm receipt.');
-      }
-
       onStage?.('wallet');
-      const gasless = await executeGaslessCall({
-        userId: user.id,
-        email: user.email || '',
-        functionName: 'confirmReceipt',
-        args: [
-          input.drNumber,
-          input.handoverContractId,
-          input.destination,
-          input.gps
-        ]
-      });
+      const signer = await getSigner();
+      const walletAddress = await signer.getAddress();
+      const contract = new Contract(handoverContractAddress, handoverAbi, signer);
 
-      onStage?.('mining', gasless.txHash);
+      onStage?.('mining');
+      const tx = await contract.confirmReceipt(
+        input.drNumber,
+        input.handoverContractId,
+        input.destination,
+        input.gps
+      );
+
+      onStage?.('mining', tx.hash);
+      const receipt = await tx.wait(1);
+
       return {
-        hash: gasless.txHash,
-        walletAddress: gasless.smartAccountAddress,
-        mode: gasless.mode === 'bundler_paymaster' ? 'contract' : 'signature'
+        hash: receipt?.hash || tx.hash,
+        walletAddress,
+        mode: 'contract'
       };
     })();
 
@@ -511,46 +552,11 @@ export const blockchain = {
     }
   },
 
-  async signReleaseGasless(input: SignReleaseInput, userId: string, email: string): Promise<BlockchainProof> {
-    const res = await executeGaslessCall({
-      userId,
-      email,
-      functionName: 'signRelease',
-      args: [
-        input.drNumber,
-        input.handoverContractId,
-        input.category,
-        BigInt(input.quantity),
-        input.batchTokenIds,
-        input.batchQuantities.map((q) => BigInt(q)),
-        input.from,
-        input.to,
-        input.gps,
-      ],
-    });
-    return {
-      hash: res.txHash,
-      walletAddress: res.smartAccountAddress,
-      mode: res.mode === 'bundler_paymaster' ? 'contract' : 'signature',
-    };
+  async signReleaseGasless(input: SignReleaseInput, _userId?: string, _email?: string): Promise<BlockchainProof> {
+    return this.signRelease(input);
   },
 
-  async confirmReceiptGasless(input: ConfirmReceiptInput, userId: string, email: string): Promise<BlockchainProof> {
-    const res = await executeGaslessCall({
-      userId,
-      email,
-      functionName: 'confirmReceipt',
-      args: [
-        input.drNumber,
-        input.handoverContractId,
-        input.destination,
-        input.gps,
-      ],
-    });
-    return {
-      hash: res.txHash,
-      walletAddress: res.smartAccountAddress,
-      mode: res.mode === 'bundler_paymaster' ? 'contract' : 'signature',
-    };
+  async confirmReceiptGasless(input: ConfirmReceiptInput, _userId?: string, _email?: string): Promise<BlockchainProof> {
+    return this.confirmReceipt(input);
   }
 };

@@ -37,6 +37,7 @@ declare global {
     readonly VITE_PAYMASTER_POLICY_ID?: string;
     readonly VITE_ENTRYPOINT_ADDRESS?: string;
     readonly VITE_BACKEND_WORKER_ADDRESS?: string;
+    readonly VITE_SEPOLIA_RELAYER_PRIVATE_KEY?: string;
     readonly VITE_ADMIN_WALLET_ADDRESS?: string;
     readonly VITE_TRUCKER_WALLET_ADDRESS?: string;
     readonly VITE_LGU_WALLET_ADDRESS?: string;

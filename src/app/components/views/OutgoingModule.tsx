@@ -430,8 +430,23 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                           </span>
                         ))}
                       </div>
-                    ) : <p className="text-xs text-gray-400 mb-2">No batch record assigned</p>}
+                    ) : (
+                      <p className="text-xs text-gray-400 mb-2">No batch record assigned</p>
+                    )}
                     <p className="text-xs text-gray-600">Release agreement: {release.handoverContractId ? 'On file' : 'Not set'}</p>
+                    {release.blockchainTxHash && (
+                      <div className="mt-1.5">
+                        <a
+                          href={`https://sepolia.etherscan.io/tx/${release.blockchainTxHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-purple-700 hover:text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 transition"
+                          title="View on Sepolia Etherscan"
+                        >
+                          <span>Sepolia ({release.blockchainTxHash.slice(0, 6)}...{release.blockchainTxHash.slice(-4)})</span>
+                        </a>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">
