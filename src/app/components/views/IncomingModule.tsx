@@ -182,13 +182,13 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
     if (actionModal.type === 'submit') {
       submitIncomingForVerification(item.id);
-      showResult(`Incoming record ${item.id} has been submitted for warehouse checker review.`);
+      showResult(`Incoming record ${item.id} has been submitted for ${item.destinationType === 'LGU' ? item.destination + ' LGU' : 'warehouse'} checker review.`);
       return;
     }
 
     if (actionModal.type === 'verify') {
       verifyIncomingReceipt(item.id);
-      showResult(`Physical receipt for ${item.id} (${item.quantity.toLocaleString()} ${item.unitType} of ${item.fnfiCategory}) confirmed and added to warehouse stock.`);
+      showResult(`Physical receipt for ${item.id} (${item.quantity.toLocaleString()} ${item.unitType} of ${item.fnfiCategory}) confirmed and added to ${item.destinationType === 'LGU' ? item.destination + ' LGU' : 'warehouse'} stock.`);
       return;
     }
 
@@ -211,6 +211,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const filteredGoods = incomingGoodsList.filter(item => {
     const q = (searchTerm || '').toLowerCase();
     const matchesSearch =
+      (item.incidentCode || '').toLowerCase().includes(q) ||
       (item.fnfiCategory || '').toLowerCase().includes(q) ||
       (item.source || '').toLowerCase().includes(q) ||
       (item.id || '').toLowerCase().includes(q) ||
@@ -314,7 +315,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search ID, batch record, category, source..."
+              placeholder="Search RIS code, manifest ID, batch record, category, source..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -360,6 +361,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <table className="w-full min-w-[1200px]">
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">RIS Code</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Manifest</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
@@ -371,10 +373,16 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <tbody className="divide-y divide-gray-100">
               {paginatedGoods.map((item) => (
                 <tr key={item.id} className="hover:bg-gray-50 transition-colors align-top">
-                  <td className="px-4 py-4">
-                    <p className="font-bold text-sm text-blue-600">{item.id}</p>
+                  {/* RIS Code - Column before Manifest */}
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <span className="font-mono text-xs font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 inline-block shadow-2xs">
+                      {item.incidentCode || '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <p className="font-bold text-sm text-gray-900 font-mono">{item.id}</p>
                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
-                      <Calendar className="w-3 h-3" /> {item.dateReceived}
+                      <Calendar className="w-3 h-3 text-gray-400" /> {item.dateReceived}
                     </div>
                   </td>
                   <td className="px-4 py-4">
@@ -398,12 +406,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           Archived
                         </span>
                       )}
-                    </div>
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">RIS Ref:</span>
-                      <span className={item.incidentCode ? "font-mono text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200" : "text-xs text-gray-400 italic"}>
-                        {item.incidentCode || 'No RIS recorded'}
-                      </span>
                     </div>
                   </td>
                   <td className="px-4 py-4">
@@ -628,11 +630,19 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
             <div className="p-6 space-y-4">
               {actionModal.type === 'submit' && (
-                <p className="text-sm text-gray-700">Send this incoming delivery to the warehouse checker for review?</p>
+                <p className="text-sm text-gray-700">
+                  {actionModal.item?.destinationType === 'LGU'
+                    ? `Send this direct incoming delivery for ${actionModal.item.destination} for review?`
+                    : 'Send this incoming delivery to the warehouse checker for review?'}
+                </p>
               )}
 
               {actionModal.type === 'verify' && (
-                <p className="text-sm text-gray-700">Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into warehouse inventory.</p>
+                <p className="text-sm text-gray-700">
+                  {actionModal.item?.destinationType === 'LGU'
+                    ? `Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into ${actionModal.item.destination} LGU inventory.`
+                    : 'Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into warehouse inventory.'}
+                </p>
               )}
 
               {actionModal.type === 'correction' && (

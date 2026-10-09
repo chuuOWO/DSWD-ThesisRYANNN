@@ -965,9 +965,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const year = new Date().getFullYear();
     const newId = `INC-${year}-${String(nextIndex).padStart(3, '0')}`;
     const isLgu = newGoods.destinationType === 'LGU';
-    const initialStatus: IncomingStatus = isLgu ? 'Verified' : 'Draft';
+    const initialStatus: IncomingStatus = 'Draft';
     const auditMessage = isLgu
-      ? `Direct delivery of ${newGoods.quantity} ${newGoods.unitType} of ${newGoods.fnfiCategory} stocked to ${newGoods.destination} inventory.`
+      ? `Incoming direct delivery to ${newGoods.destination} recorded as editable draft awaiting confirmation.`
       : 'Incoming manifest saved as editable draft awaiting physical warehouse inspection.';
 
     const goodsWithId: IncomingGoods = {
@@ -975,15 +975,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       id: newId,
       status: initialStatus,
       manifestHash: makeManifestHash(newGoods),
-      verifiedBy: isLgu ? currentActor.name : undefined,
-      auditTrail: [audit(isLgu ? 'Stocked to LGU' : 'Draft Created', auditMessage)]
+      verifiedBy: undefined,
+      auditTrail: [audit('Draft Created', auditMessage)]
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
 
-    // If destination is an LGU, add directly to that LGU's inventory
-    if (isLgu) {
-      addLguStock(newGoods.destination, newGoods.fnfiCategory, newGoods.quantity);
-    } else if (newGoods.destinationType === 'Warehouse') {
+    // Warehouse stock is recorded; Direct to LGU deliveries are stocked upon confirmation (verifyIncomingReceipt)
+    if (newGoods.destinationType === 'Warehouse') {
       const whName = isMainWarehouse(newGoods.destination)
         ? newGoods.destination
         : (normalizeWarehouseName(newGoods.destination) || 'Oton Main Warehouse');
@@ -1025,7 +1023,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       if (destType === 'Warehouse') {
         const whName = isMainWarehouse(dest) ? dest : (normalizeWarehouseName(dest) || 'Oton Main Warehouse');
         addStock(cat, whName as WarehouseName, diff);
-      } else if (destType === 'LGU') {
+      } else if (destType === 'LGU' && (existing.status === 'Verified' || existing.status === 'Minted')) {
         addLguStock(dest, cat, diff);
       }
     }

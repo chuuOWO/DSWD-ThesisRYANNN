@@ -149,6 +149,10 @@ export function AddIncomingGoodsModal({
   const validate = (): boolean => {
     const newErrors: Partial<Record<keyof IncomingGoodsForm, string>> = {};
 
+    if (!formData.incidentCode || !formData.incidentCode.trim()) {
+      newErrors.incidentCode = 'RIS (Request Slip) reference is required';
+    }
+
     if (!formData.dateReceived) {
       newErrors.dateReceived = 'Date received is required';
     }
@@ -235,6 +239,32 @@ export function AddIncomingGoodsModal({
           }}
           className="p-6 space-y-6 overflow-y-auto flex-1"
         >
+          {/* RIS (Request Slip) Reference - Required at Top */}
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">
+              RIS (Request Slip) Code <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={formData.incidentCode}
+              onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value))}
+              placeholder="e.g., RIS-2026-001, DSWD-RIS-042"
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm ${
+                errors.incidentCode ? 'border-red-500' : 'border-gray-300'
+              }`}
+            />
+            {errors.incidentCode ? (
+              <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.incidentCode}
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-1">
+                Official Request and Issue Slip reference for this incoming delivery.
+              </p>
+            )}
+          </div>
+
           {/* Date Received */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
@@ -530,32 +560,15 @@ export function AddIncomingGoodsModal({
                   <div className="rounded-lg border border-purple-200 bg-purple-50/80 p-3 flex items-start gap-2.5 text-xs text-purple-900">
                     <Building2 className="w-4 h-4 text-purple-700 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-purple-900">LGU Direct Crediting</p>
+                      <p className="font-bold text-purple-900">LGU Direct Delivery</p>
                       <p className="text-purple-700 mt-0.5">
-                        This delivery will immediately credit the inventory of {selectedMunicipality}, {selectedProvince}. No blockchain token or wallet signature required.
+                        This delivery will be recorded for {selectedMunicipality}, {selectedProvince}. Submit and confirm physical verification to stock into LGU inventory.
                       </p>
                     </div>
                   </div>
                 )}
               </div>
             )}
-          </div>
-
-          {/* RIS (Request Slip) */}
-          <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              RIS (Request Slip) <span className="text-xs font-normal text-gray-500">(Optional)</span>
-            </label>
-            <input
-              type="text"
-              value={formData.incidentCode}
-              onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value))}
-              placeholder="e.g., RIS-2026-001, DSWD-RIS-042"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Official Request and Issue Slip reference for this incoming delivery.
-            </p>
           </div>
 
           {/* Actions */}
