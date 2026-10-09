@@ -732,3 +732,4 @@ export function LGUDetailModal({
     </div>
   );
 }
+
