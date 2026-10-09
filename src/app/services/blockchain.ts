@@ -160,8 +160,12 @@ const getSigner = async () => {
   if (relayerKey && relayerKey.length >= 64) {
     const formattedKey = relayerKey.startsWith('0x') ? relayerKey : `0x${relayerKey}`;
     const provider = getReadOnlyProvider();
-    return new ethers.Wallet(formattedKey, provider);
+    const wallet = new ethers.Wallet(formattedKey, provider);
+    console.log('[Blockchain] Using automated Sepolia relayer signer:', wallet.address, '(zero-popup background execution)');
+    return wallet;
   }
+
+  console.warn('[Blockchain] VITE_SEPOLIA_RELAYER_PRIVATE_KEY not detected in runtime environment. Falling back to browser MetaMask.');
 
   if (typeof window !== 'undefined' && (window as any).ethereum) {
     const ethereum = (window as any).ethereum;
