@@ -40,11 +40,16 @@ export function AddIncomingGoodsModal({
   provincesList = []
 }: AddIncomingGoodsModalProps) {
   const sourceOptions = useMemo(() => {
+    let base: string[] = [];
     if (supplySourcesList && supplySourcesList.length > 0) {
       const active = supplySourcesList.filter(s => s.isActive !== false).map(s => s.shortCode || s.name);
-      if (active.length > 0) return active;
+      if (active.length > 0) base = active;
     }
-    return DEFAULT_SUPPLY_SOURCES.map(s => s.shortCode || s.name);
+    if (base.length === 0) {
+      base = DEFAULT_SUPPLY_SOURCES.map(s => s.shortCode || s.name);
+    }
+    const cleanList = base.filter(s => !s.toLowerCase().startsWith('other'));
+    return [...cleanList, 'Others, specify'];
   }, [supplySourcesList]);
 
   const categoryOptions = useMemo(() => {
@@ -109,6 +114,23 @@ export function AddIncomingGoodsModal({
     return '';
   });
 
+  const [selectedSourceType, setSelectedSourceType] = useState<string>(() => {
+    if (initialData?.source) {
+      const match = sourceOptions.find(s => s.toLowerCase() === initialData.source.toLowerCase() && s !== 'Others, specify');
+      if (match) return match;
+      return 'Others, specify';
+    }
+    return sourceOptions[0] || 'VDRC';
+  });
+
+  const [customSourceText, setCustomSourceText] = useState<string>(() => {
+    if (initialData?.source) {
+      const match = sourceOptions.find(s => s.toLowerCase() === initialData.source.toLowerCase() && s !== 'Others, specify');
+      if (!match) return initialData.source;
+    }
+    return '';
+  });
+
   const defaultFormData: IncomingGoodsForm = {
     dateReceived: new Date().toISOString().split('T')[0],
     fnfiCategory: categoryOptions[0] || 'Food Pack',
@@ -129,6 +151,16 @@ export function AddIncomingGoodsModal({
   useEffect(() => {
     if (!initialData) return;
     setFormData({ ...initialData, unitType: initialData.unitType || 'packs' });
+    if (initialData.source) {
+      const match = sourceOptions.find(s => s.toLowerCase() === initialData.source.toLowerCase() && s !== 'Others, specify');
+      if (match) {
+        setSelectedSourceType(match);
+        setCustomSourceText('');
+      } else {
+        setSelectedSourceType('Others, specify');
+        setCustomSourceText(initialData.source);
+      }
+    }
     if (initialData.destinationType === 'LGU') {
       const matched = availableLgus.find(l => l.municipality.toLowerCase() === initialData.destination.toLowerCase());
       if (matched) {
@@ -136,7 +168,7 @@ export function AddIncomingGoodsModal({
       }
       setSelectedMunicipality(initialData.destination);
     }
-  }, [initialData, availableLgus]);
+  }, [initialData, availableLgus, sourceOptions]);
 
   const handleChange = (field: keyof IncomingGoodsForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -175,8 +207,14 @@ export function AddIncomingGoodsModal({
       }
     }
 
-    if (!formData.source.trim()) {
-      newErrors.source = 'Source/Donor is required';
+    const finalSource = selectedSourceType === 'Others, specify'
+      ? customSourceText.trim()
+      : formData.source.trim();
+
+    if (!finalSource) {
+      newErrors.source = selectedSourceType === 'Others, specify'
+        ? 'Please specify the other source or donor name'
+        : 'Source/Donor is required';
     }
 
     if (formData.destinationType === 'Warehouse') {
@@ -197,8 +235,13 @@ export function AddIncomingGoodsModal({
     e.preventDefault();
 
     if (validate()) {
+      const finalSource = selectedSourceType === 'Others, specify'
+        ? customSourceText.trim()
+        : formData.source.trim();
+
       const submissionData = {
         ...formData,
+        source: finalSource,
         destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination,
         incidentCode: formData.incidentCode?.trim() || ''
       };
@@ -391,24 +434,63 @@ export function AddIncomingGoodsModal({
             )}
           </div>
 
-          {/* Source Selection (First source is picked) */}
+          {/* Source Selection */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
               Source / Donor <span className="text-red-500">*</span>
             </label>
             <select
-              value={formData.source}
-              onChange={(e) => handleChange('source', e.target.value)}
-              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                errors.source ? 'border-red-500' : 'border-gray-300'
+              value={selectedSourceType}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedSourceType(val);
+                if (val === 'Others, specify') {
+                  setFormData(prev => ({ ...prev, source: customSourceText }));
+                } else {
+                  setFormData(prev => ({ ...prev, source: val }));
+                  setCustomSourceText('');
+                }
+                if (errors.source) {
+                  setErrors(prev => ({ ...prev, source: '' }));
+                }
+              }}
+              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium ${
+                errors.source && selectedSourceType !== 'Others, specify' ? 'border-red-500' : 'border-gray-300'
               }`}
             >
               {sourceOptions.map(src => (
                 <option key={src} value={src}>{src}</option>
               ))}
             </select>
+
+            {/* Custom Source Input when 'Others, specify' is selected */}
+            {selectedSourceType === 'Others, specify' && (
+              <div className="mt-2.5">
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Specify Source / Donor Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={customSourceText}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomSourceText(val);
+                    setFormData(prev => ({ ...prev, source: val }));
+                    if (errors.source) {
+                      setErrors(prev => ({ ...prev, source: '' }));
+                    }
+                  }}
+                  placeholder="e.g., Red Cross, World Food Programme, Local Business Donor"
+                  className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                    errors.source ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                  autoFocus
+                />
+              </div>
+            )}
+
             {errors.source && (
-              <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+              <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
                 <AlertCircle className="w-3 h-3" />
                 {errors.source}
               </p>
