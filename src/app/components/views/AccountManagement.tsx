@@ -17,6 +17,7 @@ import {
   EyeOff,
   FileText,
   Filter,
+  History,
   Key,
   Layers,
   Lock,
@@ -356,8 +357,8 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
   const pageSize = 5;
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
 
-  // Top-level Navigation Switcher: 'directory' | 'logs'
-  const [activeMainTab, setActiveMainTab] = useState<'directory' | 'logs'>('directory');
+  // Top-level Navigation Switcher: 'directory' | 'logs' | 'user_trails'
+  const [activeMainTab, setActiveMainTab] = useState<'directory' | 'logs' | 'user_trails'>('directory');
 
   // Activity Logs audit trail states
   const [activityLogs, setActivityLogs] = useState<ActivityLogRecord[]>([]);
@@ -368,6 +369,16 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
   const [selectedLog, setSelectedLog] = useState<ActivityLogRecord | null>(null);
   const [logsCurrentPage, setLogsCurrentPage] = useState(1);
   const logsPageSize = 10;
+
+  // Individual User Activity Trail states
+  const [selectedUserForTrail, setSelectedUserForTrail] = useState<UserProfile | null>(null);
+  const [userTrailLogs, setUserTrailLogs] = useState<ActivityLogRecord[]>([]);
+  const [isLoadingUserTrail, setIsLoadingUserTrail] = useState(false);
+  const [userTrailSearchQuery, setUserTrailSearchQuery] = useState('');
+  const [userTrailActionFilter, setUserTrailActionFilter] = useState('all');
+  const [userTrailPage, setUserTrailPage] = useState(1);
+  const userTrailPageSize = 10;
+  const [userSelectorSearch, setUserSelectorSearch] = useState('');
 
   // Selected profile for full inspection modal
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
@@ -399,20 +410,47 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
     }
   };
 
+  const loadUserTrail = async (user: UserProfile) => {
+    setIsLoadingUserTrail(true);
+    try {
+      const logs = await backendApi.getUserActivityLogs(user.id, user.email, 200);
+      setUserTrailLogs(logs);
+    } catch (err) {
+      console.warn('Failed to load user trail logs:', err);
+    } finally {
+      setIsLoadingUserTrail(false);
+    }
+  };
+
   useEffect(() => {
     if (activeMainTab === 'logs') {
       loadActivityLogs();
     }
-  }, [activeMainTab]);
+    if (activeMainTab === 'user_trails') {
+      if (!selectedUserForTrail && profiles.length > 0) {
+        setSelectedUserForTrail(profiles[0]);
+        loadUserTrail(profiles[0]);
+      } else if (selectedUserForTrail) {
+        loadUserTrail(selectedUserForTrail);
+      }
+    }
+  }, [activeMainTab, selectedUserForTrail?.id, profiles.length]);
 
   useEffect(() => {
     const unsub = backendApi.subscribeDashboard(() => {
       if (activeMainTab === 'logs') {
         loadActivityLogs();
       }
+      if (activeMainTab === 'user_trails' && selectedUserForTrail) {
+        loadUserTrail(selectedUserForTrail);
+      }
     });
     return unsub;
-  }, [activeMainTab]);
+  }, [activeMainTab, selectedUserForTrail?.id]);
+
+  useEffect(() => {
+    loadActivityLogs();
+  }, []);
 
   const loadProfiles = async () => {
     setIsLoading(true);
@@ -770,6 +808,81 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
     return filteredLogs.slice(start, start + logsPageSize);
   }, [filteredLogs, logsCurrentPage, logsPageSize]);
 
+  const userActionCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    activityLogs.forEach((log) => {
+      if (log.actorId) {
+        counts[log.actorId] = (counts[log.actorId] || 0) + 1;
+      }
+      if (log.entityType === 'User' && log.entityId && log.entityId !== log.actorId) {
+        counts[log.entityId] = (counts[log.entityId] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [activityLogs]);
+
+  const filteredUserTrailLogs = useMemo(() => {
+    return userTrailLogs.filter((log) => {
+      const query = userTrailSearchQuery.trim().toLowerCase();
+      const matchSearch =
+        !query ||
+        log.action.toLowerCase().includes(query) ||
+        log.details.toLowerCase().includes(query) ||
+        log.entityType.toLowerCase().includes(query) ||
+        (log.txHash && log.txHash.toLowerCase().includes(query)) ||
+        (log.actorName && log.actorName.toLowerCase().includes(query));
+
+      const matchAction =
+        userTrailActionFilter === 'all'
+          ? true
+          : userTrailActionFilter === 'onchain'
+          ? Boolean(log.txHash)
+          : log.action === userTrailActionFilter;
+
+      return matchSearch && matchAction;
+    });
+  }, [userTrailLogs, userTrailSearchQuery, userTrailActionFilter]);
+
+  const totalUserTrailPages = Math.max(1, Math.ceil(filteredUserTrailLogs.length / userTrailPageSize));
+  const paginatedUserTrailLogs = useMemo(() => {
+    const start = (userTrailPage - 1) * userTrailPageSize;
+    return filteredUserTrailLogs.slice(start, start + userTrailPageSize);
+  }, [filteredUserTrailLogs, userTrailPage, userTrailPageSize]);
+
+  const userTrailStats = useMemo(() => {
+    let onChain = 0;
+    let logins = 0;
+    let operational = 0;
+    let profileUpdates = 0;
+
+    userTrailLogs.forEach((l) => {
+      if (l.txHash) onChain++;
+      if (l.action === 'USER_LOGIN') logins++;
+      if (['UPDATE_PROFILE', 'UPDATE_AVATAR', 'PROVISION_SMART_ACCOUNT', 'ASSIGN_LGU', 'VERIFY_USER'].includes(l.action)) profileUpdates++;
+      if (['MINT_BATCH_TOKEN', 'APPROVE_RELEASE', 'SIGN_RELEASE', 'CONFIRM_RECEIPT', 'STOCK_RECOUNT'].includes(l.action)) operational++;
+    });
+
+    return {
+      total: userTrailLogs.length,
+      onChain,
+      logins,
+      operational,
+      profileUpdates
+    };
+  }, [userTrailLogs]);
+
+  const filteredSelectorProfiles = useMemo(() => {
+    const q = userSelectorSearch.trim().toLowerCase();
+    if (!q) return profiles;
+    return profiles.filter((p) =>
+      (p.fullName && p.fullName.toLowerCase().includes(q)) ||
+      (p.email && p.email.toLowerCase().includes(q)) ||
+      (p.role && p.role.toLowerCase().includes(q)) ||
+      (p.lguName && p.lguName.toLowerCase().includes(q)) ||
+      (p.walletAddress && p.walletAddress.toLowerCase().includes(q))
+    );
+  }, [profiles, userSelectorSearch]);
+
   const formatLogTimestamp = (dateStr?: string) => {
     if (!dateStr) return 'Unknown';
     try {
@@ -819,6 +932,16 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
       case 'STOCK_RECOUNT':
       case 'EMERGENCY_STOCK_CORRECTION':
         return { label: 'Stock Recounted', bg: 'bg-orange-50 text-orange-800 border-orange-200' };
+      case 'USER_LOGIN':
+        return { label: 'Session Login', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      case 'USER_SIGNUP':
+        return { label: 'Account Registered', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
+      case 'UPDATE_PROFILE':
+        return { label: 'Profile Updated', bg: 'bg-violet-50 text-violet-800 border-violet-200' };
+      case 'UPDATE_AVATAR':
+        return { label: 'Avatar Changed', bg: 'bg-purple-50 text-purple-800 border-purple-200' };
+      case 'PROVISION_SMART_ACCOUNT':
+        return { label: 'Smart Account Linked', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
       default:
         return { label: action.replace(/_/g, ' '), bg: 'bg-gray-50 text-gray-800 border-gray-200' };
     }
@@ -842,28 +965,60 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                 <UserCheck className="w-7 h-7 text-[#10069f]" />
                 Personnel Directory & Access Management
               </>
-            ) : (
+            ) : activeMainTab === 'logs' ? (
               <>
                 <Activity className="w-7 h-7 text-[#10069f]" />
                 System Activity Logs & Blockchain Audit Trail
+              </>
+            ) : (
+              <>
+                <History className="w-7 h-7 text-[#10069f]" />
+                User Activity Trails & Individual Account Audit
               </>
             )}
           </h1>
           <p className="text-xs text-gray-600 mt-1">
             {activeMainTab === 'directory'
               ? 'Review personnel registrations, verify work credentials, and assign logistics roles across Panay Island.'
-              : 'Tamper-evident audit trail capturing role assignments, token mints, delivery handovers, and master data changes with on-chain Ethereum Sepolia verification.'}
+              : activeMainTab === 'logs'
+              ? 'Tamper-evident audit trail capturing role assignments, token mints, delivery handovers, and master data changes with on-chain Ethereum Sepolia verification.'
+              : 'Granular chronological audit trail per account tracking user sign-ins, profile changes, dispatched goods, smart account bindings, and on-chain proofs.'}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={activeMainTab === 'directory' ? loadProfiles : loadActivityLogs}
-            disabled={activeMainTab === 'directory' ? isLoading : isLoadingLogs}
+            onClick={
+              activeMainTab === 'directory'
+                ? loadProfiles
+                : activeMainTab === 'logs'
+                ? loadActivityLogs
+                : () => {
+                    loadProfiles();
+                    if (selectedUserForTrail) loadUserTrail(selectedUserForTrail);
+                  }
+            }
+            disabled={
+              activeMainTab === 'directory'
+                ? isLoading
+                : activeMainTab === 'logs'
+                ? isLoadingLogs
+                : isLoadingUserTrail
+            }
             className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${(activeMainTab === 'directory' ? isLoading : isLoadingLogs) ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${
+                (activeMainTab === 'directory'
+                  ? isLoading
+                  : activeMainTab === 'logs'
+                  ? isLoadingLogs
+                  : isLoadingUserTrail)
+                  ? 'animate-spin'
+                  : ''
+              }`}
+            />
             Refresh
           </button>
         </div>
@@ -907,6 +1062,32 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             activeMainTab === 'logs' ? 'bg-[#10069f]/10 text-[#10069f]' : 'bg-gray-100 text-gray-600'
           }`}>
             {activityLogs.length > 0 ? activityLogs.length : 'Audit'}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveMainTab('user_trails');
+            if (!selectedUserForTrail && profiles.length > 0) {
+              setSelectedUserForTrail(profiles[0]);
+              loadUserTrail(profiles[0]);
+            } else if (selectedUserForTrail) {
+              loadUserTrail(selectedUserForTrail);
+            }
+          }}
+          className={`pb-3 px-3 text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer border-b-2 -mb-[2px] ${
+            activeMainTab === 'user_trails'
+              ? 'border-[#10069f] text-[#10069f]'
+              : 'border-transparent text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span>User Activity Trails</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            activeMainTab === 'user_trails' ? 'bg-[#10069f]/10 text-[#10069f]' : 'bg-gray-100 text-gray-600'
+          }`}>
+            {selectedUserForTrail ? (userActionCounts[selectedUserForTrail.id] || userTrailLogs.length) : 'Per User'}
           </span>
         </button>
       </div>
@@ -1319,6 +1500,20 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                                 </button>
                                 <button
                                   type="button"
+                                  onClick={() => {
+                                    setSelectedUserForTrail(profile);
+                                    loadUserTrail(profile);
+                                    setUserTrailPage(1);
+                                    setActiveMainTab('user_trails');
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-[#10069f] text-[11px] font-bold transition active:scale-95 cursor-pointer flex items-center gap-1"
+                                  title="View user activity trail"
+                                >
+                                  <History className="w-3 h-3" />
+                                  Trail
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleRequestDelete(profile)}
                                   disabled={isCurrentAdmin}
                                   className="px-2.5 py-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold transition active:scale-95 disabled:opacity-40 cursor-pointer flex items-center gap-1"
@@ -1695,6 +1890,456 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
     </div>
   )}
 
+  {activeMainTab === 'user_trails' && (
+    <div className="space-y-6">
+      {/* Account Selector Strip */}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-2xs p-4 sm:p-5 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-black text-gray-900 flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#10069f]" />
+              Select Personnel Account to Audit
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Pick any registered personnel to examine their dedicated action history and on-chain proofs.
+            </p>
+          </div>
+
+          {/* Account Search input */}
+          <div className="relative w-full sm:w-72">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search accounts by name, role, email..."
+              value={userSelectorSearch}
+              onChange={(e) => setUserSelectorSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#10069f]"
+            />
+          </div>
+        </div>
+
+        {/* Horizontal Scrollable Account Cards */}
+        <div className="flex gap-2.5 overflow-x-auto pb-2 pt-1">
+          {filteredSelectorProfiles.map((user) => {
+            const isSelected = selectedUserForTrail?.id === user.id;
+            const actionCount = userActionCounts[user.id] || 0;
+            return (
+              <button
+                key={user.id}
+                type="button"
+                onClick={() => {
+                  setSelectedUserForTrail(user);
+                  loadUserTrail(user);
+                  setUserTrailPage(1);
+                }}
+                className={`flex-shrink-0 w-64 p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-blue-50/70 border-[#10069f] shadow-xs ring-2 ring-[#10069f]/20'
+                    : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50/60'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs flex-shrink-0 ${
+                      user.role === 'dswd_admin'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : user.lguName
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}
+                  >
+                    {user.fullName ? user.fullName.slice(0, 2).toUpperCase() : user.email.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className={`text-xs font-bold truncate ${isSelected ? 'text-[#10069f]' : 'text-gray-900'}`}>
+                        {user.fullName || 'DSWD Officer'}
+                      </p>
+                      <span
+                        className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          user.status === 'verified' ? 'bg-emerald-500' : 'bg-amber-500'
+                        }`}
+                        title={user.status === 'verified' ? 'Verified Account' : 'Pending Verification'}
+                      />
+                    </div>
+                    <p className="text-[10px] text-gray-500 truncate font-mono mt-0.5">{user.email}</p>
+                    <div className="flex items-center justify-between gap-1 mt-2">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                          user.role === 'dswd_admin'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : user.lguName
+                            ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                            : 'bg-purple-50 text-purple-700 border border-purple-200'
+                        }`}
+                      >
+                        {user.role === 'dswd_admin'
+                          ? 'Admin'
+                          : user.lguName
+                          ? `${extractCleanMunicipality(user.lguName)} Focal`
+                          : 'Receiver'}
+                      </span>
+                      <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                        {actionCount} {actionCount === 1 ? 'action' : 'actions'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+          {filteredSelectorProfiles.length === 0 && (
+            <div className="text-xs text-gray-500 py-3 px-2">No matching accounts found</div>
+          )}
+        </div>
+      </div>
+
+      {/* Selected User Hero Banner */}
+      {selectedUserForTrail ? (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-2xs p-5 sm:p-6 space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-gray-100">
+            <div className="flex items-start sm:items-center gap-4">
+              <div
+                className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm ${
+                  selectedUserForTrail.role === 'dswd_admin'
+                    ? 'bg-emerald-100 text-emerald-800 border-2 border-emerald-300'
+                    : selectedUserForTrail.lguName
+                    ? 'bg-indigo-100 text-indigo-800 border-2 border-indigo-300'
+                    : 'bg-purple-100 text-purple-800 border-2 border-purple-300'
+                }`}
+              >
+                {selectedUserForTrail.fullName
+                  ? selectedUserForTrail.fullName.slice(0, 2).toUpperCase()
+                  : selectedUserForTrail.email.slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-lg font-black text-gray-900">
+                    {selectedUserForTrail.fullName || 'DSWD Officer'}
+                  </h2>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                      selectedUserForTrail.status === 'verified'
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                        : 'bg-amber-100 text-amber-800 border border-amber-200'
+                    }`}
+                  >
+                    {selectedUserForTrail.status}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      selectedUserForTrail.role === 'dswd_admin'
+                        ? 'bg-blue-100 text-[#10069f]'
+                        : selectedUserForTrail.lguName
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}
+                  >
+                    {selectedUserForTrail.role === 'dswd_admin'
+                      ? 'DSWD Administrator'
+                      : selectedUserForTrail.lguName
+                      ? `LGU Focal (${extractCleanMunicipality(selectedUserForTrail.lguName)})`
+                      : 'Field Receiver'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 font-mono mt-1">
+                  <span>{selectedUserForTrail.email}</span>
+                  {selectedUserForTrail.phoneNumber && <span className="font-sans">Phone: {selectedUserForTrail.phoneNumber}</span>}
+                  {selectedUserForTrail.truckId && <span>Truck/Plate: #{selectedUserForTrail.truckId}</span>}
+                  <span>ID: {selectedUserForTrail.id.slice(0, 8)}...</span>
+                </div>
+
+                {/* Smart Account wallet info */}
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-bold text-gray-700">Smart Account:</span>
+                  {selectedUserForTrail.walletAddress ? (
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200 font-mono text-[11px] text-gray-800">
+                      <span>{selectedUserForTrail.walletAddress}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(selectedUserForTrail.walletAddress!, 'trail-user-wallet')}
+                        className="p-0.5 text-gray-400 hover:text-gray-700 cursor-pointer"
+                        title="Copy Wallet Address"
+                      >
+                        {copiedId === 'trail-user-wallet' ? (
+                          <Check className="w-3 h-3 text-green-600" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                      </button>
+                      <a
+                        href={`https://sepolia.etherscan.io/address/${selectedUserForTrail.walletAddress}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#10069f] hover:underline inline-flex items-center gap-0.5 ml-1 font-bold text-[10px]"
+                        title="View on Sepolia Etherscan"
+                      >
+                        <span>Etherscan</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 font-medium italic">
+                      Gasless Smart Account auto-provisioned upon next blockchain action
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedProfile(selectedUserForTrail);
+                  setIsWalletRevealed(false);
+                  setIsWorkIdRevealed(false);
+                  setIsIdRevealed(false);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Inspect Profile
+              </button>
+            </div>
+          </div>
+
+          {/* Stats for this user */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/60">
+              <p className="text-xl font-black text-gray-900">{userTrailStats.total}</p>
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mt-0.5">Total Records</p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50">
+              <p className="text-xl font-black text-indigo-900">{userTrailStats.onChain}</p>
+              <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider mt-0.5">On-Chain Verified</p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50">
+              <p className="text-xl font-black text-emerald-900">{userTrailStats.logins}</p>
+              <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider mt-0.5">System Logins</p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/50">
+              <p className="text-xl font-black text-blue-900">{userTrailStats.operational}</p>
+              <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wider mt-0.5">Logistics Operations</p>
+            </div>
+            <div className="p-3.5 rounded-xl border border-purple-200 bg-purple-50/50">
+              <p className="text-xl font-black text-purple-900">{userTrailStats.profileUpdates}</p>
+              <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wider mt-0.5">Security & Identity</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Search & Action Category Filter */}
+      <div className="bg-white rounded-2xl p-4 border border-gray-200 shadow-2xs flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Search this user's actions, descriptions, entities, or Sepolia Tx hash..."
+            value={userTrailSearchQuery}
+            onChange={(e) => {
+              setUserTrailSearchQuery(e.target.value);
+              setUserTrailPage(1);
+            }}
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-[#10069f] focus:border-transparent transition"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={userTrailActionFilter}
+            onChange={(e) => {
+              setUserTrailActionFilter(e.target.value);
+              setUserTrailPage(1);
+            }}
+            className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#10069f] cursor-pointer"
+          >
+            <option value="all">All Actions</option>
+            <option value="onchain">On-Chain Sepolia Verified</option>
+            <option value="USER_LOGIN">Session Logins</option>
+            <option value="USER_SIGNUP">Account Registrations</option>
+            <option value="UPDATE_PROFILE">Profile Updates</option>
+            <option value="UPDATE_AVATAR">Avatar Changes</option>
+            <option value="PROVISION_SMART_ACCOUNT">Smart Account Bindings</option>
+            <option value="MINT_BATCH_TOKEN">Token Mints</option>
+            <option value="APPROVE_RELEASE">Release Approvals</option>
+            <option value="SIGN_RELEASE">Handover Signatures</option>
+            <option value="CONFIRM_RECEIPT">Receipt Confirmations</option>
+            <option value="ASSIGN_LGU">LGU Designations</option>
+            <option value="VERIFY_USER">Account Verifications</option>
+          </select>
+
+          {(userTrailSearchQuery || userTrailActionFilter !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setUserTrailSearchQuery('');
+                setUserTrailActionFilter('all');
+                setUserTrailPage(1);
+              }}
+              className="px-3 py-2 rounded-xl text-xs font-bold text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* User Activity Trail Table */}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-2xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold uppercase tracking-wider text-[10px]">
+              <tr>
+                <th className="px-5 py-3">Timestamp</th>
+                <th className="px-5 py-3">Action</th>
+                <th className="px-5 py-3">Target Entity</th>
+                <th className="px-5 py-3">Audit Details & Summary</th>
+                <th className="px-5 py-3">Sepolia Proof</th>
+                <th className="px-5 py-3 text-right">Inspect</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {isLoadingUserTrail ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-gray-500">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto text-[#10069f] mb-2" />
+                    Loading activity logs for this user...
+                  </td>
+                </tr>
+              ) : paginatedUserTrailLogs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-12 text-center text-gray-500">
+                    <History className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                    <p className="font-bold text-gray-700">No activity trail records found</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {userTrailSearchQuery || userTrailActionFilter !== 'all'
+                        ? 'Try clearing or modifying your filter criteria.'
+                        : 'Actions taken by or targeting this account will be recorded here.'}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                paginatedUserTrailLogs.map((log) => {
+                  const badge = getActionBadge(log.action);
+                  return (
+                    <tr
+                      key={log.id}
+                      onClick={() => setSelectedLog(log)}
+                      className="hover:bg-blue-50/40 transition cursor-pointer group"
+                    >
+                      {/* Timestamp */}
+                      <td className="px-5 py-3.5 whitespace-nowrap text-gray-600 text-[11px] font-mono">
+                        {formatLogTimestamp(log.createdAt)}
+                      </td>
+
+                      {/* Action */}
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-black border ${badge.bg}`}>
+                          {badge.label}
+                        </span>
+                      </td>
+
+                      {/* Target Entity */}
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        <div className="flex flex-col">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-700 w-max">
+                            {log.entityType}
+                          </span>
+                          {log.entityId && (
+                            <span className="text-[10px] font-mono text-gray-500 mt-0.5 truncate max-w-[140px]" title={log.entityId}>
+                              {log.entityId}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Details */}
+                      <td className="px-5 py-3.5 max-w-sm text-gray-700 truncate" title={log.details}>
+                        {log.details}
+                      </td>
+
+                      {/* Sepolia Proof */}
+                      <td className="px-5 py-3.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {log.txHash ? (
+                          <a
+                            href={`https://sepolia.etherscan.io/tx/${log.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 text-[11px] font-mono font-bold transition group/link"
+                            title={`View on Sepolia Etherscan: ${log.txHash}`}
+                          >
+                            <span>{log.txHash.slice(0, 6)}...{log.txHash.slice(-4)}</span>
+                            <ExternalLink className="w-3 h-3 text-indigo-500 group-hover/link:text-indigo-700" />
+                          </a>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-500">
+                            Off-Chain
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Inspect */}
+                      <td className="px-5 py-3.5 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLog(log)}
+                          className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:text-[#10069f] hover:bg-blue-50 transition cursor-pointer"
+                          title="Inspect Full Audit Record"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination Controls */}
+        {filteredUserTrailLogs.length > 0 && (
+          <div className="p-4 border-t border-gray-200 bg-gray-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-600">
+            <div>
+              Showing <span className="font-bold text-gray-900">{(userTrailPage - 1) * userTrailPageSize + 1}</span> to{' '}
+              <span className="font-bold text-gray-900">
+                {Math.min(userTrailPage * userTrailPageSize, filteredUserTrailLogs.length)}
+              </span>{' '}
+              of <span className="font-bold text-gray-900">{filteredUserTrailLogs.length}</span> activity logs
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setUserTrailPage((p) => Math.max(1, p - 1))}
+                disabled={userTrailPage <= 1}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
+              <span className="font-bold text-gray-800 px-2">
+                Page {userTrailPage} of {totalUserTrailPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setUserTrailPage((p) => Math.min(totalUserTrailPages, p + 1))}
+                disabled={userTrailPage >= totalUserTrailPages}
+                className="px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-xs font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1 cursor-pointer"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )}
+
       {/* ====================================================================
           ACCOUNT DETAIL MODAL / DRAWER
           ==================================================================== */}
@@ -2039,6 +2684,20 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                   </>
                 ) : (
                   <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedUserForTrail(selectedProfile);
+                        loadUserTrail(selectedProfile);
+                        setUserTrailPage(1);
+                        setSelectedProfile(null);
+                        setActiveMainTab('user_trails');
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-[#10069f] text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      View Action Trail
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleRequestDelete(selectedProfile)}

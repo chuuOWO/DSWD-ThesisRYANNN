@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { formatUserErrorMessage } from '../lib/errorUtils';
+import { backendApi } from './backendApi';
 
 export type UserRole = 'dswd_admin' | 'receiver';
 export type AccountStatus = 'pending' | 'verified' | 'rejected';
@@ -226,6 +227,18 @@ export const authApi = {
           throw new Error('ACCOUNT_PENDING');
         }
       }
+
+      backendApi.logActivity({
+        actorId: data.user.id,
+        actorName: profile?.fullName || data.user.user_metadata?.full_name || cleanEmail,
+        actorEmail: cleanEmail,
+        actorRole: profile?.role || data.user.user_metadata?.role || 'user',
+        actorWallet: profile?.walletAddress || data.user.user_metadata?.wallet_address || undefined,
+        action: 'USER_LOGIN',
+        entityType: 'User',
+        entityId: data.user.id,
+        details: `User ${profile?.fullName || cleanEmail} logged into the system.`
+      }).catch(() => {});
     }
 
     return data;
@@ -320,6 +333,23 @@ export const authApi = {
       } catch (profileError) {
         console.warn('Profile upsert warning:', profileError);
       }
+
+      backendApi.logActivity({
+        actorId: data.user.id,
+        actorName: computedFullName,
+        actorEmail: normalizedEmail,
+        actorRole: payload.role,
+        actorWallet: payload.walletAddress || undefined,
+        action: 'USER_SIGNUP',
+        entityType: 'User',
+        entityId: data.user.id,
+        details: `Account registration application submitted for ${computedFullName} (${payload.role === 'dswd_admin' ? 'DSWD Admin' : 'Receiver'}).`,
+        metadata: {
+          role: payload.role,
+          jobPosition: payload.jobPosition,
+          truckId: payload.truckId
+        }
+      }).catch(() => {});
     }
 
     // Sign out newly created user so they return cleanly to the login screen awaiting admin verification
@@ -490,6 +520,17 @@ export const authApi = {
       if (Object.keys(profileUpdates).length > 0) {
         await supabase.from('profiles').update(profileUpdates).eq('id', userId);
       }
+
+      backendApi.logActivity({
+        actorId: userId,
+        action: updates.avatarUrl !== undefined && Object.keys(updates).length === 1 ? 'UPDATE_AVATAR' : 'UPDATE_PROFILE',
+        entityType: 'User',
+        entityId: userId,
+        details: updates.avatarUrl !== undefined && Object.keys(updates).length === 1
+          ? 'Updated account profile avatar image.'
+          : `Updated account profile information (${Object.keys(updates).join(', ')}).`,
+        metadata: updates
+      }).catch(() => {});
     } catch (dbErr) {
       console.warn('Database profiles update error:', dbErr);
     }
@@ -533,6 +574,18 @@ export const authApi = {
     } catch (metaErr) {
       console.warn('Auth metadata wallet update error:', metaErr);
     }
+
+    backendApi.logActivity({
+      actorId: userId,
+      actorWallet: trimmed || undefined,
+      action: 'PROVISION_SMART_ACCOUNT',
+      entityType: 'User',
+      entityId: userId,
+      details: trimmed
+        ? `Bound gasless smart account ${trimmed} to user identity.`
+        : 'Unlinked smart account address from user profile.',
+      metadata: { walletAddress: trimmed }
+    }).catch(() => {});
 
     return { ok: true };
   },

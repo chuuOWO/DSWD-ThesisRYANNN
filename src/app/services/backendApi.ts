@@ -1920,6 +1920,8 @@ export const backendApi = {
     search?: string;
     action?: string;
     entityType?: string;
+    actorId?: string;
+    actorEmail?: string;
   }): Promise<ActivityLogRecord[]> {
     try {
       const limit = options?.limit ?? 100;
@@ -1937,6 +1939,12 @@ export const backendApi = {
 
       if (options?.entityType && options.entityType !== 'all') {
         query = query.eq('entity_type', options.entityType);
+      }
+
+      if (options?.actorId) {
+        query = query.or(`actor_id.eq.${options.actorId},entity_id.eq.${options.actorId}`);
+      } else if (options?.actorEmail) {
+        query = query.ilike('actor_email', options.actorEmail.trim());
       }
 
       const { data, error } = await query;
@@ -1977,6 +1985,46 @@ export const backendApi = {
       return rows;
     } catch (err) {
       console.warn('getActivityLogs exception:', err);
+      return [];
+    }
+  },
+
+  async getUserActivityLogs(userId: string, email?: string, limit: number = 100): Promise<ActivityLogRecord[]> {
+    try {
+      let query = supabase
+        .from('activity_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (email && email.trim()) {
+        query = query.or(`actor_id.eq.${userId},entity_id.eq.${userId},actor_email.ilike.${email.trim()}`);
+      } else {
+        query = query.or(`actor_id.eq.${userId},entity_id.eq.${userId}`);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('getUserActivityLogs error:', error.message);
+        return [];
+      }
+      return (data ?? []).map((r: any) => ({
+        id: String(r.id),
+        actorId: r.actor_id,
+        actorName: String(r.actor_name || 'System'),
+        actorEmail: String(r.actor_email || ''),
+        actorRole: String(r.actor_role || ''),
+        actorWallet: r.actor_wallet,
+        action: String(r.action),
+        entityType: String(r.entity_type),
+        entityId: r.entity_id,
+        details: String(r.details || ''),
+        metadata: (r.metadata && typeof r.metadata === 'object') ? r.metadata : {},
+        txHash: r.tx_hash,
+        createdAt: String(r.created_at)
+      }));
+    } catch (err) {
+      console.warn('getUserActivityLogs exception:', err);
       return [];
     }
   },
