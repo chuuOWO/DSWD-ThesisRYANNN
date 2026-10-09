@@ -1900,10 +1900,13 @@ export const backendApi = {
         }
       }
 
+      const isUuid = (val?: string | null) =>
+        Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val.trim()));
+
       const { error } = await supabase
         .from('activity_logs')
         .insert({
-          actor_id: actorId || null,
+          actor_id: isUuid(actorId) ? actorId : null,
           actor_name: actorName || 'System User',
           actor_email: actorEmail || 'system@dswd.gov.ph',
           actor_role: actorRole || 'system',

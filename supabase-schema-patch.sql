@@ -420,6 +420,7 @@ alter table public.incoming_manifests add column if not exists tx_hash text;
 alter table public.incoming_manifests add column if not exists batch_token_id text;
 alter table public.incoming_manifests add column if not exists minted_at text;
 alter table public.incoming_manifests add column if not exists wallet_address text;
+alter table public.incoming_manifests add column if not exists verified_by text;
 alter table public.incoming_manifests add column if not exists correction_note text;
 alter table public.incoming_manifests add column if not exists created_at timestamptz not null default now();
 
@@ -500,6 +501,10 @@ alter table public.outgoing_requests add column if not exists sender_signature t
 alter table public.outgoing_requests add column if not exists receiver_signature text;
 alter table public.outgoing_requests add column if not exists tx_hash text;
 alter table public.outgoing_requests add column if not exists wallet_address text;
+alter table public.outgoing_requests add column if not exists source_type text default 'Warehouse';
+alter table public.outgoing_requests add column if not exists direct_source text;
+alter table public.outgoing_requests add column if not exists admin_signature text;
+alter table public.outgoing_requests add column if not exists correction_note text;
 alter table public.outgoing_requests add column if not exists delivery_priority integer not null default 0;
 alter table public.outgoing_requests add column if not exists is_held boolean not null default false;
 alter table public.outgoing_requests add column if not exists created_at timestamptz not null default now();
@@ -552,10 +557,13 @@ create table if not exists public.lgu_inventory_reports (
   affected_families integer not null default 0,
   damage_index integer not null default 0 check (damage_index between 0 and 100),
   urgency_score integer not null default 0 check (urgency_score between 0 and 100),
-  priority_color text not null default 'Green' check (priority_color in ('Red', 'Yellow', 'Green')),
+  priority_color text not null default 'Green' check (priority_color in ('Red', 'Orange', 'Yellow', 'Green')),
   recommendation text not null default 'Sufficient stock; continue monitoring.',
   created_at timestamptz not null default now()
 );
+
+alter table public.lgu_inventory_reports drop constraint if exists lgu_inventory_reports_priority_color_check;
+alter table public.lgu_inventory_reports add constraint lgu_inventory_reports_priority_color_check check (priority_color in ('Red', 'Orange', 'Yellow', 'Green'));
 
 alter table public.lgu_inventory_reports add column if not exists lgu_id uuid;
 alter table public.lgu_inventory_reports add column if not exists municipality text;
@@ -705,7 +713,8 @@ begin
   score := least(100, greatest(0, stock_score + demand_score + damage_score));
   color := case
     when score >= 75 then 'Red'
-    when score >= 50 then 'Yellow'
+    when score >= 50 then 'Orange'
+    when score >= 25 then 'Yellow'
     else 'Green'
   end;
 
@@ -713,9 +722,10 @@ begin
     score,
     color,
     case
-      when color = 'Red' then 'Immediate restocking and dispatch recommended.'
-      when color = 'Yellow' then 'Prepare allocation; monitor within 24 hours.'
-      else 'Sufficient stock; continue monitoring.'
+      when color = 'Red' then 'Critical stock deficit; immediate priority dispatch required.'
+      when color = 'Orange' then 'Low buffer stock; emergency flag active.'
+      when color = 'Yellow' then 'Moderate buffer stock; scheduled replenishment recommended.'
+      else 'Adequate buffer stock; routine monitoring.'
     end;
 end;
 $$;
@@ -748,7 +758,7 @@ begin
 
   new.urgency_score := coalesce(nullif(new.urgency_score, 0), computed.urgency_score);
   new.priority_color := case
-    when new.priority_color in ('Red', 'Yellow', 'Green') then new.priority_color
+    when new.priority_color in ('Red', 'Orange', 'Yellow', 'Green') then new.priority_color
     else computed.priority_color
   end;
   new.recommendation := coalesce(nullif(new.recommendation, ''), computed.recommendation);
