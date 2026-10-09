@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle, Boxes, Building2, ArrowRight } from 'lucide-react';
+import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle, ArrowRight, Clock } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
@@ -238,56 +238,35 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     .filter(item => item.destinationType === 'Warehouse' && (item.status === 'Verified' || item.status === 'Minted'))
     .reduce((sum, item) => sum + item.quantity, 0);
 
-  // Breakdown of intake volume by supply source
-  const sourceBreakdown = useMemo(() => {
-    const map = new Map<string, { count: number; totalQty: number }>();
-    let grandTotal = 0;
+  // FEFO shelf-life tracking for incoming batches sorted by earliest expiration
+  const fefoWatchlist = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    incomingGoodsList.forEach(item => {
-      const src = item.source?.trim() || 'Unspecified';
-      const prev = map.get(src) || { count: 0, totalQty: 0 };
-      prev.count += 1;
-      prev.totalQty += item.quantity || 0;
-      map.set(src, prev);
-      grandTotal += item.quantity || 0;
-    });
+    const itemsWithDays = incomingGoodsList
+      .filter(item => Boolean(item.expirationDate))
+      .map(item => {
+        const expDate = new Date(item.expirationDate);
+        expDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        return {
+          ...item,
+          daysRemaining: diffDays
+        };
+      })
+      .sort((a, b) => a.daysRemaining - b.daysRemaining);
 
-    const entries = Array.from(map.entries())
-      .map(([source, stats]) => ({
-        source,
-        count: stats.count,
-        totalQty: stats.totalQty,
-        percentage: grandTotal > 0 ? Math.round((stats.totalQty / grandTotal) * 100) : 0
-      }))
-      .sort((a, b) => b.totalQty - a.totalQty);
+    const criticalCount = itemsWithDays.filter(i => i.daysRemaining <= 30).length;
+    const moderateCount = itemsWithDays.filter(i => i.daysRemaining > 30 && i.daysRemaining <= 90).length;
+    const safeCount = itemsWithDays.filter(i => i.daysRemaining > 90).length;
 
-    return { entries, grandTotal };
-  }, [incomingGoodsList]);
-
-  // Breakdown of incoming stock allocated per destination facility
-  const destinationBreakdown = useMemo(() => {
-    const map = new Map<string, { count: number; totalQty: number }>();
-    let grandTotal = 0;
-
-    incomingGoodsList.forEach(item => {
-      const dest = item.destination?.trim() || 'Unspecified';
-      const prev = map.get(dest) || { count: 0, totalQty: 0 };
-      prev.count += 1;
-      prev.totalQty += item.quantity || 0;
-      map.set(dest, prev);
-      grandTotal += item.quantity || 0;
-    });
-
-    const entries = Array.from(map.entries())
-      .map(([destination, stats]) => ({
-        destination,
-        count: stats.count,
-        totalQty: stats.totalQty,
-        percentage: grandTotal > 0 ? Math.round((stats.totalQty / grandTotal) * 100) : 0
-      }))
-      .sort((a, b) => b.totalQty - a.totalQty);
-
-    return { entries, grandTotal };
+    return {
+      all: itemsWithDays,
+      earliest: itemsWithDays.slice(0, 5),
+      criticalCount,
+      moderateCount,
+      safeCount
+    };
   }, [incomingGoodsList]);
 
   // Most recent 5 incoming deliveries for the activity stream
@@ -596,65 +575,116 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
       {/* Intake Distribution & Verification Activity Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Supply Source & Allocation Distribution */}
+        {/* FEFO Expiration & Shelf-Life Watchlist */}
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
           <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <Boxes className="w-5 h-5 text-blue-600" />
+              <Clock className="w-5 h-5 text-indigo-600" />
               <div>
-                <h3 className="text-base font-bold text-gray-900">Supply Source Intake Distribution</h3>
-                <p className="text-xs text-gray-500">Volume and deliveries received per source facility</p>
+                <h3 className="text-base font-bold text-gray-900">FEFO Expiration & Shelf-Life Watchlist</h3>
+                <p className="text-xs text-gray-500">First-Expired, First-Out operational tracking for incoming relief inventory</p>
               </div>
             </div>
-            <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
-              {sourceBreakdown.entries.length} {sourceBreakdown.entries.length === 1 ? 'Source' : 'Sources'}
-            </span>
+            {fefoWatchlist.criticalCount > 0 ? (
+              <span className="px-2.5 py-1 rounded-full bg-red-50 text-red-700 text-xs font-bold border border-red-200 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {fefoWatchlist.criticalCount} Critical
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-full bg-green-50 text-green-700 text-xs font-bold border border-green-200 flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5" />
+                All Batches Safe
+              </span>
+            )}
           </div>
 
           <div className="p-6 flex-1 flex flex-col justify-between">
-            {sourceBreakdown.entries.length > 0 ? (
-              <div className="space-y-4">
-                {sourceBreakdown.entries.slice(0, 5).map((item) => (
-                  <div key={item.source} className="space-y-1.5">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-gray-800 flex items-center gap-1.5">
-                        <Building2 className="w-3.5 h-3.5 text-gray-400" />
-                        {item.source}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-500">{item.count} {item.count === 1 ? 'shipment' : 'shipments'}</span>
-                        <span className="font-bold text-gray-900">{item.totalQty.toLocaleString()} units</span>
-                        <span className="font-semibold text-blue-600 w-9 text-right">{item.percentage}%</span>
+            {/* Shelf-Life Urgency Distribution Pills */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="p-2.5 rounded-lg bg-red-50 border border-red-100 text-center">
+                <span className="block text-xs font-medium text-red-700">Critical (&le; 30d)</span>
+                <span className="block text-lg font-bold text-red-800">{fefoWatchlist.criticalCount}</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-100 text-center">
+                <span className="block text-xs font-medium text-amber-700">Moderate (31-90d)</span>
+                <span className="block text-lg font-bold text-amber-800">{fefoWatchlist.moderateCount}</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-green-50 border border-green-100 text-center">
+                <span className="block text-xs font-medium text-green-700">Safe (&gt; 90d)</span>
+                <span className="block text-lg font-bold text-green-800">{fefoWatchlist.safeCount}</span>
+              </div>
+            </div>
+
+            {/* Earliest Expiring Batches List */}
+            {fefoWatchlist.earliest.length > 0 ? (
+              <div className="space-y-2.5">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Earliest Expiring Batches (Priority Outflow)</p>
+                {fefoWatchlist.earliest.map((item) => {
+                  const isExpired = item.daysRemaining <= 0;
+                  const isCritical = item.daysRemaining > 0 && item.daysRemaining <= 30;
+                  const isModerate = item.daysRemaining > 30 && item.daysRemaining <= 90;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between p-2.5 rounded-lg border transition text-xs ${
+                        isExpired
+                          ? 'bg-red-50 border-red-200'
+                          : isCritical
+                          ? 'bg-red-50/60 border-red-200'
+                          : isModerate
+                          ? 'bg-amber-50/60 border-amber-200'
+                          : 'bg-gray-50 border-gray-100 hover:bg-gray-100/70'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-900 truncate">{item.fnfiCategory}</span>
+                          <span className="font-mono text-[11px] text-gray-500">
+                            {item.incidentCode ? item.incidentCode : item.id}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mt-0.5">
+                          <span>{item.quantity.toLocaleString()} {item.unitType}</span>
+                          <span>&middot;</span>
+                          <span className="font-medium text-gray-700">{item.destination}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end flex-shrink-0">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            isExpired
+                              ? 'bg-red-100 text-red-800'
+                              : isCritical
+                              ? 'bg-red-100 text-red-800'
+                              : isModerate
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-green-100 text-green-800'
+                          }`}
+                        >
+                          {isExpired
+                            ? 'Expired'
+                            : `${item.daysRemaining} days left`}
+                        </span>
+                        <span className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                          <Calendar className="w-2.5 h-2.5" />
+                          Exp: {item.expirationDate}
+                        </span>
                       </div>
                     </div>
-                    <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${Math.max(item.percentage, 3)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="p-6 text-center text-sm text-gray-500">
-                No incoming delivery records recorded yet.
+                No expiration-tracked relief batches recorded.
               </div>
             )}
 
-            <div className="mt-6 pt-4 border-t border-gray-100">
-              <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Destination Allocation</p>
-              <div className="flex flex-wrap gap-2">
-                {destinationBreakdown.entries.slice(0, 4).map((dest) => (
-                  <span
-                    key={dest.destination}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-xs"
-                  >
-                    <span className="font-medium text-gray-600">{dest.destination}:</span>
-                    <strong className="text-gray-900">{dest.totalQty.toLocaleString()}</strong>
-                  </span>
-                ))}
-              </div>
+            <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+              <span>FEFO Protocol:</span>
+              <span className="font-medium text-gray-700">Dispatch batches with shortest remaining shelf-life first.</span>
             </div>
           </div>
         </div>
