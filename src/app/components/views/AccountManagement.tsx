@@ -859,7 +859,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
       if (l.txHash) onChain++;
       if (l.action === 'USER_LOGIN') logins++;
       if (['UPDATE_PROFILE', 'UPDATE_AVATAR', 'PROVISION_SMART_ACCOUNT', 'ASSIGN_LGU', 'VERIFY_USER'].includes(l.action)) profileUpdates++;
-      if (['MINT_BATCH_TOKEN', 'APPROVE_RELEASE', 'SIGN_RELEASE', 'CONFIRM_RECEIPT', 'STOCK_RECOUNT'].includes(l.action)) operational++;
+      if (['MINT_BATCH_TOKEN', 'APPROVE_RELEASE', 'RELEASE_APPROVED', 'SIGN_RELEASE', 'CONFIRM_RECEIPT', 'STOCK_RECOUNT', 'EMERGENCY_STOCK_CORRECTION', 'INCOMING_ADDED', 'INCOMING_SUBMITTED', 'INCOMING_VERIFIED', 'INCOMING_EDITED', 'RELEASE_CREATED', 'RELEASE_DISPATCHED', 'RELEASE_EDITED', 'CORRECTION_REQUESTED', 'LGU_REPORT_SUBMITTED', 'EXPORT_INVENTORY_REPORT'].includes(l.action)) operational++;
     });
 
     return {
@@ -906,11 +906,54 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
       case 'MINT_BATCH_TOKEN':
         return { label: 'Token Minted', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
       case 'APPROVE_RELEASE':
+      case 'RELEASE_APPROVED':
         return { label: 'Release Approved', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
       case 'SIGN_RELEASE':
         return { label: 'Handover Signed', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
       case 'CONFIRM_RECEIPT':
         return { label: 'Receipt Confirmed', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+      case 'INCOMING_ADDED':
+        return { label: 'Manifest Created', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      case 'INCOMING_SUBMITTED':
+        return { label: 'Manifest Submitted', bg: 'bg-sky-50 text-sky-800 border-sky-200' };
+      case 'INCOMING_VERIFIED':
+        return { label: 'Manifest Verified', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+      case 'INCOMING_EDITED':
+        return { label: 'Manifest Edited', bg: 'bg-slate-50 text-slate-800 border-slate-200' };
+      case 'RELEASE_CREATED':
+        return { label: 'Release Drafted', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
+      case 'RELEASE_DISPATCHED':
+        return { label: 'Cargo In-Transit', bg: 'bg-purple-50 text-purple-800 border-purple-200' };
+      case 'RELEASE_EDITED':
+        return { label: 'Release Edited', bg: 'bg-slate-50 text-slate-800 border-slate-200' };
+      case 'CORRECTION_REQUESTED':
+        return { label: 'Correction Requested', bg: 'bg-amber-50 text-amber-800 border-amber-200' };
+      case 'LGU_REPORT_SUBMITTED':
+        return { label: 'LGU Report Submitted', bg: 'bg-cyan-50 text-cyan-800 border-cyan-200' };
+      case 'STOCK_ADDED':
+        return { label: 'Stock Added', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      case 'STOCK_DEDUCTED':
+        return { label: 'Stock Deducted', bg: 'bg-orange-50 text-orange-800 border-orange-200' };
+      case 'LGU_CREATED':
+        return { label: 'LGU Registered', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      case 'LGU_UPDATED':
+        return { label: 'LGU Updated', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
+      case 'PROVINCE_CREATED':
+        return { label: 'Province Added', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+      case 'WAREHOUSE_CREATED':
+        return { label: 'Warehouse Added', bg: 'bg-sky-50 text-sky-800 border-sky-200' };
+      case 'KIT_TYPE_CREATED':
+        return { label: 'Kit Type Added', bg: 'bg-violet-50 text-violet-800 border-violet-200' };
+      case 'KIT_TYPE_UPDATED':
+        return { label: 'Kit Type Updated', bg: 'bg-violet-50 text-violet-800 border-violet-200' };
+      case 'KIT_TYPE_DELETED':
+        return { label: 'Kit Type Removed', bg: 'bg-rose-50 text-rose-800 border-rose-200' };
+      case 'SUPPLY_SOURCE_CREATED':
+        return { label: 'Source Hub Added', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+      case 'SUPPLY_SOURCE_DELETED':
+        return { label: 'Source Hub Removed', bg: 'bg-rose-50 text-rose-800 border-rose-200' };
+      case 'EXPORT_INVENTORY_REPORT':
+        return { label: 'Inventory Exported', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
       case 'VERIFY_USER':
         return { label: 'User Verified', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
       case 'DECLINE_USER':
@@ -1660,10 +1703,21 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
           >
             <option value="all">All Actions</option>
             <option value="onchain">On-Chain Sepolia Verified</option>
+            <option value="INCOMING_ADDED">Incoming Manifest Created</option>
+            <option value="INCOMING_SUBMITTED">Manifest Submitted for Review</option>
+            <option value="INCOMING_VERIFIED">Manifest Physically Verified</option>
             <option value="MINT_BATCH_TOKEN">Token Minted (ERC-1155)</option>
+            <option value="RELEASE_CREATED">Relief Release Created</option>
             <option value="APPROVE_RELEASE">Release Approved</option>
             <option value="SIGN_RELEASE">Custody Handover Signed</option>
+            <option value="RELEASE_DISPATCHED">Dispatched In-Transit</option>
             <option value="CONFIRM_RECEIPT">Delivery Receipt Confirmed</option>
+            <option value="CORRECTION_REQUESTED">Correction Requested</option>
+            <option value="LGU_REPORT_SUBMITTED">LGU Inventory Report Submitted</option>
+            <option value="STOCK_ADDED">Warehouse Stock Added</option>
+            <option value="STOCK_DEDUCTED">Warehouse Stock Deducted</option>
+            <option value="STOCK_RECOUNT">Physical Stock Recount</option>
+            <option value="EXPORT_INVENTORY_REPORT">Inventory Report Exported</option>
             <option value="VERIFY_USER">User Verified</option>
             <option value="DECLINE_USER">Registration Declined</option>
             <option value="DELETE_USER">Account Deleted</option>
@@ -1673,7 +1727,11 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             <option value="RESTORE_LGU">LGU Restored</option>
             <option value="ARCHIVE_PROVINCE">Province Archived</option>
             <option value="RESTORE_PROVINCE">Province Restored</option>
-            <option value="STOCK_RECOUNT">Physical Stock Recount</option>
+            <option value="LGU_CREATED">LGU Registered</option>
+            <option value="PROVINCE_CREATED">Province Registered</option>
+            <option value="WAREHOUSE_CREATED">Warehouse Registered</option>
+            <option value="KIT_TYPE_CREATED">Kit Type Registered</option>
+            <option value="SUPPLY_SOURCE_CREATED">Supply Hub Registered</option>
           </select>
 
           {/* Entity Type Filter */}
@@ -1687,10 +1745,16 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
           >
             <option value="all">All Entities</option>
             <option value="User">User</option>
-            <option value="BatchToken">Batch Token</option>
+            <option value="IncomingGoods">Incoming Manifest</option>
             <option value="OutgoingRelease">Outgoing Release</option>
+            <option value="BatchToken">Batch Token</option>
+            <option value="Warehouse">Warehouse Facility</option>
             <option value="LGU">LGU</option>
             <option value="Province">Province</option>
+            <option value="KitType">Commodity Kit Type</option>
+            <option value="SupplySource">Logistics Hub Source</option>
+            <option value="LGUReport">LGU Inventory Report</option>
+            <option value="InventoryReport">Inventory Report Export</option>
           </select>
 
           {(logSearchQuery || logActionFilter !== 'all' || logEntityFilter !== 'all') && (
@@ -2163,10 +2227,19 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             <option value="UPDATE_PROFILE">Profile Updates</option>
             <option value="UPDATE_AVATAR">Avatar Changes</option>
             <option value="PROVISION_SMART_ACCOUNT">Smart Account Bindings</option>
+            <option value="INCOMING_ADDED">Incoming Manifest Created</option>
+            <option value="INCOMING_SUBMITTED">Manifest Submitted</option>
+            <option value="INCOMING_VERIFIED">Manifest Verified</option>
             <option value="MINT_BATCH_TOKEN">Token Mints</option>
+            <option value="RELEASE_CREATED">Release Drafted</option>
             <option value="APPROVE_RELEASE">Release Approvals</option>
             <option value="SIGN_RELEASE">Handover Signatures</option>
+            <option value="RELEASE_DISPATCHED">Dispatched In-Transit</option>
             <option value="CONFIRM_RECEIPT">Receipt Confirmations</option>
+            <option value="CORRECTION_REQUESTED">Correction Requested</option>
+            <option value="LGU_REPORT_SUBMITTED">LGU Reports Submitted</option>
+            <option value="STOCK_RECOUNT">Stock Recounts</option>
+            <option value="EXPORT_INVENTORY_REPORT">Inventory Exports</option>
             <option value="ASSIGN_LGU">LGU Designations</option>
             <option value="VERIFY_USER">Account Verifications</option>
           </select>

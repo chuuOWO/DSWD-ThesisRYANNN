@@ -138,12 +138,20 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     if (!newKitName.trim()) return;
 
     try {
-      await backendApi.createKitType({
+      const res = await backendApi.createKitType({
         name: newKitName.trim(),
         category: newKitCategory,
         unitType: newKitUnit.trim() || 'kits',
         description: newKitDesc.trim() || 'Custom relief goods package'
       });
+      await backendApi.logActivity({
+        action: 'KIT_TYPE_CREATED',
+        entityType: 'KitType',
+        entityId: res?.id || newKitName.trim(),
+        details: `Created relief commodity kit type: ${newKitName.trim()} (${newKitCategory})`,
+        metadata: { name: newKitName.trim(), category: newKitCategory, unitType: newKitUnit.trim() || 'kits' }
+      }).catch(() => {});
+
       const updated = await backendApi.getKitTypes();
       setKitTypes(updated);
       setNewKitName('');
@@ -167,6 +175,14 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         unitType: editKitUnit.trim() || 'kits',
         description: editKitDesc.trim() || 'Custom relief goods package'
       });
+      await backendApi.logActivity({
+        action: 'KIT_TYPE_UPDATED',
+        entityType: 'KitType',
+        entityId: editingKit.id,
+        details: `Updated commodity kit type: ${editKitName.trim()}`,
+        metadata: { id: editingKit.id, name: editKitName.trim(), category: editKitCategory }
+      }).catch(() => {});
+
       const updated = await backendApi.getKitTypes();
       setKitTypes(updated);
       setEditingKit(null);
@@ -179,7 +195,15 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
 
   const handleDeleteKit = async (id: string) => {
     try {
+      const kit = kitTypes.find(k => k.id === id);
       await backendApi.deleteKitType(id);
+      await backendApi.logActivity({
+        action: 'KIT_TYPE_DELETED',
+        entityType: 'KitType',
+        entityId: id,
+        details: `Deleted commodity kit type: ${kit?.name || id}`
+      }).catch(() => {});
+
       setKitTypes(prev => prev.filter(k => k.id !== id));
       await inventoryState?.refreshKitTypes?.();
       showToast('Kit type removed');
@@ -200,6 +224,13 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         region: newSourceRegion.trim(),
         location: newSourceLocation.trim() || 'Panay Region'
       });
+      await backendApi.logActivity({
+        action: 'SUPPLY_SOURCE_CREATED',
+        entityType: 'SupplySource',
+        entityId: newSourceName.trim(),
+        details: `Registered logistics supply source: ${newSourceName.trim()} (${newSourceType})`
+      }).catch(() => {});
+
       const updated = await backendApi.getSupplySources();
       setSources(updated);
       setNewSourceName('');
@@ -214,7 +245,15 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
 
   const handleDeleteSource = async (id: string) => {
     try {
+      const src = sources.find(s => s.id === id);
       await backendApi.deleteSupplySource(id);
+      await backendApi.logActivity({
+        action: 'SUPPLY_SOURCE_DELETED',
+        entityType: 'SupplySource',
+        entityId: id,
+        details: `Deleted logistics supply source: ${src?.name || id}`
+      }).catch(() => {});
+
       setSources(prev => prev.filter(s => s.id !== id));
       await inventoryState?.refreshSupplySources?.();
       showToast('Supply source removed');
@@ -230,6 +269,13 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
 
     try {
       await backendApi.createProvince(clean);
+      await backendApi.logActivity({
+        action: 'PROVINCE_CREATED',
+        entityType: 'Province',
+        entityId: clean,
+        details: `Registered administrative province: ${clean}`
+      }).catch(() => {});
+
       const updated = await backendApi.getProvinces();
       setProvinces(updated);
       setNewProvinceName('');
@@ -249,7 +295,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     const lng = parseFloat(newLguLng) || 122.5000;
 
     try {
-      await backendApi.createLgu({
+      const res = await backendApi.createLgu({
         municipality: newLguName.trim(),
         province: newLguProvince || provinces[0]?.name || 'Iloilo',
         lguName: `${newLguName.trim()} Municipal Hall`,
@@ -258,6 +304,13 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         latitude: lat,
         longitude: lng
       });
+      await backendApi.logActivity({
+        action: 'LGU_CREATED',
+        entityType: 'LGU',
+        entityId: res?.id || newLguName.trim(),
+        details: `Registered LGU municipality: ${newLguName.trim()} (${newLguProvince || provinces[0]?.name || 'Iloilo'})`,
+        metadata: { municipality: newLguName.trim(), province: newLguProvince || provinces[0]?.name || 'Iloilo' }
+      }).catch(() => {});
 
       const updated = await backendApi.getLgus();
       setDbLgus(updated);
@@ -315,7 +368,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     if (!newWhName.trim()) return;
 
     try {
-      await backendApi.createWarehouse({
+      const res = await backendApi.createWarehouse({
         name: newWhName.trim(),
         province: newWhProvince || provinces[0]?.name || 'Iloilo',
         municipality: newWhMuni.trim(),
@@ -323,6 +376,13 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         latitude: parseFloat(newWhLat) || 10.7000,
         longitude: parseFloat(newWhLng) || 122.5000
       });
+      await backendApi.logActivity({
+        action: 'WAREHOUSE_CREATED',
+        entityType: 'Warehouse',
+        entityId: (res as any)?.id || newWhName.trim(),
+        details: `Registered warehouse storage facility: ${newWhName.trim()} in ${newWhMuni.trim()}, ${newWhProvince || provinces[0]?.name || 'Iloilo'} (Capacity: ${newWhCapacity})`,
+        metadata: { name: newWhName.trim(), municipality: newWhMuni.trim(), capacity: newWhCapacity }
+      }).catch(() => {});
 
       const updated = await backendApi.getWarehouses();
       setWarehouses(updated);

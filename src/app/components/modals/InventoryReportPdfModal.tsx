@@ -14,6 +14,7 @@ import {
   TrendingDown
 } from 'lucide-react';
 import type { UserProfile } from '../../services/authApi';
+import { backendApi } from '../../services/backendApi';
 
 export interface InventoryReportPdfModalProps {
   isOpen: boolean;
@@ -187,6 +188,26 @@ export function InventoryReportPdfModal({
   }, [filteredData, facilityScope]);
 
   const handlePrint = () => {
+    backendApi.logActivity({
+      action: 'EXPORT_INVENTORY_REPORT',
+      entityType: 'InventoryReport',
+      entityId: reportRefNumber,
+      actorName: adminProfile?.fullName || 'Administrator',
+      actorEmail: adminProfile?.email || 'admin@dswd.gov.ph',
+      actorRole: adminProfile?.role || 'dswd_admin',
+      actorWallet: adminProfile?.walletAddress,
+      details: `Generated and exported official inventory PDF report (${reportRefNumber}) for ${filterScopeText.scope}. Filter: ${filterScopeText.lgu}, Category: ${filterScopeText.category}.`,
+      metadata: {
+        reportRefNumber,
+        facilityScope,
+        selectedLguFilter,
+        selectedCategory,
+        stockHealthFilter,
+        totalItemsCount: filteredData.length,
+        grandConsolidated: filteredTotals.grandConsolidated
+      }
+    }).catch(() => {});
+
     window.print();
   };
 

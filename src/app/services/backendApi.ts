@@ -1875,14 +1875,28 @@ export const backendApi = {
       let actorRole = entry.actorRole;
       let actorWallet = entry.actorWallet;
 
-      if (!actorEmail || !actorName) {
+      if (!actorEmail || !actorName || !actorRole || !actorWallet) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           actorId = actorId || user.id;
           actorEmail = actorEmail || user.email || 'system@dswd.gov.ph';
-          actorName = actorName || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
-          actorRole = actorRole || user.user_metadata?.role || 'user';
+          actorName = actorName || user.user_metadata?.full_name;
+          actorRole = actorRole || user.user_metadata?.role;
           actorWallet = actorWallet || user.user_metadata?.wallet_address;
+
+          if (!actorName || !actorRole || !actorWallet) {
+            const { data: prof } = await supabase
+              .from('profiles')
+              .select('full_name, role, wallet_address, email')
+              .eq('id', user.id)
+              .maybeSingle();
+            if (prof) {
+              actorName = actorName || prof.full_name;
+              actorRole = actorRole || prof.role;
+              actorWallet = actorWallet || prof.wallet_address;
+              actorEmail = actorEmail || prof.email;
+            }
+          }
         }
       }
 

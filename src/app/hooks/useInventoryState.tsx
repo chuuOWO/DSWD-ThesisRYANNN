@@ -527,9 +527,11 @@ const toFriendlyTxError = (error: unknown, fallback: string) => {
 };
 
 export interface ActorProfile {
+  id?: string;
   fullName?: string;
   email?: string;
   role?: string;
+  walletAddress?: string;
 }
 
 export function useInventoryState(enabled = true, actorProfile?: ActorProfile | null) {
@@ -537,10 +539,21 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
   const currentActor = useMemo(() => {
-    if (!actorProfile) return { name: 'System / Unattributed', role: 'System' };
+    if (!actorProfile) {
+      return {
+        id: undefined,
+        name: 'System / Unattributed',
+        email: 'system@dswd.gov.ph',
+        role: 'System',
+        wallet: undefined
+      };
+    }
     return {
+      id: actorProfile.id,
       name: actorProfile.fullName || actorProfile.email || 'Authenticated Personnel',
-      role: actorProfile.role || 'Personnel'
+      email: actorProfile.email || 'system@dswd.gov.ph',
+      role: actorProfile.role || 'Personnel',
+      wallet: actorProfile.walletAddress
     };
   }, [actorProfile]);
 
@@ -913,6 +926,20 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }));
 
       await backendApi.updateLgu(id, updates);
+
+      backendApi.logActivity({
+        action: 'LGU_UPDATED',
+        entityType: 'LGU',
+        entityId: id,
+        actorId: currentActor.id,
+        actorName: currentActor.name,
+        actorEmail: currentActor.email,
+        actorRole: currentActor.role,
+        actorWallet: currentActor.wallet,
+        details: `Updated master parameters for LGU ${updates.municipality || id}.`,
+        metadata: { id, updates }
+      }).catch(() => {});
+
       return { ok: true, message: 'LGU profile updated successfully.' };
     } catch (err: any) {
       return { ok: false, message: err?.message || 'Failed to update LGU in database.' };
@@ -949,6 +976,20 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         isActive: true
       };
       setLgusList(prev => [...prev, newRecord]);
+
+      backendApi.logActivity({
+        action: 'LGU_CREATED',
+        entityType: 'LGU',
+        entityId: res.id,
+        actorId: currentActor.id,
+        actorName: currentActor.name,
+        actorEmail: currentActor.email,
+        actorRole: currentActor.role,
+        actorWallet: currentActor.wallet,
+        details: `Created LGU municipality ${input.municipality}, ${input.province} with max quota ${input.maxStock || 3000}.`,
+        metadata: { id: res.id, municipality: input.municipality, province: input.province }
+      }).catch(() => {});
+
       return { ok: true, message: 'LGU created successfully.' };
     } catch (err: any) {
       return { ok: false, message: err?.message || 'Failed to create LGU in database.' };
@@ -999,6 +1040,27 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Create incoming manifest')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'INCOMING_ADDED',
+      entityType: 'IncomingGoods',
+      entityId: newId,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Created incoming manifest ${newId} with ${newGoods.quantity} ${newGoods.unitType || 'units'} of ${newGoods.fnfiCategory} from ${newGoods.source} to ${newGoods.destination}.`,
+      metadata: {
+        manifestNumber: newId,
+        category: newGoods.fnfiCategory,
+        quantity: newGoods.quantity,
+        unitType: newGoods.unitType,
+        source: newGoods.source,
+        destination: newGoods.destination,
+        incidentCode: newGoods.incidentCode
+      }
+    }).catch(() => {});
   };
 
   const updateIncomingGoods = (id: string, patch: Partial<IncomingGoods>) => {
@@ -1043,6 +1105,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Update incoming goods')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'INCOMING_EDITED',
+      entityType: 'IncomingGoods',
+      entityId: id,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Edited incoming manifest ${id} parameters.`,
+      metadata: { manifestNumber: id, ...patch }
+    }).catch(() => {});
   };
 
   const submitIncomingForVerification = (id: string) => {
@@ -1053,6 +1128,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Submit incoming manifest')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'INCOMING_SUBMITTED',
+      entityType: 'IncomingGoods',
+      entityId: id,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Submitted incoming manifest ${id} for physical warehouse inspection and verification.`,
+      metadata: { manifestNumber: id }
+    }).catch(() => {});
   };
 
   const verifyIncomingReceipt = (id: string) => {
@@ -1068,6 +1156,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Verify incoming manifest')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'INCOMING_VERIFIED',
+      entityType: 'IncomingGoods',
+      entityId: id,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Verified physical incoming manifest ${id} by ${currentActor.name}. Physical count and warehouse inventory verified.`,
+      metadata: { manifestNumber: id, verifiedBy: currentActor.name }
+    }).catch(() => {});
   };
 
   const mintBatchToken = async (id: string, actorRole: UserRole = 'Admin') => {
@@ -1195,6 +1296,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Create incoming discrepancy report')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'CORRECTION_REQUESTED',
+      entityType: 'IncomingGoods',
+      entityId: id,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Discrepancy flagged and correction requested for incoming manifest ${id}: ${note}`,
+      metadata: { manifestNumber: id, note, reportType: 'Incoming' }
+    }).catch(() => {});
   };
 
   const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => {
@@ -1252,6 +1366,28 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Create outgoing request')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'RELEASE_CREATED',
+      entityType: 'OutgoingRelease',
+      entityId: newDR,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Created outgoing release request ${newDR} for ${newRelease.lguName} (${newRelease.amountRequested} units of ${newRelease.fnfiCategory} via ${newRelease.deliveryMode}).`,
+      metadata: {
+        drNumber: newDR,
+        lguName: newRelease.lguName,
+        municipality: newRelease.municipality,
+        province: newRelease.province,
+        category: newRelease.fnfiCategory,
+        amountRequested: newRelease.amountRequested,
+        deliveryMode: newRelease.deliveryMode,
+        warehouseSource: newRelease.warehouseSource
+      }
+    }).catch(() => {});
   };
 
   const updateOutgoingRelease = (drNumber: string, patch: Partial<OutgoingRelease>) => {
@@ -1271,6 +1407,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       receiverGps: patch.receiverGps,
       destinationAddress: patch.destinationAddress
     }).catch(err => console.warn('Supabase updateOutgoing error:', err));
+
+    backendApi.logActivity({
+      action: 'RELEASE_EDITED',
+      entityType: 'OutgoingRelease',
+      entityId: drNumber,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Edited outgoing release parameters for ${drNumber}.`,
+      metadata: { drNumber, ...patch }
+    }).catch(() => {});
   };
 
   const approveAllocation = async (drNumber: string, amountApproved: number): Promise<{ ok: boolean; message: string }> => {
@@ -1331,6 +1480,28 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Approve outgoing allocation')(error);
       setIntegrationMode('mock');
     }
+
+    backendApi.logActivity({
+      action: 'RELEASE_APPROVED',
+      entityType: 'OutgoingRelease',
+      entityId: drNumber,
+      details: `Admin approved release ${drNumber} (${amountApproved} units of ${release.fnfiCategory}) for ${release.lguName}. Batch token ${batchTokenId} minted on blockchain.`,
+      txHash: proof.hash,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: 'Admin',
+      actorWallet: proof.walletAddress,
+      metadata: {
+        drNumber,
+        batchTokenId,
+        amountApproved,
+        lguName: release.lguName,
+        category: release.fnfiCategory,
+        warehouseSource: release.warehouseSource,
+        txHash: proof.hash
+      }
+    }).catch(() => {});
 
     // Deduct stock from the source warehouse or source LGU in Supabase & local state
     if (isMainWarehouse(release.warehouseSource)) {
@@ -1458,6 +1629,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Mark outgoing in transit')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'RELEASE_DISPATCHED',
+      entityType: 'OutgoingRelease',
+      entityId: drNumber,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Dispatched relief cargo ${drNumber}; status marked In Transit to destination LGU.`,
+      metadata: { drNumber }
+    }).catch(() => {});
   };
 
   const receiverAcceptWithGps = async (
@@ -1688,6 +1872,31 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     try {
       await backendApi.createLGUInventoryReport({ ...input, ...computed });
       setIntegrationMode('backend');
+
+      backendApi.logActivity({
+        action: 'LGU_REPORT_SUBMITTED',
+        entityType: 'LGUReport',
+        entityId: input.lguId || input.municipality,
+        actorId: currentActor.id,
+        actorName: currentActor.name,
+        actorEmail: currentActor.email,
+        actorRole: 'LGUReceiver',
+        actorWallet: currentActor.wallet,
+        details: `Submitted LGU inventory report for ${input.municipality}, ${input.province}: ${input.foodPacks} food packs, ${input.affectedFamilies || 0} affected families. Priority: ${computed.priorityLevel} (${computed.priorityColor}).`,
+        metadata: {
+          municipality: input.municipality,
+          province: input.province,
+          foodPacks: input.foodPacks,
+          hygieneKits: input.hygieneKits,
+          familyKits: input.familyKits,
+          affectedFamilies: input.affectedFamilies,
+          damageIndex: input.damageIndex,
+          priorityLevel: computed.priorityLevel,
+          priorityColor: computed.priorityColor,
+          urgencyScore: computed.urgencyScore
+        }
+      }).catch(() => {});
+
       return { ok: true, message: 'LGU inventory report submitted to Supabase and priority score recalculated.' };
     } catch (error) {
       logBackendError('Create LGU inventory report')(error);
@@ -1875,6 +2084,19 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Create outgoing discrepancy report')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'CORRECTION_REQUESTED',
+      entityType: 'OutgoingRelease',
+      entityId: drNumber,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Discrepancy reported and correction requested for delivery release ${drNumber}: ${note}`,
+      metadata: { drNumber, note, reportType: 'Outgoing' }
+    }).catch(() => {});
   };
 
   const synchronizedLgusList = useMemo<SynchronizedLgu[]>(() => {
