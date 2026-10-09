@@ -17,7 +17,6 @@ interface InventoryState {
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
-  mintBatchToken: (id: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
   requestIncomingCorrection: (id: string, note: string) => void;
 }
 
@@ -48,17 +47,12 @@ const canEdit = (status: IncomingStatus) => ['Draft', 'Pending Verification', 'C
 
 const friendlyResult = (message: string) =>
   message
-    .replace(/minted/gi, 'posted')
-    .replace(/token/gi, 'batch record')
     .replace(/manifest hash/gi, 'delivery reference');
 
 const friendlyAuditDetails = (details = '') =>
   details
-    .replace(/No blockchain minting yet\./gi, 'Not yet posted to the official stock record.')
+    .replace(/No blockchain minting yet\./gi, 'Recorded as draft warehouse receiving entry.')
     .replace(/Pre-tokenization record/gi, 'Draft receiving record')
-    .replace(/blockchain/gi, 'official')
-    .replace(/minted/gi, 'posted')
-    .replace(/token/gi, 'batch record')
     .replace(/manifest hash/gi, 'delivery reference');
 
 type IncomingAction = 'submit' | 'verify' | 'correction' | 'message';
@@ -79,7 +73,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     updateIncomingGoods,
     submitIncomingForVerification,
     verifyIncomingReceipt,
-    mintBatchToken,
     requestIncomingCorrection,
     warehousesList = [],
     supplySourcesList = [],
@@ -237,7 +230,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <div>
             <h1 className="text-2xl font-bold">Incoming Goods Receiving</h1>
             <p className="text-sm text-blue-100 mt-1">
-              Record deliveries, check physical receipt, and post verified batches to warehouse stock.
+              Record deliveries, inspect physical shipments, and add verified supplies to warehouse inventory.
             </p>
           </div>
           <button
@@ -264,7 +257,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <div className="flex items-center gap-3">
             <ShieldCheck className="w-8 h-8 text-green-600" />
             <div>
-              <p className="text-sm font-semibold text-gray-600">Posted Batches</p>
+              <p className="text-sm font-semibold text-gray-600">Verified Deliveries</p>
               <p className="text-2xl font-bold text-green-600">{postedCount}</p>
             </div>
           </div>
@@ -273,7 +266,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <div className="flex items-center gap-3">
             <FileCheck2 className="w-8 h-8 text-yellow-600" />
             <div>
-              <p className="text-sm font-semibold text-gray-600">For Review or Posting</p>
+              <p className="text-sm font-semibold text-gray-600">For Physical Review</p>
               <p className="text-2xl font-bold text-yellow-600">{pendingCount}</p>
             </div>
           </div>
@@ -282,7 +275,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <div className="flex items-center gap-3">
             <TruckIcon className="w-8 h-8 text-purple-600" />
             <div>
-              <p className="text-sm font-semibold text-gray-600">Posted Warehouse Stock</p>
+              <p className="text-sm font-semibold text-gray-600">Warehouse Stock Received</p>
               <p className="text-2xl font-bold text-purple-600">{warehouseTotalQty.toLocaleString()}</p>
             </div>
           </div>
@@ -354,7 +347,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Posting Record</th>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Stocking Status</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Actions</th>
               </tr>
             </thead>
@@ -409,20 +402,19 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     )}
                   </td>
                   <td className="px-4 py-4">
-                    {item.destinationType === 'LGU' ? (
-                      <div className="space-y-0.5">
-                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                          Stocked to LGU (Direct)
-                        </span>
-                        <p className="text-[11px] text-gray-400">No blockchain required</p>
-                      </div>
-                    ) : item.batchTokenId ? (
+                    {item.status === 'Verified' || item.status === 'Minted' ? (
                       <div className="space-y-1">
-                        <p className="font-bold text-sm text-green-700">{item.batchTokenId}</p>
-                        <p className="text-xs text-gray-500">Posted: {item.mintedAt}</p>
+                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
+                          Stocked in {item.destination}
+                        </span>
+                        <p className="text-xs text-gray-500">Verified: {item.dateReceived}</p>
                       </div>
+                    ) : item.status === 'Pending Verification' ? (
+                      <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-50 text-yellow-700 border border-yellow-200">
+                        Awaiting Physical Check
+                      </span>
                     ) : (
-                      <p className="text-sm text-gray-400">Not posted yet</p>
+                      <p className="text-sm text-gray-400">Draft Record</p>
                     )}
                   </td>
                   <td className="px-4 py-4">

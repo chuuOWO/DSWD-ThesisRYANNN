@@ -967,8 +967,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const isLgu = newGoods.destinationType === 'LGU';
     const initialStatus: IncomingStatus = isLgu ? 'Verified' : 'Draft';
     const auditMessage = isLgu
-      ? `Direct delivery of ${newGoods.quantity} ${newGoods.unitType} of ${newGoods.fnfiCategory} stocked to ${newGoods.destination} inventory without blockchain.`
-      : 'Incoming manifest saved as editable draft. No blockchain minting yet.';
+      ? `Direct delivery of ${newGoods.quantity} ${newGoods.unitType} of ${newGoods.fnfiCategory} stocked to ${newGoods.destination} inventory.`
+      : 'Incoming manifest saved as editable draft awaiting physical warehouse inspection.';
 
     const goodsWithId: IncomingGoods = {
       ...newGoods,
@@ -1012,7 +1012,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return {
         ...updated,
         manifestHash: makeManifestHash(updated),
-        auditTrail: [audit('Edited', 'Pre-tokenization record edited to correct human encoding error.'), ...item.auditTrail]
+        auditTrail: [audit('Edited', 'Draft receiving record edited to correct human encoding error.'), ...item.auditTrail]
       };
     }));
 
