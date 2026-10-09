@@ -15,6 +15,7 @@ import {
 import { authApi, UserRole } from '../../services/authApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
+import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { supabase } from '../../lib/supabase';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { sanitizeTextOnly } from '../../lib/inputValidation';
@@ -140,6 +141,14 @@ export function AuthPage() {
     try {
       const res = await authApi.signIn(email.trim(), password);
       console.log('[DSWD Auth] Sign-in successful for user ID:', res.user?.id, 'email:', res.user?.email);
+      if (res.user?.id && res.user.email) {
+        try {
+          const smartWallet = await provisionSmartAccountAddress(res.user.id, res.user.email);
+          await authApi.updateWalletAddress(res.user.id, smartWallet);
+        } catch (walletSyncErr) {
+          console.warn('Smart account sync on login:', walletSyncErr);
+        }
+      }
       await refreshProfile();
       console.log('[DSWD Auth] Profile refreshed successfully');
     } catch (authErr: any) {
@@ -185,7 +194,12 @@ export function AuthPage() {
 
     try {
       const computedFullName = `${firstName.trim()} ${lastName.trim()}`;
-      await authApi.signUp({
+      let autoSmartWallet = walletAddress.trim();
+      if (!autoSmartWallet) {
+        autoSmartWallet = await provisionSmartAccountAddress('initial', email.trim());
+      }
+
+      const signUpRes = await authApi.signUp({
         email: email.trim(),
         password,
         fullName: computedFullName,
@@ -196,8 +210,17 @@ export function AuthPage() {
         workIdUrl: workIdUrl || undefined,
         role,
         truckId: role === 'receiver' ? truckId.trim() : undefined,
-        walletAddress: walletAddress.trim() || undefined
+        walletAddress: autoSmartWallet
       });
+
+      if (signUpRes?.user?.id) {
+        try {
+          const canonicalWallet = await provisionSmartAccountAddress(signUpRes.user.id, email.trim());
+          await authApi.updateWalletAddress(signUpRes.user.id, canonicalWallet);
+        } catch (updateErr) {
+          console.warn('Smart wallet update on signup:', updateErr);
+        }
+      }
 
       setPassword('');
       setFirstName('');
@@ -500,44 +523,18 @@ export function AuthPage() {
                     )}
                   </div>
 
-                  {/* Optional MetaMask Link */}
-                  <div>
-                    {walletAddress ? (
-                      <div className="w-full py-2 px-3 rounded-2xl border border-emerald-300 bg-emerald-50 text-[11px] font-mono text-emerald-800 flex items-center justify-between">
-                        <span className="truncate">{walletAddress}</span>
-                        <button
-                          type="button"
-                          onClick={() => setWalletAddress('')}
-                          className="text-emerald-600 hover:text-emerald-800 ml-2 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                  {/* Invisible Gasless Smart Account */}
+                  <div className="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/60 text-xs text-indigo-900 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Wallet className="w-4 h-4 text-[#10069f] flex-shrink-0" />
+                      <div>
+                        <p className="font-bold text-[#10069f] text-[11px]">Gasless Smart Account</p>
+                        <p className="text-[10px] text-indigo-700">Auto-provisioned with ERC-4337 Paymaster sponsorship</p>
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setErrorMessage(null);
-                          try {
-                            const { walletAddress: addr } = await blockchain.connectWallet();
-                            if (addr) {
-                              const isLinked = await authApi.isWalletLinked(addr);
-                              if (isLinked) {
-                                setErrorMessage('This wallet is already linked to another account.');
-                                return;
-                              }
-                              setWalletAddress(addr);
-                            }
-                          } catch {
-                            // user cancelled
-                          }
-                        }}
-                        className="w-full py-2 rounded-2xl border border-dashed border-indigo-300 hover:border-[#10069f] text-xs font-medium text-[#10069f] hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Wallet className="w-3.5 h-3.5" />
-                        <span>Link MetaMask Wallet (Optional)</span>
-                      </button>
-                    )}
+                    </div>
+                    <span className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded-full flex-shrink-0">
+                      Zero Gas
+                    </span>
                   </div>
 
                   {/* Submit Register Button */}
@@ -1010,43 +1007,18 @@ export function AuthPage() {
                 </div>
 
                 {/* Optional MetaMask Link */}
-                <div>
-                  {walletAddress ? (
-                    <div className="w-full py-2 px-3 rounded-2xl border border-emerald-300 bg-emerald-50 text-[11px] font-mono text-emerald-800 flex items-center justify-between">
-                      <span className="truncate">{walletAddress}</span>
-                      <button
-                        type="button"
-                        onClick={() => setWalletAddress('')}
-                        className="text-emerald-600 hover:text-emerald-800 ml-2 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                {/* Invisible Gasless Smart Account */}
+                <div className="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/60 text-xs text-indigo-900 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-[#10069f] flex-shrink-0" />
+                    <div>
+                      <p className="font-bold text-[#10069f] text-[11px]">Gasless Smart Account</p>
+                      <p className="text-[10px] text-indigo-700">Auto-provisioned with ERC-4337 Paymaster sponsorship</p>
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setErrorMessage(null);
-                        try {
-                          const { walletAddress: addr } = await blockchain.connectWallet();
-                          if (addr) {
-                            const isLinked = await authApi.isWalletLinked(addr);
-                            if (isLinked) {
-                              setErrorMessage('This wallet is already linked to another account.');
-                              return;
-                            }
-                            setWalletAddress(addr);
-                          }
-                        } catch {
-                          // user cancelled
-                        }
-                      }}
-                      className="w-full py-2 rounded-2xl border border-dashed border-indigo-300 hover:border-[#10069f] text-xs font-medium text-[#10069f] hover:bg-indigo-50/50 transition cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <Wallet className="w-3.5 h-3.5" />
-                      <span>Link MetaMask Wallet (Optional)</span>
-                    </button>
-                  )}
+                  </div>
+                  <span className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded-full flex-shrink-0">
+                    Zero Gas
+                  </span>
                 </div>
 
                 {/* Submit Register Button */}

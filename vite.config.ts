@@ -26,6 +26,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  define: {
+    global: 'globalThis',
+  },
   resolve: {
     alias: {
       // Alias @ to the src directory

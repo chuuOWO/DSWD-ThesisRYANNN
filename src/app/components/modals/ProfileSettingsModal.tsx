@@ -19,6 +19,7 @@ import { authApi, type UserProfile } from '../../services/authApi';
 import { backendApi } from '../../services/backendApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
+import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { sanitizeTextOnly } from '../../lib/inputValidation';
 
 interface ProfileSettingsModalProps {
@@ -113,17 +114,28 @@ export function ProfileSettingsModal({
         }
       }
 
-      const { walletAddress } = await blockchain.connectWallet();
-      if (!walletAddress) throw new Error('No account returned from MetaMask.');
+      let walletAddress: string | null = null;
+      if (window.ethereum) {
+        try {
+          const res = await blockchain.connectWallet();
+          walletAddress = res.walletAddress;
+        } catch {
+          // Fall through to embedded wallet
+        }
+      }
+      if (!walletAddress) {
+        walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
+      }
+      if (!walletAddress) throw new Error('Could not provision smart account address.');
       const isLinked = await authApi.isWalletLinked(walletAddress, profile.id);
       if (isLinked) {
-        throw new Error('This MetaMask wallet is already bound to another account.');
+        throw new Error('This wallet is already bound to another account.');
       }
       await authApi.updateWalletAddress(profile.id, walletAddress);
       await refreshProfile();
-      setFeedbackMessage({ type: 'success', text: `MetaMask wallet updated: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
+      setFeedbackMessage({ type: 'success', text: `Gasless smart account active: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
     } catch (err) {
-      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update wallet.' });
+      setFeedbackMessage({ type: 'error', text: err instanceof Error ? err.message : 'Failed to update smart account.' });
     } finally {
       setIsLinkingWallet(false);
     }
@@ -366,12 +378,8 @@ export function ProfileSettingsModal({
               <button
                 type="button"
                 onClick={() => setIsPhotoMenuOpen((prev) => !prev)}
-                className={`relative flex h-24 w-24 items-center justify-center rounded-full overflow-hidden shadow-md focus:outline-none transition bg-gray-100 cursor-pointer ${
-                  !profile.walletAddress
-                    ? 'border-2 border-red-500 ring-4 ring-red-400/40'
-                    : 'border-2 border-blue-600/30 focus:ring-4 focus:ring-blue-100'
-                }`}
-                title={!profile.walletAddress ? "You need to open profile and link it to MetaMask." : "Click to change profile picture"}
+                className="relative flex h-24 w-24 items-center justify-center rounded-full overflow-hidden shadow-md focus:outline-none transition bg-gray-100 cursor-pointer border-2 border-blue-600/30 focus:ring-4 focus:ring-blue-100"
+                title="Click to change profile picture"
               >
                 {avatarUrl ? (
                   <img
@@ -380,9 +388,7 @@ export function ProfileSettingsModal({
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className={`flex h-full w-full items-center justify-center text-white text-2xl font-black ${
-                    !profile.walletAddress ? 'bg-red-600' : 'bg-blue-700'
-                  }`}>
+                  <div className="flex h-full w-full items-center justify-center text-white text-2xl font-black bg-blue-700">
                     {getInitials(fullName)}
                   </div>
                 )}
@@ -393,16 +399,6 @@ export function ProfileSettingsModal({
                   <span>Change</span>
                 </div>
               </button>
-
-              {/* Warning sign badge if unlinked */}
-              {!profile.walletAddress && (
-                <span
-                  className="absolute -top-1 -right-1 z-10 w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg ring-2 ring-white"
-                  title="You need to open profile and link it to MetaMask."
-                >
-                  <AlertTriangle className="w-3.5 h-3.5" />
-                </span>
-              )}
 
               {/* Bottom camera button badge */}
               <button
@@ -418,16 +414,9 @@ export function ProfileSettingsModal({
             <p className="mt-2 text-xs font-bold text-gray-800">
               {fullName || 'User Profile'}
             </p>
-            {!profile.walletAddress ? (
-              <p className="text-[11px] text-red-600 font-semibold flex items-center gap-1 mt-0.5">
-                <AlertTriangle className="w-3 h-3 text-red-600 flex-shrink-0" />
-                You need to open profile and link it to MetaMask.
-              </p>
-            ) : (
-              <p className="text-[11px] text-gray-500">
-                Click photo to take picture or upload file
-              </p>
-            )}
+            <p className="text-[11px] text-gray-500">
+              Click photo to take picture or upload file
+            </p>
 
             {/* Photo Actions Dropdown / Sheet */}
             {isPhotoMenuOpen && (
@@ -594,64 +583,32 @@ export function ProfileSettingsModal({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-bold text-gray-700">
-                Linked MetaMask Wallet
+                Gasless Smart Account
               </label>
-              {profile.walletAddress ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                  <ShieldCheck size={10} className="text-blue-600" />
-                  Connected Wallet
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                  <AlertTriangle size={10} className="text-amber-600" />
-                  Not Linked
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                <ShieldCheck size={10} className="text-emerald-600" />
+                Paymaster Sponsored
+              </span>
             </div>
             {profile.walletAddress ? (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono text-gray-700 break-all select-all">
                   <span className="flex-1 font-semibold">{profile.walletAddress}</span>
-                  <button
-                    type="button"
-                    onClick={handleLinkWallet}
-                    disabled={isLinkingWallet || activeShipmentsCount > 0}
-                    className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-[#2500ba] text-white text-xs font-semibold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer"
-                  >
-                    {isLinkingWallet ? 'Connecting...' : 'Change Wallet'}
-                  </button>
                 </div>
-                {activeShipmentsCount > 0 ? (
-                  <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10.5px] text-amber-800 flex items-center gap-1.5 font-medium">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                    <span>Wallet updates are locked while carrying {activeShipmentsCount} active package(s).</span>
-                  </div>
-                ) : (
-                  <p className="text-[10.5px] text-gray-500 leading-tight">
-                    You can connect a new MetaMask account if your wallet changed or access was lost.
-                  </p>
-                )}
+                <p className="text-[10.5px] text-gray-500 leading-tight">
+                  ERC-4337 Smart Account provisioned on Sepolia. Dispatches and handover receipts execute with zero gas fees.
+                </p>
               </div>
             ) : (
               <div className="space-y-1.5">
                 <button
                   type="button"
                   onClick={handleLinkWallet}
-                  disabled={isLinkingWallet || activeShipmentsCount > 0}
+                  disabled={isLinkingWallet}
                   className="w-full py-2.5 px-4 rounded-xl border-2 border-dashed border-[#2500ba]/40 text-xs font-bold text-[#2500ba] hover:bg-[#2500ba]/5 disabled:opacity-50 transition cursor-pointer"
                 >
-                  {isLinkingWallet ? 'Connecting MetaMask...' : 'Link MetaMask Wallet'}
+                  {isLinkingWallet ? 'Provisioning Smart Account...' : 'Generate Gasless Smart Account'}
                 </button>
-                {activeShipmentsCount > 0 ? (
-                  <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10.5px] text-amber-800 flex items-center gap-1.5 font-medium">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                    <span>Wallet linking is locked while carrying {activeShipmentsCount} active package(s).</span>
-                  </div>
-                ) : (
-                  <p className="text-[10.5px] text-gray-500 leading-tight">
-                    Connect your MetaMask wallet for signing dispatch orders, delivery manifests, and blockchain audits.
-                  </p>
-                )}
               </div>
             )}
           </div>

@@ -242,6 +242,7 @@ export interface OutgoingUpdatePayload {
 export interface TruckLiveLocation {
   truck_id: string;
   current_dr_number?: string | null;
+  shipment_id?: string | null;
   destination_lgu_id?: string | null;
   destination_name?: string | null;
   driver_name?: string | null;
@@ -1604,76 +1605,8 @@ export const backendApi = {
     // 2. Mark truck live location done so it disappears from live map
     await this.markTruckLiveLocationDoneByDr(cleanDr);
 
-    // 3. Record or update inventory for this LGU in lgu_inventory_reports
-    try {
-      let muni = (params.municipality || params.lguName || '').trim();
-      let prov = params.province || 'Iloilo';
-
-      try {
-        const { data: dbLgu } = await supabase
-          .from('lgus')
-          .select('municipality, province')
-          .or(`municipality.ilike.${muni},lgu_name.ilike.%${muni}%`)
-          .limit(1)
-          .maybeSingle();
-
-        if (dbLgu) {
-          muni = dbLgu.municipality;
-          prov = dbLgu.province;
-        } else {
-          muni = muni.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim();
-        }
-      } catch {
-        muni = muni.split('(')[0].replace(/municipal.*|city.*|office.*|government.*|evacuation.*|hall.*|warehouse.*/i, '').trim();
-      }
-      const isFood = params.category.toLowerCase().includes('food');
-      const isHygiene = params.category.toLowerCase().includes('hygiene');
-      const isFamily = params.category.toLowerCase().includes('family');
-
-      // Check existing report for this municipality
-      const { data: existing } = await supabase
-        .from('lgu_inventory_reports')
-        .select('*')
-        .ilike('municipality', muni)
-        .order('reported_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const foodPacks = (existing?.food_packs ?? 0) + (isFood ? params.quantity : 0);
-      const hygieneKits = (existing?.hygiene_kits ?? 0) + (isHygiene ? params.quantity : 0);
-      const familyKits = (existing?.family_kits ?? 0) + (isFamily ? params.quantity : 0);
-
-      await supabase.from('lgu_inventory_reports').insert({
-        municipality: muni,
-        province: prov,
-        lgu_name: muni,
-        food_packs: foodPacks,
-        hygiene_kits: hygieneKits,
-        family_kits: familyKits,
-        affected_families: existing?.affected_families ?? 100,
-        damage_index: existing?.damage_index ?? 10,
-        urgency_score: Math.max(10, (existing?.urgency_score ?? 30) - 15),
-        priority_color: foodPacks > 300 ? 'Green' : foodPacks > 100 ? 'Yellow' : 'Red',
-        recommendation: `Received ${params.quantity} ${params.category} via ${params.drNumber}. Live stock updated.`,
-        reported_at: new Date().toISOString()
-      });
-
-      // Also update public.lgus directly
-      const lguStockUpdate: Record<string, unknown> = {
-        last_reported_at: new Date().toISOString()
-      };
-      if (isFood) lguStockUpdate.food_packs = foodPacks;
-      if (isHygiene) lguStockUpdate.hygiene_kits = hygieneKits;
-      if (isFamily) lguStockUpdate.family_kits = familyKits;
-
-      await supabase
-        .from('lgus')
-        .update(lguStockUpdate)
-        .ilike('municipality', muni);
-    } catch (invErr) {
-      console.warn('Failed to update LGU inventory report and lgus table:', invErr);
-    }
-
+    // Note: Outgoing delivery confirmation strictly confirms receipt and does NOT mutate LGU warehouse inventory.
+    // Stock is stored exclusively via incoming goods intake or explicit physical stock audit reports.
     return { ok: true };
   },
 
@@ -1733,6 +1666,7 @@ export const backendApi = {
       const sanitizedPayload: Record<string, unknown> = {
         truck_id: payload.truck_id,
         current_dr_number: payload.current_dr_number ?? null,
+        shipment_id: payload.shipment_id ?? payload.current_dr_number ?? null,
         destination_lgu_id: payload.destination_lgu_id ?? null,
         destination_name: payload.destination_name ?? null,
         driver_name: payload.driver_name ?? null,

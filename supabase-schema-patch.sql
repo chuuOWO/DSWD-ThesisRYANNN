@@ -848,6 +848,7 @@ create table if not exists public.truck_live_locations (
 );
 
 alter table public.truck_live_locations add column if not exists current_dr_number text;
+alter table public.truck_live_locations add column if not exists shipment_id text;
 alter table public.truck_live_locations add column if not exists destination_lgu_id uuid;
 alter table public.truck_live_locations add column if not exists destination_name text default '';
 alter table public.truck_live_locations add column if not exists driver_name text default '';

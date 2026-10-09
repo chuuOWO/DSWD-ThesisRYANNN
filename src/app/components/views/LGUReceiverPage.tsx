@@ -700,7 +700,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         setIsProcessing(false);
         setToastMessage({
           type: 'success',
-          text: `Shipment ${canonicalDrNumber} accepted! Stored ${quantity.toLocaleString()} ${category} into ${finalMuni} inventory.`
+          text: `Delivery ${canonicalDrNumber} confirmed on blockchain! Handover verified.`
         });
       }, 1600);
     } catch (err) {

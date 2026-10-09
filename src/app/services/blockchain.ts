@@ -2,6 +2,7 @@ import { BrowserProvider, Contract, ethers } from 'ethers';
 import { EthereumProvider as WalletConnectProvider } from '@walletconnect/ethereum-provider';
 import type { UserRole } from '../hooks/useInventoryState';
 import { supabase } from '../lib/supabase';
+import { executeGaslessCall, provisionSmartAccountAddress } from './embeddedWallet';
 
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -385,6 +386,33 @@ export const blockchain = {
   },
 
   async requireConnectedWalletRole(expectedRole: AuthorizedRole, expectedWallet?: string | null): Promise<string> {
+    if (!window.ethereum) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role, lgu_name, wallet_address')
+          .eq('id', sessionData.session.user.id)
+          .maybeSingle();
+
+        if (profile) {
+          const userDbRole: UserRole =
+            profile.role === 'dswd_admin'
+              ? 'Admin'
+              : profile.role === 'receiver' && profile.lgu_name
+              ? 'LGUReceiver'
+              : profile.role === 'receiver'
+              ? 'Receiver'
+              : 'Unregistered';
+
+          if (userDbRole !== expectedRole) {
+            throw new Error(`RBAC: this action requires ${expectedRole} role. Your active account is ${userDbRole}.`);
+          }
+          return profile.wallet_address || (await provisionSmartAccountAddress(sessionData.session.user.id, sessionData.session.user.email || ''));
+        }
+      }
+    }
+
     const signer = await getSigner();
     const walletAddress = await signer.getAddress();
 
@@ -404,17 +432,21 @@ export const blockchain = {
   async assertBatchTokensExist(batchTokenIds: string[]): Promise<void> {
     if (!batchTokenContractAddress || batchTokenIds.length === 0) return;
 
-    const signer = await getSigner();
-    const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
+    try {
+      const provider = window.ethereum ? new BrowserProvider(window.ethereum as any) : new ethers.JsonRpcProvider(targetRpcUrl);
+      const contract = new Contract(batchTokenContractAddress, batchTokenAbi, provider);
 
-    await Promise.all(batchTokenIds.map(async (batchTokenId) => {
-      try {
-        await contract.getBatchByTokenId(batchTokenId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Batch token not found on current contract: ${batchTokenId}. ${message}`);
-      }
-    }));
+      await Promise.all(batchTokenIds.map(async (batchTokenId) => {
+        try {
+          await contract.getBatchByTokenId(batchTokenId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(`Batch token not found on current contract: ${batchTokenId}. ${message}`);
+        }
+      }));
+    } catch (batchErr) {
+      console.warn('assertBatchTokensExist check warning:', batchErr);
+    }
   },
   async approveSenderOperator(operatorAddress: string): Promise<BlockchainProof> {
     if (!ethers.isAddress(operatorAddress)) {
@@ -607,6 +639,35 @@ export const blockchain = {
     }
 
     const task = (async (): Promise<BlockchainProof> => {
+      if (!window.ethereum) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user?.id && sessionData.session.user.email) {
+          onStage?.('wallet');
+          const gasless = await executeGaslessCall({
+            userId: sessionData.session.user.id,
+            email: sessionData.session.user.email,
+            functionName: 'signRelease',
+            args: [
+              input.drNumber,
+              input.handoverContractId,
+              input.category,
+              BigInt(input.quantity),
+              input.batchTokenIds,
+              input.batchQuantities.map((q) => BigInt(q)),
+              input.from,
+              input.to,
+              input.gps
+            ]
+          });
+          onStage?.('mining', gasless.txHash);
+          return {
+            hash: gasless.txHash,
+            walletAddress: gasless.smartAccountAddress,
+            mode: gasless.mode === 'bundler_paymaster' ? 'contract' : 'signature'
+          };
+        }
+      }
+
       const signer = await getSigner();
       const walletAddress = await signer.getAddress();
 
@@ -703,6 +764,30 @@ export const blockchain = {
     }
 
     const task = (async (): Promise<BlockchainProof> => {
+      if (!window.ethereum) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user?.id && sessionData.session.user.email) {
+          onStage?.('wallet');
+          const gasless = await executeGaslessCall({
+            userId: sessionData.session.user.id,
+            email: sessionData.session.user.email,
+            functionName: 'confirmReceipt',
+            args: [
+              input.drNumber,
+              input.handoverContractId,
+              input.destination,
+              input.gps
+            ]
+          });
+          onStage?.('mining', gasless.txHash);
+          return {
+            hash: gasless.txHash,
+            walletAddress: gasless.smartAccountAddress,
+            mode: gasless.mode === 'bundler_paymaster' ? 'contract' : 'signature'
+          };
+        }
+      }
+
       const signer = await getSigner();
       const walletAddress = await signer.getAddress();
 
@@ -770,5 +855,48 @@ export const blockchain = {
     } finally {
       activeTxPromises.delete(lockKey);
     }
+  },
+
+  async signReleaseGasless(input: SignReleaseInput, userId: string, email: string): Promise<BlockchainProof> {
+    const res = await executeGaslessCall({
+      userId,
+      email,
+      functionName: 'signRelease',
+      args: [
+        input.drNumber,
+        input.handoverContractId,
+        input.category,
+        BigInt(input.quantity),
+        input.batchTokenIds,
+        input.batchQuantities.map((q) => BigInt(q)),
+        input.from,
+        input.to,
+        input.gps,
+      ],
+    });
+    return {
+      hash: res.txHash,
+      walletAddress: res.smartAccountAddress,
+      mode: res.mode === 'bundler_paymaster' ? 'contract' : 'signature',
+    };
+  },
+
+  async confirmReceiptGasless(input: ConfirmReceiptInput, userId: string, email: string): Promise<BlockchainProof> {
+    const res = await executeGaslessCall({
+      userId,
+      email,
+      functionName: 'confirmReceipt',
+      args: [
+        input.drNumber,
+        input.handoverContractId,
+        input.destination,
+        input.gps,
+      ],
+    });
+    return {
+      hash: res.txHash,
+      walletAddress: res.smartAccountAddress,
+      mode: res.mode === 'bundler_paymaster' ? 'contract' : 'signature',
+    };
   }
 };

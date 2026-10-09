@@ -1492,12 +1492,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           auditTrail: [audit('Receiver Accepted', 'LGU signed receipt; GPS coordinates captured and custody transfer completed.', proof.hash), ...item.auditTrail]
         }
       : item));
-    // Credit recipient LGU stock in database and local state upon delivery completion
-    const targetMuni = release.municipality || release.lguName;
-    const targetQty = release.amountApproved || release.amountRequested || 0;
-    if (targetMuni && targetQty > 0 && release.fnfiCategory) {
-      addLguStock(targetMuni, release.fnfiCategory, targetQty, release.province);
-    }
+    // Note: Outgoing delivery confirmation strictly confirms receipt and does NOT store goods into LGU inventory.
+    // LGU warehouse stock is stored strictly via incoming goods intake or explicit physical stock audit reports.
 
     backendApi.updateOutgoing(canonicalDr, {
       deliveryStatus: 'Accepted',

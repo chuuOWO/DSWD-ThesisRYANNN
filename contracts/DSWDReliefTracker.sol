@@ -83,6 +83,15 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
         address indexed receiver
     );
 
+    event TruckLocationRecorded(
+        string indexed shipmentId,
+        string truckId,
+        string latitude,
+        string longitude,
+        uint256 timestamp,
+        address indexed recordedBy
+    );
+
     modifier onlyAdmin() {
         require(
             msg.sender == owner() || isAuthorizedAdmin[msg.sender],
@@ -287,5 +296,26 @@ contract DSWDReliefTracker is ERC1155, Ownable, ReentrancyGuard {
         uint256 batchId = batchIdByTokenId[batchTokenId];
         require(batchId != 0, "Batch not found");
         return batches[batchId];
+    }
+
+    function recordTruckLocation(
+        string memory shipmentId,
+        string memory truckId,
+        string memory latitude,
+        string memory longitude,
+        uint256 timestamp
+    ) external onlyAdmin {
+        require(bytes(shipmentId).length > 0, "Shipment ID required");
+        require(bytes(truckId).length > 0, "Truck ID required");
+        require(timestamp > 0, "Invalid timestamp");
+
+        emit TruckLocationRecorded(
+            shipmentId,
+            truckId,
+            latitude,
+            longitude,
+            timestamp,
+            msg.sender
+        );
     }
 }
