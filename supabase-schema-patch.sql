@@ -1750,9 +1750,9 @@ and (current_dr_number is null or current_dr_number = '');
 create table if not exists public.activity_logs (
   id uuid primary key default gen_random_uuid(),
   actor_id uuid references public.profiles(id) on delete set null,
-  actor_name text not null,
-  actor_email text not null,
-  actor_role text not null,
+  actor_name text not null default 'System User',
+  actor_email text not null default 'system@dswd.gov.ph',
+  actor_role text not null default 'system',
   actor_wallet text,
   action text not null,
   entity_type text not null,
@@ -1763,19 +1763,52 @@ create table if not exists public.activity_logs (
   created_at timestamptz not null default now()
 );
 
+-- Idempotent column upgrades
+alter table public.activity_logs add column if not exists actor_id uuid references public.profiles(id) on delete set null;
+alter table public.activity_logs add column if not exists actor_name text default 'System User';
+alter table public.activity_logs add column if not exists actor_email text default 'system@dswd.gov.ph';
+alter table public.activity_logs add column if not exists actor_role text default 'system';
+alter table public.activity_logs add column if not exists actor_wallet text;
+alter table public.activity_logs add column if not exists action text;
+alter table public.activity_logs add column if not exists entity_type text default 'General';
+alter table public.activity_logs add column if not exists entity_id text;
+alter table public.activity_logs add column if not exists details text default '';
+alter table public.activity_logs add column if not exists metadata jsonb default '{}'::jsonb;
+alter table public.activity_logs add column if not exists tx_hash text;
+alter table public.activity_logs add column if not exists created_at timestamptz default now();
+
+-- Performance and lookup indexes
 create index if not exists idx_activity_logs_created_at on public.activity_logs (created_at desc);
 create index if not exists idx_activity_logs_action on public.activity_logs (action);
+create index if not exists idx_activity_logs_actor_id on public.activity_logs (actor_id);
+create index if not exists idx_activity_logs_actor_email on public.activity_logs (actor_email);
+create index if not exists idx_activity_logs_entity_type on public.activity_logs (entity_type);
 
+-- Realtime replication
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'activity_logs' and schemaname = 'public'
+  ) then
+    alter publication supabase_realtime add table public.activity_logs;
+  end if;
+end $$;
+
+-- Row Level Security
 alter table public.activity_logs enable row level security;
 
+drop policy if exists "Allow all authenticated users to read activity logs" on public.activity_logs;
 create policy "Allow all authenticated users to read activity logs"
   on public.activity_logs for select
   to authenticated
   using (true);
 
-create policy "Allow authenticated users to insert activity logs"
+drop policy if exists "Allow authenticated users to insert activity logs" on public.activity_logs;
+drop policy if exists "Allow all users to insert activity logs" on public.activity_logs;
+create policy "Allow all users to insert activity logs"
   on public.activity_logs for insert
-  to authenticated
+  to anon, authenticated
   with check (true);
 
 -- ==============================================================================
