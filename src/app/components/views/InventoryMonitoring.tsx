@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { LguRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
@@ -35,6 +35,8 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const [selectedWarehouse, setSelectedWarehouse] = useState('All Specific Warehouses');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedWarehouseType, setSelectedWarehouseType] = useState('All');
+  const [isLowStockCollapsed, setIsLowStockCollapsed] = useState(false);
+  const [isExpirationCollapsed, setIsExpirationCollapsed] = useState(false);
 
   // Dynamic categories gathered from inventory, incoming, and outgoing releases without fallbacks
   const dynamicCategories = useMemo(() => {
@@ -324,18 +326,65 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
 
       {/* Alerts */}
       {(lowStockItems.length > 0 || totalExpiring > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Low Stock Alert */}
-          {lowStockItems.length > 0 && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-5">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <h3 className="font-bold text-yellow-900 text-sm">Low Stock Alert</h3>
-                  <p className="text-sm text-yellow-800 mt-1">{lowStockItems.length} categories have low stock (below 500 kits)</p>
-                  <div className="mt-3 space-y-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Critical Inventory Notices</span>
+            <button
+              type="button"
+              onClick={() => {
+                const areAllCollapsed = (lowStockItems.length === 0 || isLowStockCollapsed) && (totalExpiring === 0 || isExpirationCollapsed);
+                const nextState = !areAllCollapsed;
+                setIsLowStockCollapsed(nextState);
+                setIsExpirationCollapsed(nextState);
+              }}
+              className="text-xs font-semibold text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              {(lowStockItems.length === 0 || isLowStockCollapsed) && (totalExpiring === 0 || isExpirationCollapsed)
+                ? 'Expand All Notices'
+                : 'Minimize All Notices'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Low Stock Alert */}
+            {lowStockItems.length > 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 transition-all">
+                <div
+                  className="flex items-center justify-between cursor-pointer select-none"
+                  onClick={() => setIsLowStockCollapsed(prev => !prev)}
+                >
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-yellow-900 text-sm">Low Stock Alert</h3>
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-yellow-200 text-yellow-800">
+                          {lowStockItems.length}
+                        </span>
+                      </div>
+                      <p className="text-xs text-yellow-800 mt-0.5">
+                        {lowStockItems.length} {lowStockItems.length === 1 ? 'category has' : 'categories have'} low stock (below 500 kits)
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsLowStockCollapsed(prev => !prev);
+                    }}
+                    className="p-1 rounded-md text-yellow-800 hover:bg-yellow-200/60 transition-colors"
+                    title={isLowStockCollapsed ? 'Expand Low Stock Alert' : 'Minimize Low Stock Alert'}
+                    aria-label={isLowStockCollapsed ? 'Expand Low Stock Alert' : 'Minimize Low Stock Alert'}
+                  >
+                    {isLowStockCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                  </button>
+                </div>
+
+                {!isLowStockCollapsed && (
+                  <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
                     {lowStockItems.map(item => (
-                      <div key={item.category} className="bg-white rounded p-2 border border-yellow-200">
+                      <div key={item.category} className="bg-white rounded p-2 border border-yellow-200 shadow-sm">
                         <div className="flex justify-between items-center">
                           <span className="font-bold text-sm text-gray-900">{item.category}</span>
                           <span className="text-sm font-bold text-yellow-700">{item.available} available</span>
@@ -343,24 +392,51 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                       </div>
                     ))}
                   </div>
-                </div>
+                )}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Expiration Alert */}
-          {totalExpiring > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-5">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1">
-                  <h3 className="font-bold text-red-900 text-sm">Expiration Warning</h3>
-                  <p className="text-sm text-red-800 mt-1">{totalExpiring} items expiring within 30 days</p>
-                  <div className="mt-3 space-y-2">
+            {/* Expiration Alert */}
+            {totalExpiring > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 transition-all">
+                <div
+                  className="flex items-center justify-between cursor-pointer select-none"
+                  onClick={() => setIsExpirationCollapsed(prev => !prev)}
+                >
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-red-900 text-sm">Expiration Warning</h3>
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-200 text-red-800">
+                          {totalExpiring}
+                        </span>
+                      </div>
+                      <p className="text-xs text-red-800 mt-0.5">
+                        {totalExpiring} items expiring within 30 days
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsExpirationCollapsed(prev => !prev);
+                    }}
+                    className="p-1 rounded-md text-red-800 hover:bg-red-200/60 transition-colors"
+                    title={isExpirationCollapsed ? 'Expand Expiration Warning' : 'Minimize Expiration Warning'}
+                    aria-label={isExpirationCollapsed ? 'Expand Expiration Warning' : 'Minimize Expiration Warning'}
+                  >
+                    {isExpirationCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                  </button>
+                </div>
+
+                {!isExpirationCollapsed && (
+                  <div className="mt-3 space-y-2 max-h-64 overflow-y-auto pr-1">
                     {displayData
                       .filter(item => item.expiringItems > 0)
                       .map(item => (
-                        <div key={item.category} className="bg-white rounded p-2 border border-red-200">
+                        <div key={item.category} className="bg-white rounded p-2 border border-red-200 shadow-sm">
                           <div className="flex justify-between items-center">
                             <span className="font-bold text-sm text-gray-900">{item.category}</span>
                             <span className="text-sm font-bold text-red-700">{item.expiringItems} expiring</span>
@@ -368,10 +444,10 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
                         </div>
                       ))}
                   </div>
-                </div>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
