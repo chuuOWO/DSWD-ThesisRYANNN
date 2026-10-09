@@ -96,10 +96,22 @@ export const RECEIPT_TYPE = {
   ],
 };
 
+export const MINT_TYPE = {
+  MintBatchToken: [
+    { name: 'manifestNumber', type: 'string' },
+    { name: 'batchTokenId', type: 'string' },
+    { name: 'manifestHash', type: 'string' },
+    { name: 'category', type: 'string' },
+    { name: 'quantity', type: 'uint256' },
+    { name: 'destination', type: 'string' },
+    { name: 'timestamp', type: 'uint256' },
+  ],
+};
+
 export interface GaslessExecutionParams {
   userId: string;
   email: string;
-  functionName: 'signRelease' | 'confirmReceipt';
+  functionName: 'mintBatchToken' | 'signRelease' | 'confirmReceipt';
   args: any[];
 }
 
@@ -123,7 +135,23 @@ export async function executeGaslessCall(params: GaslessExecutionParams): Promis
   const timestamp = BigInt(Math.floor(Date.now() / 1000));
   let signature: string;
 
-  if (params.functionName === 'signRelease') {
+  if (params.functionName === 'mintBatchToken') {
+    const message = {
+      manifestNumber: String(params.args[0]),
+      batchTokenId: String(params.args[1]),
+      manifestHash: String(params.args[2]),
+      category: String(params.args[3]),
+      quantity: BigInt(params.args[4]),
+      destination: String(params.args[5]),
+      timestamp,
+    };
+    signature = await account.signTypedData({
+      domain: EIP712_DOMAIN,
+      types: MINT_TYPE,
+      primaryType: 'MintBatchToken',
+      message,
+    });
+  } else if (params.functionName === 'signRelease') {
     const message = {
       drNumber: String(params.args[0]),
       handoverContractId: String(params.args[1]),

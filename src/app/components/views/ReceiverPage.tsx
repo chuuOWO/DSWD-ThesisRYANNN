@@ -1041,7 +1041,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         const currentPackages = activePackagesRef.current;
         const isLguReceiver = Boolean(profile?.lguName && profile.lguName.trim());
         if (currentPackages && currentPackages.length > 0 && !isLguReceiver) {
-          const activeDr = currentPackages[0]?.dr_number || null;
+          const activeDr = currentPackages[0]?.drNumber || null;
           void backendApi.upsertTruckLiveLocation({
             truck_id: receiverId,
             current_dr_number: activeDr,

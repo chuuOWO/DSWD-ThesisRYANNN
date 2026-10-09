@@ -944,6 +944,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         urgencyScore: 20,
         priorityColor: 'Green',
         recommendation: 'Stable baseline stock',
+        affectedFamilies: input.affectedFamilies || 0,
+        damageIndex: 0,
         isActive: true
       };
       setLgusList(prev => [...prev, newRecord]);
@@ -1216,7 +1218,6 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       } else if (newRelease.warehouseSource && (newRelease.sourceType === 'LGU' || !isMainWarehouse(newRelease.warehouseSource))) {
         backendApi.deductLguStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty)
           .catch(err => console.warn('Supabase deductLguStock error:', err));
-        deductLguStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty);
       }
     }
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createPublicClient, createWalletClient, http, parseAbi } from 'npm:viem@2.21.0';
 import { privateKeyToAccount } from 'npm:viem@2.21.0/accounts';

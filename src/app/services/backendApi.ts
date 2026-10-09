@@ -165,6 +165,7 @@ export interface LguInput {
   remarks?: string;
   maxStock?: number;
   initialStock?: Record<string, number>;
+  affectedFamilies?: number;
 }
 
 export interface OutgoingPayload {
@@ -767,7 +768,7 @@ export const backendApi = {
     stockUpdates: Record<string, number>,
     reason: string,
     actorName?: string
-  ): Promise<{ ok: boolean }> {
+  ): Promise<{ ok: boolean; message?: string }> {
     const canonicalUpdates: Record<string, number> = {};
     Object.entries(stockUpdates).forEach(([k, v]) => {
       const canonical = normalizeCategoryName(k);
@@ -824,7 +825,7 @@ export const backendApi = {
       console.warn('Could not record emergency discrepancy log:', discErr);
     }
 
-    return { ok: true };
+    return { ok: true, message: 'LGU stock overridden and audit log saved.' };
   },
 
   // --- SUPPLY SOURCES ---

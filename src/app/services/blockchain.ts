@@ -402,6 +402,18 @@ export const blockchain = {
     }, onStage);
   },
 
+  async getHandoverIdByDr(drNumber: string): Promise<bigint> {
+    if (!handoverContractAddress) return 0n;
+    try {
+      const contract = new Contract(handoverContractAddress, handoverAbi, getReadOnlyProvider());
+      const id = await contract.handoverIdByDrNumber(drNumber.trim());
+      return BigInt(id.toString());
+    } catch (e) {
+      console.warn('getHandoverIdByDr error:', e);
+      return 0n;
+    }
+  },
+
   async signRelease(input: SignReleaseInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
     const lockKey = `signRelease:${input.drNumber}`;
     const existing = activeTxPromises.get(lockKey);
