@@ -12,12 +12,15 @@ import {
   Building2,
   Boxes,
   CheckCircle,
-  Clock
+  Clock,
+  FileText
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { LguRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
 import { normalizeCategoryName } from '../../lib/lguSync';
+import type { UserProfile } from '../../services/authApi';
+import { InventoryReportPdfModal } from '../modals/InventoryReportPdfModal';
 
 interface InventoryState {
   inventory: { category: string; warehouseA: number; warehouseB: number }[];
@@ -32,6 +35,7 @@ interface InventoryState {
 
 interface InventoryMonitoringProps {
   inventoryState: InventoryState;
+  adminProfile?: UserProfile | null;
 }
 
 interface InventoryItem {
@@ -44,7 +48,7 @@ interface InventoryItem {
   expiringItems: number;
 }
 
-export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps) {
+export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryMonitoringProps) {
   const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [] } = inventoryState;
 
   // Primary facility scope filter: defaults to Main Warehouses (Oton & Pototan)
@@ -54,10 +58,11 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const [searchQuery, setSearchQuery] = useState('');
   const [stockHealthFilter, setStockHealthFilter] = useState<'all' | 'low' | 'expiring' | 'optimal'>('all');
 
-  // Collapse toggles for notices and comparison chart
-  const [isLowStockCollapsed, setIsLowStockCollapsed] = useState(false);
-  const [isExpirationCollapsed, setIsExpirationCollapsed] = useState(false);
+  // Collapse toggles for notices and comparison chart - notices minimized by default
+  const [isLowStockCollapsed, setIsLowStockCollapsed] = useState(true);
+  const [isExpirationCollapsed, setIsExpirationCollapsed] = useState(true);
   const [isChartCollapsed, setIsChartCollapsed] = useState(false);
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
@@ -339,6 +344,17 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
           <p className="text-sm text-gray-600 mt-1">
             Centrally monitoring Oton and Pototan main hubs, stock balance, and prepositioned relief supplies
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsExportPdfOpen(true)}
+            className="px-4 py-2 bg-[#2500ba] hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-xs cursor-pointer active:scale-95"
+            title="Export selected filter and inventory view as printable PDF report"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Export as PDF</span>
+          </button>
         </div>
       </div>
 
@@ -964,6 +980,27 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
           </div>
         )}
       </div>
+
+      {/* Official Inventory PDF Export Modal */}
+      <InventoryReportPdfModal
+        isOpen={isExportPdfOpen}
+        onClose={() => setIsExportPdfOpen(false)}
+        facilityScope={facilityScope}
+        selectedLguFilter={selectedLguFilter}
+        selectedCategory={selectedCategory}
+        searchQuery={searchQuery}
+        stockHealthFilter={stockHealthFilter}
+        filteredData={filteredData}
+        allData={combinedData}
+        lowStockItems={lowStockItems}
+        totalExpiring={totalExpiring}
+        warehouseATotal={warehouseATotal}
+        warehouseBTotal={warehouseBTotal}
+        totalMainWarehouse={totalMainWarehouse}
+        totalLGUWarehouse={totalLGUWarehouse}
+        totalReleased={totalReleased}
+        adminProfile={adminProfile}
+      />
     </div>
   );
 }

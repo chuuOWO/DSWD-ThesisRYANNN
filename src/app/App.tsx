@@ -147,7 +147,7 @@ export default function App() {
         return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
       case 'inventory':
       case 'inventory-monitoring':
-        return <InventoryMonitoring inventoryState={inventoryState} />;
+        return <InventoryMonitoring inventoryState={inventoryState} adminProfile={activeProfile} />;
       case 'lgu-monitoring':
         return <LGUMonitoring inventoryState={inventoryState} currentRole={currentRole} />;
       case 'truck-tracking':
