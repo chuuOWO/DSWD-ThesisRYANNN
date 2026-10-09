@@ -34,7 +34,7 @@ export function FiveDotsLoadingModal({
       setFilledCount((prev) => {
         if (prev >= 5) {
           if (onComplete) onComplete();
-          return 1; // loop back so it keeps pulsing while waiting for MetaMask
+          return 1; // loop back so it keeps pulsing while waiting for transaction confirmation
         }
         return prev + 1;
       });
@@ -94,7 +94,7 @@ export function FiveDotsLoadingModal({
             >
               Click to try again
             </button>
-            <p className="text-[10px] text-slate-400">If MetaMask is still not showing up</p>
+            <p className="text-[10px] text-slate-400">If the transaction is taking longer than expected</p>
           </div>
         )}
       </div>

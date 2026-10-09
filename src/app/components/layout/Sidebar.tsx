@@ -94,7 +94,7 @@ export function Sidebar({ currentView, onNavigate, onSignOut, onOpenSettings }: 
                 )}
               </div>
               <p className={`text-[10px] truncate ${!profile.walletAddress ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
-                {!profile.walletAddress ? 'MetaMask Unlinked' : (profile.role === 'dswd_admin' ? 'DSWD Admin' : 'Officer')}
+                {!profile.walletAddress ? 'Smart Account Unprovisioned' : (profile.role === 'dswd_admin' ? 'DSWD Admin' : 'Officer')}
               </p>
             </div>
           </div>

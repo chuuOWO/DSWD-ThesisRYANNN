@@ -1300,12 +1300,12 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
               </div>
             </div>
 
-            {/* MetaMask Wallet Address with Closed/Open Eye Toggle */}
+            {/* Smart Account Address with Closed/Open Eye Toggle */}
             <div className="p-4 rounded-2xl border border-gray-200 bg-slate-50/70 space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
                   <Key className="w-3.5 h-3.5 text-blue-700" />
-                  Linked MetaMask Wallet ID
+                  Gasless Smart Account Address
                 </label>
                 {selectedProfile.walletAddress && (
                   <button
@@ -1364,7 +1364,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
               ) : (
                 <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                  <span>No MetaMask wallet has been linked to this account yet. The user can link one in Profile Settings.</span>
+                  <span>No smart account has been provisioned for this account yet. The user can generate one in Profile Settings.</span>
                 </div>
               )}
             </div>

@@ -32,10 +32,14 @@ declare global {
     readonly VITE_BLOCKCHAIN_CHAIN_ID: string;
     readonly VITE_BLOCKCHAIN_CHAIN_NAME: string;
     readonly VITE_BLOCKCHAIN_RPC_URL: string;
-    readonly VITE_WALLETCONNECT_PROJECT_ID: string;
-    readonly VITE_ADMIN_WALLET_ADDRESS: string;
-    readonly VITE_TRUCKER_WALLET_ADDRESS: string;
-    readonly VITE_LGU_WALLET_ADDRESS: string;
+    readonly VITE_BUNDLER_RPC_URL?: string;
+    readonly VITE_PAYMASTER_RPC_URL?: string;
+    readonly VITE_PAYMASTER_POLICY_ID?: string;
+    readonly VITE_ENTRYPOINT_ADDRESS?: string;
+    readonly VITE_BACKEND_WORKER_ADDRESS?: string;
+    readonly VITE_ADMIN_WALLET_ADDRESS?: string;
+    readonly VITE_TRUCKER_WALLET_ADDRESS?: string;
+    readonly VITE_LGU_WALLET_ADDRESS?: string;
   }
 
   interface ImportMeta {

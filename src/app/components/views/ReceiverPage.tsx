@@ -180,8 +180,8 @@ const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPa
   const trimmed = value.trim();
   if (!trimmed) throw new Error('QR code is empty.');
 
-  // 1. Check if the value is a URL (MetaMask Universal Link or HTTP/HTTPS)
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('metamask://')) {
+  // 1. Check if the value is a URL (HTTP/HTTPS)
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
       const urlQueryIndex = trimmed.indexOf('?');
       if (urlQueryIndex !== -1) {
@@ -821,10 +821,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     location: PhoneLocation;
     matchingRelease?: ReceiverReleaseRecord;
   } | null>(null);
-  const [isMetaMaskSigning, setIsMetaMaskSigning] = useState(false);
-  const [metaMaskStage, setMetaMaskStage] = useState<'idle' | 'wallet' | 'mining'>('idle');
+  const [isSubmittingProof, setIsSubmittingProof] = useState(false);
+  const [signStage, setSignStage] = useState<'idle' | 'wallet' | 'mining'>('idle');
   const isExecutingCustodyRef = useRef(false);
-  const [metaMaskSignError, setMetaMaskSignError] = useState<string | null>(null);
+  const [signError, setSignError] = useState<string | null>(null);
   const [verifiedQuantity, setVerifiedQuantity] = useState<number>(1);
   const [pendingVerifyPayload, setPendingVerifyPayload] = useState<QrPayload | null>(null);
   const [confirmedTxHash, setConfirmedTxHash] = useState<string | null>(null);
@@ -1179,7 +1179,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
   const handleInitiateCustody = async (payload: QrPayload) => {
     stopCamera();
-    setMetaMaskSignError(null);
+    setSignError(null);
     setIsSigning(true);
 
     try {
@@ -1248,10 +1248,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setVerifiedQuantity(payload.quantity);
       setPendingVerifyPayload(payload);
 
-      // Navigate to the explicit MetaMask confirmation screen
+      // Navigate to the explicit confirmation screen
       nav('sign_custody');
 
-      // Trigger MetaMask signature immediately
+      // Trigger gasless custody signature immediately
       void handleExecuteCustodySign(custodyData);
     } catch (error) {
       console.error('Scan custody initiate error:', error);
@@ -1275,9 +1275,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     }
     isExecutingCustodyRef.current = true;
     const { payload, location: nextLocation } = custody;
-    setIsMetaMaskSigning(true);
-    setMetaMaskStage('wallet');
-    setMetaMaskSignError(null);
+    setIsSubmittingProof(true);
+    setSignStage('wallet');
+    setSignError(null);
 
     let activeProofHash: string | undefined = undefined;
     let activeWalletAddr = profile?.walletAddress || '0xReceiverWallet';
@@ -1295,7 +1295,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
         signerWallet: profile?.walletAddress || undefined
       }, (stage, txHash) => {
-        setMetaMaskStage(stage);
+        setSignStage(stage);
         if (txHash) {
           setConfirmedTxHash(txHash);
         }
@@ -1406,12 +1406,12 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         console.warn('Handover check failed:', checkErr);
       }
 
-      const msg = formatUserErrorMessage(err, 'MetaMask transaction was cancelled or reverted on Sepolia.');
-      setMetaMaskSignError(msg);
+      const msg = formatUserErrorMessage(err, 'Blockchain transaction failed or reverted on Sepolia.');
+      setSignError(msg);
     } finally {
       isExecutingCustodyRef.current = false;
-      setIsMetaMaskSigning(false);
-      setMetaMaskStage('idle');
+      setIsSubmittingProof(false);
+      setSignStage('idle');
     }
   };
 
@@ -1424,7 +1424,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     }
   };
 
-  // Auto-detect package when opened via MetaMask Universal Link (?dr=... or ?data=...)
+  // Auto-detect package when opened via Universal Link (?dr=... or ?data=...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlParams = new URLSearchParams(window.location.search);
@@ -1503,7 +1503,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     ? 'border-2 border-red-500 ring-2 ring-red-400/60 bg-red-950/30'
                     : 'border border-white/70 bg-white/10'
                 }`}
-                title={!profile?.walletAddress ? "You need to open profile settings and link MetaMask." : profile?.fullName || 'Receiver Profile'}
+                title={!profile?.walletAddress ? "Open profile settings to provision your Smart Account." : profile?.fullName || 'Receiver Profile'}
               >
                 {profile?.avatarUrl ? (
                   <img
@@ -1524,7 +1524,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               </div>
               {!profile?.walletAddress && (
                 <div className="absolute top-full mt-2 left-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                  You need to open profile settings and link MetaMask.
+                  Open profile settings to provision your Smart Account.
                   <div className="absolute -top-1 left-3 border-4 border-transparent border-b-red-900" />
                 </div>
               )}
@@ -1880,23 +1880,23 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             <FiveDotsLoadingModal
               isOpen={step === 'sign_custody'}
               title={
-                metaMaskStage === 'mining'
+                signStage === 'mining'
                   ? 'Confirming on Blockchain...'
-                  : 'Opening MetaMask...'
+                  : 'Signing Proof of Custody (Gasless)...'
               }
               subtitle={
-                metaMaskStage === 'mining'
+                signStage === 'mining'
                   ? 'Transaction broadcast! Waiting for Sepolia block confirmation...'
-                  : metaMaskSignError
-                  ? metaMaskSignError
-                  : 'Please approve the proof of custody in your MetaMask wallet...'
+                  : signError
+                  ? signError
+                  : 'Submitting sponsored transaction to Alchemy Paymaster...'
               }
-              onRetry={isMetaMaskSigning ? undefined : () => void handleExecuteCustodySign()}
+              onRetry={isSubmittingProof ? undefined : () => void handleExecuteCustodySign()}
               onClose={() => {
-                if (isMetaMaskSigning && metaMaskStage === 'mining') {
+                if (isSubmittingProof && signStage === 'mining') {
                   return;
                 }
-                setIsMetaMaskSigning(false);
+                setIsSubmittingProof(false);
                 setPendingCustody(null);
                 nav('pickup');
               }}

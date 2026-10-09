@@ -1006,7 +1006,6 @@ export function AuthPage() {
                   )}
                 </div>
 
-                {/* Optional MetaMask Link */}
                 {/* Invisible Gasless Smart Account */}
                 <div className="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/60 text-xs text-indigo-900 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">

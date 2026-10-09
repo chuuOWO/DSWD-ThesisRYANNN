@@ -17,7 +17,7 @@ const roleDescriptions: Record<UserRole, string> = {
   Admin: 'Can verify/post batch tokens and approve allocations',
   Receiver: 'Can sign release and move shipment in transit',
   LGUReceiver: 'Can submit LGU stock reports and confirm receipt',
-  Unregistered: 'Connect an assigned MetaMask wallet'
+  Unregistered: 'Provision a gasless Smart Account'
 };
 
 const shortenWallet = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;

@@ -475,7 +475,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                         <button
                           onClick={() => openReleaseAction('receiverAccept', release)}
                           disabled={currentRole !== 'LGUReceiver'}
-                          title={currentRole !== 'LGUReceiver' ? 'RBAC: connect the LGUReceiver MetaMask wallet to confirm receipt.' : 'Confirm receipt with the LGUReceiver MetaMask wallet.'}
+                          title={currentRole !== 'LGUReceiver' ? 'RBAC: LGUReceiver privileges required to confirm receipt.' : 'Confirm receipt with LGUReceiver account.'}
                           className={`inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold rounded-lg ${currentRole === 'LGUReceiver' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
                         >
                           <MapPin className="w-3 h-3" /> Confirm Receipt
@@ -677,7 +677,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   placeholder="0"
                   className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-lg"
                 />
-                <p className="text-xs text-gray-600 mt-1">Approval mints the on-chain batch token and records the Admin MetaMask signature.</p>
+                <p className="text-xs text-gray-600 mt-1">Approval mints the on-chain batch token and records the Admin cryptographic signature.</p>
               </div>
             </div>
 

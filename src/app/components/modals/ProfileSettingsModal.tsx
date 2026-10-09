@@ -114,18 +114,7 @@ export function ProfileSettingsModal({
         }
       }
 
-      let walletAddress: string | null = null;
-      if (window.ethereum) {
-        try {
-          const res = await blockchain.connectWallet();
-          walletAddress = res.walletAddress;
-        } catch {
-          // Fall through to embedded wallet
-        }
-      }
-      if (!walletAddress) {
-        walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
-      }
+      const walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
       if (!walletAddress) throw new Error('Could not provision smart account address.');
       const isLinked = await authApi.isWalletLinked(walletAddress, profile.id);
       if (isLinked) {

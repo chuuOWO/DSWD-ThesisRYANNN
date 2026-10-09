@@ -262,7 +262,7 @@ export const authApi = {
       throw new Error('An account with this email address already exists. Please sign in or use a different email.');
     }
 
-    // 2. Prevent linking the same MetaMask wallet to multiple accounts
+    // 2. Prevent linking the same Smart Account address to multiple accounts
     if (payload.walletAddress && payload.walletAddress.trim()) {
       const normalizedWallet = payload.walletAddress.trim().toLowerCase();
       const { data: existing } = await supabase
@@ -272,7 +272,7 @@ export const authApi = {
         .maybeSingle();
 
       if (existing) {
-        throw new Error('This MetaMask account has already been linked to another user.');
+        throw new Error('This Smart Account address has already been bound to another user.');
       }
     }
 
@@ -515,7 +515,7 @@ export const authApi = {
       }
 
       if (existing) {
-        throw new Error('This MetaMask account has already been linked to another user.');
+        throw new Error('This Smart Account address has already been bound to another user.');
       }
     }
 

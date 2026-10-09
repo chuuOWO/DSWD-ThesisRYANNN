@@ -28,6 +28,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { blockchain } from '../../services/blockchain';
+import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { EmergencyStockCorrectionModal } from './EmergencyStockCorrectionModal';
 import {
   backendApi,
@@ -42,14 +43,14 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: UserProfile;
-  initialTab?: 'profile' | 'metamask' | 'data' | 'admin';
+  initialTab?: 'profile' | 'wallet' | 'data' | 'admin';
   onSignOut?: () => void;
   adminActionsEnabled?: boolean;
   onToggleAdminActions?: (enabled: boolean) => void;
   onMasterDataChanged?: () => void;
 }
 
-type SettingsTab = 'profile' | 'metamask' | 'data' | 'admin';
+type SettingsTab = 'profile' | 'wallet' | 'data' | 'admin';
 type MasterDataSubTab = 'kits' | 'sources' | 'warehouses' | 'provinces' | 'lgus';
 
 export function SettingsModal({
@@ -105,7 +106,7 @@ export function SettingsModal({
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Tab 2: MetaMask States
+  // Tab 2: Smart Account States
   const [activeWallet, setActiveWallet] = useState<string | null>(profile.walletAddress || null);
   const [isLinkingWallet, setIsLinkingWallet] = useState(false);
   const [walletFeedback, setWalletFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -234,9 +235,9 @@ export function SettingsModal({
     }
   }, [isOpen, activeTab]);
 
-  // Sync active MetaMask wallet on mount or tab change
+  // Sync active smart account on mount or tab change
   useEffect(() => {
-    if (isOpen && activeTab === 'metamask') {
+    if (isOpen && activeTab === 'wallet') {
       blockchain.getConnectedWalletAddress().then(addr => {
         if (addr) setActiveWallet(addr);
       });
@@ -359,50 +360,19 @@ export function SettingsModal({
     }
   };
 
-  // MetaMask Handlers
-  const handleLinkMetaMask = async () => {
+  // Smart Account Handler
+  const handleProvisionSmartAccount = async () => {
     setIsLinkingWallet(true);
     setWalletFeedback(null);
     try {
-      const { walletAddress } = await blockchain.connectWallet();
-      if (!walletAddress) throw new Error('No account returned from MetaMask.');
-      const isLinked = await authApi.isWalletLinked(walletAddress, profile.id);
-      if (isLinked) {
-        setWalletFeedback({ type: 'error', text: 'This MetaMask wallet is already linked to another account.' });
-        return;
-      }
+      const walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
+      if (!walletAddress) throw new Error('Could not provision smart account address.');
       await authApi.updateWalletAddress(profile.id, walletAddress);
       await refreshProfile();
       setActiveWallet(walletAddress);
-      setWalletFeedback({ type: 'success', text: `MetaMask wallet successfully linked: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
+      setWalletFeedback({ type: 'success', text: `Gasless smart account active: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
     } catch (err) {
-      setWalletFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to connect MetaMask.' });
-    } finally {
-      setIsLinkingWallet(false);
-    }
-  };
-
-  const handleSwitchMetaMask = async () => {
-    setIsLinkingWallet(true);
-    setWalletFeedback(null);
-    try {
-      const eth = (window as any).ethereum;
-      if (!eth) throw new Error('MetaMask not detected.');
-      await eth.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-      const accounts = await eth.request({ method: 'eth_accounts' }) as string[];
-      const newAddress = accounts?.[0];
-      if (!newAddress) return;
-      const isLinked = await authApi.isWalletLinked(newAddress, profile.id);
-      if (isLinked) {
-        setWalletFeedback({ type: 'error', text: 'This MetaMask wallet is already linked to another account.' });
-        return;
-      }
-      await authApi.updateWalletAddress(profile.id, newAddress);
-      await refreshProfile();
-      setActiveWallet(newAddress);
-      setWalletFeedback({ type: 'success', text: `Switched to active wallet: ${newAddress.slice(0, 6)}...${newAddress.slice(-4)}` });
-    } catch (err) {
-      setWalletFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to switch MetaMask account.' });
+      setWalletFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to provision smart account.' });
     } finally {
       setIsLinkingWallet(false);
     }
@@ -869,26 +839,26 @@ export function SettingsModal({
                 </div>
               </button>
 
-              {/* MetaMask Tab */}
+              {/* Smart Account Tab */}
               <button
                 type="button"
-                onClick={() => setActiveTab('metamask')}
+                onClick={() => setActiveTab('wallet')}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
-                  activeTab === 'metamask'
+                  activeTab === 'wallet'
                     ? 'bg-[#2500ba] text-white shadow-sm'
                     : 'text-gray-700 hover:bg-gray-200/70 hover:text-gray-900'
                 }`}
               >
-                <Wallet className={`w-4 h-4 flex-shrink-0 ${activeTab === 'metamask' ? 'text-white' : 'text-gray-500'}`} />
+                <Wallet className={`w-4 h-4 flex-shrink-0 ${activeTab === 'wallet' ? 'text-white' : 'text-gray-500'}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
-                    <span className="leading-tight">MetaMask</span>
+                    <span className="leading-tight">Smart Account</span>
                     {!profile.walletAddress && (
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="Wallet unlinked" />
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="Smart account not provisioned" />
                     )}
                   </div>
-                  <div className={`text-[10px] font-normal truncate ${activeTab === 'metamask' ? 'text-blue-100' : 'text-gray-400'}`}>
-                    Web3 wallet & signing
+                  <div className={`text-[10px] font-normal truncate ${activeTab === 'wallet' ? 'text-blue-100' : 'text-gray-400'}`}>
+                    Gasless ERC-4337 Web3
                   </div>
                 </div>
               </button>
@@ -967,13 +937,13 @@ export function SettingsModal({
             <div>
               <h3 className="text-base font-bold text-gray-900 leading-tight">
                 {activeTab === 'profile' && 'Profile Settings'}
-                {activeTab === 'metamask' && 'MetaMask Wallet Connection'}
+                {activeTab === 'wallet' && 'Gasless Smart Account (ERC-4337)'}
                 {activeTab === 'data' && 'Master Data Configuration'}
                 {activeTab === 'admin' && 'Administrative Actions'}
               </h3>
               <p className="text-[11px] text-gray-500">
                 {activeTab === 'profile' && 'Manage your officer credentials, avatar photo, and contact information.'}
-                {activeTab === 'metamask' && 'Link your MetaMask Ethereum address to sign relief operations on blockchain.'}
+                {activeTab === 'wallet' && 'View or provision your gasless smart account sponsored by Alchemy Paymaster.'}
                 {activeTab === 'data' && 'View and configure relief items, distribution supply sources, and warehouses.'}
                 {activeTab === 'admin' && 'Configure emergency stock recounts, inventory overrides, and LGU audit controls.'}
               </p>
@@ -1182,9 +1152,9 @@ export function SettingsModal({
           )}
 
           {/* =================================================================
-              TAB 2: METAMASK
+              TAB 2: GASLESS SMART ACCOUNT (ERC-4337)
               ================================================================= */}
-          {activeTab === 'metamask' && (
+          {activeTab === 'wallet' && (
             <div className="space-y-4">
               {walletFeedback && (
                 <div className={`p-3 rounded-xl border text-xs font-semibold ${
@@ -1202,18 +1172,18 @@ export function SettingsModal({
                   <div className="flex items-center gap-2">
                     <Wallet className="w-5 h-5 text-blue-400" />
                     <span className="text-xs font-bold text-blue-200 uppercase tracking-wider">
-                      MetaMask Web3 Wallet
+                      Gasless Smart Account (ERC-4337)
                     </span>
                   </div>
                   <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                     activeWallet ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-red-500/20 text-red-300 border border-red-500/40'
                   }`}>
-                    {activeWallet ? 'Wallet Connected' : 'Unlinked'}
+                    {activeWallet ? 'Gasless Account Active' : 'Unprovisioned'}
                   </span>
                 </div>
 
                 <div>
-                  <p className="text-[11px] text-slate-300">Registered Blockchain Address:</p>
+                  <p className="text-[11px] text-slate-300">Registered Smart Account Address:</p>
                   {activeWallet ? (
                     <div className="mt-1 flex items-center justify-between p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 font-mono text-xs text-blue-100 break-all">
                       <span>{activeWallet}</span>
@@ -1228,45 +1198,33 @@ export function SettingsModal({
                     </div>
                   ) : (
                     <p className="mt-1 text-xs text-amber-200 font-semibold">
-                      No MetaMask account linked yet. Link a wallet to sign relief manifests on blockchain.
+                      No smart account provisioned yet. Generate an account to enable gasless signing on blockchain.
                     </p>
                   )}
                 </div>
 
                 <div className="pt-2 flex items-center justify-between text-[11px] text-slate-300 border-t border-slate-800">
                   <span>RBAC Role: <strong className="text-white">DSWD Administrator</strong></span>
-                  <span>Network: <strong className="text-blue-300">Sepolia / Local Testnet</strong></span>
+                  <span>Network: <strong className="text-blue-300">Sepolia / ERC-4337 Gasless</strong></span>
                 </div>
               </div>
 
-              {/* Wallet Actions */}
+              {/* Account Provisioning Actions */}
               <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
-                <p className="text-xs font-bold text-gray-800">Manage Linked Account</p>
+                <p className="text-xs font-bold text-gray-800">Account Provisioning</p>
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={handleLinkMetaMask}
+                    onClick={handleProvisionSmartAccount}
                     disabled={isLinkingWallet}
                     className="px-4 py-2.5 rounded-xl bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
                   >
                     <Wallet className="w-3.5 h-3.5" />
-                    <span>{activeWallet ? 'Re-link Active Wallet' : 'Connect MetaMask Wallet'}</span>
+                    <span>{activeWallet ? 'Regenerate Smart Account' : 'Provision Smart Account'}</span>
                   </button>
-
-                  {activeWallet && (
-                    <button
-                      type="button"
-                      onClick={handleSwitchMetaMask}
-                      disabled={isLinkingWallet}
-                      className="px-4 py-2.5 rounded-xl bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 text-xs font-bold transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isLinkingWallet ? 'animate-spin' : ''}`} />
-                      <span>Switch MetaMask Account</span>
-                    </button>
-                  )}
                 </div>
                 <p className="text-[11px] text-gray-500">
-                  Only one MetaMask account can be linked per officer. Switching accounts requires confirmation in the MetaMask browser extension.
+                  All transactions are sponsored via Alchemy Paymaster. No browser extensions or gas tokens are required.
                 </p>
               </div>
             </div>

@@ -732,7 +732,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     ? 'border-2 border-red-500 ring-2 ring-red-400/60 bg-red-950/30'
                     : 'border border-white/70 bg-white/10'
                 }`}
-                title={!profile?.walletAddress ? "You need to open profile settings and link MetaMask." : profile?.fullName || 'LGU Officer Profile'}
+                title={!profile?.walletAddress ? "Open profile settings to provision your Smart Account." : profile?.fullName || 'LGU Officer Profile'}
               >
                 {profile?.avatarUrl ? (
                   <img
@@ -753,7 +753,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               </div>
               {!profile?.walletAddress && (
                 <div className="absolute top-full mt-2 left-0 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap bg-red-900 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg shadow-xl border border-red-700/60">
-                  You need to open profile settings and link MetaMask.
+                  Open profile settings to provision your Smart Account.
                   <div className="absolute -top-1 left-3 border-4 border-transparent border-b-red-900" />
                 </div>
               )}

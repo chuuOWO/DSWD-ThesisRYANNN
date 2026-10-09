@@ -1118,7 +1118,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         destination: item.destination
       });
     } catch (error) {
-      logBackendError('Mint batch token with MetaMask')(error);
+      logBackendError('Mint batch token on blockchain')(error);
       const baseMessage = toFriendlyTxError(error, 'Minting failed. Please try again.');
       return { ok: false, message: `${baseMessage} Debug: manifestHash=${item.manifestHash} batchTokenId=${tokenId}` };
     }
@@ -1148,7 +1148,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       setIntegrationMode('mock');
     });
 
-    return { ok: true, message: `${tokenId} minted and stock posted via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
+    return { ok: true, message: `${tokenId} minted and stock posted via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
   };
 
   const requestIncomingCorrection = (id: string, note: string) => {
@@ -1281,8 +1281,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         lguName: release.lguName
       });
     } catch (error) {
-      logBackendError('Mint and authorize release with MetaMask')(error);
-      return { ok: false, message: toFriendlyTxError(error, 'Authorization and batch minting failed. Please connect Admin MetaMask.') };
+      logBackendError('Mint and authorize release on blockchain')(error);
+      return { ok: false, message: toFriendlyTxError(error, 'Authorization and batch minting failed. Administrator privileges required.') };
     }
 
     const allocations: BatchAllocation[] = [{ batchTokenId, quantity: amountApproved }];
@@ -1382,7 +1382,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         gps: senderGps
       });
     } catch (error) {
-      logBackendError('Sign release with MetaMask')(error);
+      logBackendError('Sign release on blockchain')(error);
       return { ok: false, message: toFriendlyTxError(error, 'Sign release failed. Please try again.') };
     }
 
@@ -1408,7 +1408,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Sign outgoing release')(error);
       setIntegrationMode('mock');
     });
-    return { ok: true, message: `Sender signature recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
+    return { ok: true, message: `Sender signature recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
   };
 
   const markInTransit = (drNumber: string) => {
@@ -1477,7 +1477,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       });
     } catch (confErr: any) {
       console.warn('LGU confirmReceipt error:', confErr);
-      const msg = confErr?.message || 'MetaMask confirmation failed or was cancelled.';
+      const msg = confErr?.message || 'Blockchain confirmation failed or was cancelled.';
       return { ok: false, message: msg };
     }
 
@@ -1508,7 +1508,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Accept outgoing handover')(error);
     });
 
-    return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'MetaMask signature proof'}.` };
+    return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
   };
 
   const emergencyCorrectLguStock = async (
@@ -1602,7 +1602,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     try {
       await blockchain.requireConnectedWalletRole('LGUReceiver');
     } catch (error) {
-      return { ok: false, message: toFriendlyTxError(error, 'Connect the LGUReceiver MetaMask wallet to submit this report.') };
+      return { ok: false, message: toFriendlyTxError(error, 'LGUReceiver privileges required to submit this report.') };
     }
 
     const computed = computePriority(input);

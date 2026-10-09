@@ -35,52 +35,21 @@ function ViewLoading() {
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
-  const [currentRole, setCurrentRole] = useState<UserRole>('Unregistered');
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [walletMessage, setWalletMessage] = useState<string | null>(null);
-  const [walletMismatch, setWalletMismatch] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const { session, profile, isLoading, signOut } = useAuth();
   const inventoryState = useInventoryState(Boolean(session), profile);
 
+  const walletAddress = profile?.walletAddress || null;
+  const currentRole: UserRole = profile?.role === 'dswd_admin'
+    ? 'Admin'
+    : profile?.role === 'receiver' && profile?.lguName
+    ? 'LGUReceiver'
+    : profile?.role === 'receiver'
+    ? 'Receiver'
+    : 'Unregistered';
+
   const requestSignOut = () => setIsLogoutConfirmOpen(true);
-
-  const refreshWalletRole = async () => {
-    const address = await blockchain.getConnectedWalletAddress();
-    setWalletAddress(address);
-    if (address) {
-      const role = await blockchain.getWalletRoleFromDb(address);
-      setCurrentRole(role);
-      if (profile?.walletAddress && address.toLowerCase() !== profile.walletAddress.toLowerCase()) {
-        setWalletMismatch(true);
-      } else {
-        setWalletMismatch(false);
-      }
-    } else {
-      setCurrentRole('Unregistered');
-      setWalletMismatch(false);
-      setWalletMessage(null);
-    }
-  };
-
-  useEffect(() => {
-    refreshWalletRole().catch(() => {
-      setWalletAddress(null);
-      setCurrentRole('Unregistered');
-      setWalletMismatch(false);
-      setWalletMessage(null);
-    });
-
-    return blockchain.onAccountsChanged(() => {
-      refreshWalletRole().catch(() => {
-        setWalletAddress(null);
-        setCurrentRole('Unregistered');
-        setWalletMismatch(false);
-        setWalletMessage(null);
-      });
-    });
-  }, [profile?.walletAddress]);
 
   // Preload primary view modules after authentication
   useEffect(() => {
@@ -98,14 +67,7 @@ export default function App() {
   }, [session, profile]);
 
   const handleConnectWallet = async () => {
-    try {
-      const connected = await blockchain.connectWallet();
-      setWalletAddress(connected.walletAddress);
-      setCurrentRole(connected.role);
-      setWalletMessage(connected.role === 'Unregistered' ? 'Connected wallet is not assigned to an RBAC role.' : null);
-    } catch (error) {
-      setWalletMessage(error instanceof Error ? error.message : 'Unable to connect MetaMask.');
-    }
+    // Pure gasless embedded wallet: no extension connection needed
   };
 
   if (isLoading) {
@@ -204,28 +166,6 @@ export default function App() {
 
   return (
     <div className="size-full flex flex-col bg-gray-50">
-      {walletMismatch && profile?.walletAddress && walletAddress && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-4 text-xs">
-          <div className="flex items-center gap-2 text-amber-800">
-            <span className="font-bold">MetaMask Account Mismatch</span>
-            <span className="text-amber-700">
-              Registered: <span className="font-mono">{profile.walletAddress.slice(0, 6)}...{profile.walletAddress.slice(-4)}</span>
-              {' '}&mdash; Active: <span className="font-mono">{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
-            </span>
-          </div>
-          <button
-            onClick={async () => {
-              try {
-                const eth = (window as any).ethereum;
-                await eth?.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
-              } catch { /* user cancelled */ }
-            }}
-            className="flex-shrink-0 px-3 py-1 rounded bg-amber-600 text-white font-bold hover:bg-amber-700 transition"
-          >
-            Switch Account
-          </button>
-        </div>
-      )}
       <Header
         profile={activeProfile}
         email={activeProfile.email}
@@ -233,7 +173,7 @@ export default function App() {
         onSignOut={requestSignOut}
         currentRole={currentRole}
         walletAddress={walletAddress}
-        walletMessage={walletMessage}
+        walletMessage={null}
         onConnectWallet={handleConnectWallet}
       />
 

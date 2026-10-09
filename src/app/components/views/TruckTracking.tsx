@@ -371,7 +371,7 @@ const toTruckRoute = (
       },
       {
         label: releaseLabel,
-        time: latestTx ? 'MetaMask proof recorded' : (activeDrs.length > 0 ? 'Assigned and in transit' : 'Standby'),
+        time: latestTx ? 'On-chain proof recorded' : (activeDrs.length > 0 ? 'Assigned and in transit' : 'Standby'),
         note: latestTx ? `TX ${latestTx.slice(0, 10)}...` : (activeDrs.length > 0 ? `${activeDrs.length} package(s) loaded` : 'Awaiting assignment'),
         completed: Boolean(latestTx || activeDrs.length > 0)
       },

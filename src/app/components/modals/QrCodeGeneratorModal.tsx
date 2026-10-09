@@ -268,7 +268,7 @@ export function QrCodeGeneratorModal({
               </span>
             </div>
             <p className="text-[11px] text-indigo-800 leading-relaxed">
-              This QR code contains the full manifest payload ready for <strong>Receiver View scan</strong> and MetaMask cryptographic signing on Sepolia:
+              This QR code contains the full manifest payload ready for <strong>Receiver View scan</strong> and gasless cryptographic signing on Sepolia:
             </p>
             <div className="grid grid-cols-2 gap-2 text-[10px] bg-white/80 rounded-lg p-2.5 border border-indigo-100 font-mono text-gray-700">
               <div>
@@ -345,7 +345,7 @@ export function QrCodeGeneratorModal({
             </span>
           ) : (
             <>
-              Scan with the <strong>Receiver View Scanner</strong> to accept custody and sign on MetaMask.
+              Scan with the <strong>Receiver View Scanner</strong> to accept custody and record cryptographic proof on-chain.
             </>
           )}
         </p>
