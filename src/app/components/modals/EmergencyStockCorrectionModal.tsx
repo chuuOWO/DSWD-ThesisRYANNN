@@ -3,6 +3,7 @@ import { X, ShieldAlert, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-rea
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { LguRecord, KitTypeRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
+import { normalizeCategoryName, getLguStockForCategory } from '../../lib/lguSync';
 
 interface EmergencyStockCorrectionModalProps {
   isOpen: boolean;
@@ -43,37 +44,33 @@ export function EmergencyStockCorrectionModal({
   }, [lgusList, selectedLguId]);
 
   const categories = useMemo(() => {
-    const set = new Set<string>();
+    const canonicalSet = new Set<string>();
+    const standardCategories = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    standardCategories.forEach(cat => canonicalSet.add(cat));
+
     if (kitTypesList && kitTypesList.length > 0) {
-      kitTypesList.filter(k => k.isActive !== false).forEach(k => set.add(k.name));
-    } else {
-      DEFAULT_KIT_NAMES.forEach(c => set.add(c));
+      kitTypesList.filter(k => k.isActive !== false).forEach(k => {
+        const canonical = normalizeCategoryName(k.name);
+        canonicalSet.add(canonical || k.name.trim());
+      });
     }
+
     if (activeLgu?.currentStock) {
-      Object.keys(activeLgu.currentStock).forEach(k => set.add(k));
+      Object.keys(activeLgu.currentStock).forEach(k => {
+        const canonical = normalizeCategoryName(k);
+        canonicalSet.add(canonical || k.trim());
+      });
     }
-    return Array.from(set).sort();
+    return Array.from(canonicalSet).sort();
   }, [kitTypesList, activeLgu]);
 
   // Synchronize stock inputs when active LGU changes
   useEffect(() => {
     if (!activeLgu) return;
     const initialValues: Record<string, number> = {};
-    const stockMap = activeLgu.currentStock || {};
 
     categories.forEach(cat => {
-      let baseline = stockMap[cat] ?? 0;
-      const catLower = cat.toLowerCase();
-      if (baseline === 0) {
-        if (catLower.includes('food')) baseline = activeLgu.foodPacks || 0;
-        else if (catLower.includes('hygiene')) baseline = activeLgu.hygieneKits || 0;
-        else if (catLower.includes('family')) baseline = activeLgu.familyKits || 0;
-        else if (catLower.includes('sleeping')) baseline = activeLgu.sleepingKits || 0;
-        else if (catLower.includes('kitchen')) baseline = activeLgu.kitchenKits || 0;
-        else if (catLower.includes('sack')) baseline = activeLgu.laminatedSacks || 0;
-        else if (catLower.includes('rtef')) baseline = activeLgu.rtef || 0;
-      }
-      initialValues[cat] = baseline;
+      initialValues[cat] = getLguStockForCategory(activeLgu, cat);
     });
 
     setStockInputs(initialValues);
@@ -94,19 +91,7 @@ export function EmergencyStockCorrectionModal({
 
   const getBaseline = (cat: string): number => {
     if (!activeLgu) return 0;
-    const stockMap = activeLgu.currentStock || {};
-    let baseline = stockMap[cat] ?? 0;
-    const catLower = cat.toLowerCase();
-    if (baseline === 0) {
-      if (catLower.includes('food')) baseline = activeLgu.foodPacks || 0;
-      else if (catLower.includes('hygiene')) baseline = activeLgu.hygieneKits || 0;
-      else if (catLower.includes('family')) baseline = activeLgu.familyKits || 0;
-      else if (catLower.includes('sleeping')) baseline = activeLgu.sleepingKits || 0;
-      else if (catLower.includes('kitchen')) baseline = activeLgu.kitchenKits || 0;
-      else if (catLower.includes('sack')) baseline = activeLgu.laminatedSacks || 0;
-      else if (catLower.includes('rtef')) baseline = activeLgu.rtef || 0;
-    }
-    return baseline;
+    return getLguStockForCategory(activeLgu, cat);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -11,7 +11,9 @@ import {
   X, 
   Check, 
   Trash2,
-  ExternalLink
+  ExternalLink,
+  Pencil,
+  Search
 } from 'lucide-react';
 import {
   backendApi,
@@ -24,7 +26,17 @@ import {
 
 type MasterTab = 'kits' | 'sources' | 'lgus' | 'warehouses';
 
-export function MasterDataView() {
+export interface MasterDataViewProps {
+  inventoryState?: {
+    refreshKitTypes?: () => Promise<any> | void;
+    refreshSupplySources?: () => Promise<any> | void;
+    refreshWarehouses?: () => Promise<any> | void;
+    refreshProvinces?: () => Promise<any> | void;
+    refreshLgus?: () => Promise<any> | void;
+  };
+}
+
+export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [activeTab, setActiveTab] = useState<MasterTab>('kits');
   
   const [kitTypes, setKitTypes] = useState<KitTypeRecord[]>([]);
@@ -35,12 +47,24 @@ export function MasterDataView() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedProvinceFilter, setSelectedProvinceFilter] = useState('All');
 
+  // Search & Filter state
+  const [kitSearch, setKitSearch] = useState('');
+  const [kitCategoryFilter, setKitCategoryFilter] = useState<'All' | 'Food Item' | 'Non-Food Item'>('All');
+  const [sourceSearch, setSourceSearch] = useState('');
+
   // Modals state
   const [isAddKitOpen, setIsAddKitOpen] = useState(false);
   const [isAddSourceOpen, setIsAddSourceOpen] = useState(false);
   const [isAddLguOpen, setIsAddLguOpen] = useState(false);
   const [isAddProvinceOpen, setIsAddProvinceOpen] = useState(false);
   const [isAddWarehouseOpen, setIsAddWarehouseOpen] = useState(false);
+
+  // Edit Kit Modal state
+  const [editingKit, setEditingKit] = useState<KitTypeRecord | null>(null);
+  const [editKitName, setEditKitName] = useState('');
+  const [editKitCategory, setEditKitCategory] = useState<'Food Item' | 'Non-Food Item'>('Non-Food Item');
+  const [editKitUnit, setEditKitUnit] = useState('kits');
+  const [editKitDesc, setEditKitDesc] = useState('');
 
   // Form states
   const [newKitName, setNewKitName] = useState('');
@@ -122,9 +146,31 @@ export function MasterDataView() {
       setNewKitName('');
       setNewKitDesc('');
       setIsAddKitOpen(false);
+      await inventoryState?.refreshKitTypes?.();
       showToast(`Added new kit type: ${newKitName.trim()}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to add kit type');
+    }
+  };
+
+  const handleEditKit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingKit || !editKitName.trim()) return;
+
+    try {
+      await backendApi.updateKitType(editingKit.id, {
+        name: editKitName.trim(),
+        category: editKitCategory,
+        unitType: editKitUnit.trim() || 'kits',
+        description: editKitDesc.trim() || 'Custom relief goods package'
+      });
+      const updated = await backendApi.getKitTypes();
+      setKitTypes(updated);
+      setEditingKit(null);
+      await inventoryState?.refreshKitTypes?.();
+      showToast(`Updated kit type: ${editKitName.trim()}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update kit type');
     }
   };
 
@@ -132,6 +178,7 @@ export function MasterDataView() {
     try {
       await backendApi.deleteKitType(id);
       setKitTypes(prev => prev.filter(k => k.id !== id));
+      await inventoryState?.refreshKitTypes?.();
       showToast('Kit type removed');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete kit type');
@@ -155,6 +202,7 @@ export function MasterDataView() {
       setNewSourceName('');
       setNewSourceLocation('');
       setIsAddSourceOpen(false);
+      await inventoryState?.refreshSupplySources?.();
       showToast(`Added supply source: ${newSourceName.trim()}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to add supply source');
@@ -165,6 +213,7 @@ export function MasterDataView() {
     try {
       await backendApi.deleteSupplySource(id);
       setSources(prev => prev.filter(s => s.id !== id));
+      await inventoryState?.refreshSupplySources?.();
       showToast('Supply source removed');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete supply source');
@@ -182,6 +231,7 @@ export function MasterDataView() {
       setProvinces(updated);
       setNewProvinceName('');
       setIsAddProvinceOpen(false);
+      await inventoryState?.refreshProvinces?.();
       showToast(`Registered new province: ${clean}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to add province');
@@ -212,6 +262,7 @@ export function MasterDataView() {
       setNewLguOfficer('');
       setNewLguPhone('');
       setIsAddLguOpen(false);
+      await inventoryState?.refreshLgus?.();
       showToast(`Registered new LGU municipality: ${newLguName.trim()}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to register LGU');
@@ -236,11 +287,30 @@ export function MasterDataView() {
       setWarehouses(updated);
       setNewWhName('');
       setIsAddWarehouseOpen(false);
+      await inventoryState?.refreshWarehouses?.();
       showToast(`Registered warehouse facility: ${newWhName.trim()}`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to register warehouse');
     }
   };
+
+  const filteredKitTypes = kitTypes.filter(k => {
+    const matchesCategory = kitCategoryFilter === 'All' || k.category === kitCategoryFilter;
+    if (!matchesCategory) return false;
+    if (kitSearch.trim()) {
+      const q = kitSearch.toLowerCase();
+      return k.name.toLowerCase().includes(q) || (k.description || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const filteredSources = sources.filter(s => {
+    if (sourceSearch.trim()) {
+      const q = sourceSearch.toLowerCase();
+      return s.name.toLowerCase().includes(q) || s.region.toLowerCase().includes(q) || (s.location || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
 
   const filteredLgus = selectedProvinceFilter === 'All' 
     ? dbLgus 
@@ -339,38 +409,83 @@ export function MasterDataView() {
             </button>
           </div>
 
-          <div className="max-h-[380px] overflow-y-auto pr-1">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {kitTypes.map((kit) => (
-                <div key={kit.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
-                        kit.category === 'Food Item' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
-                      }`}>
-                        {kit.category}
-                      </span>
-                      <h3 className="text-sm font-bold text-gray-900 mt-1">{kit.name}</h3>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteKit(kit.id)}
-                      className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                      title="Remove kit type"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-600 leading-relaxed">{kit.description}</p>
-                  <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
-                    <span>Unit: <strong className="text-gray-800">{kit.unitType}</strong></span>
-                    <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                      <ShieldCheck size={12} /> Active FNFI
-                    </span>
-                  </div>
-                </div>
-              ))}
+          {/* Search and Category Filter */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search kit types by name or description..."
+                value={kitSearch}
+                onChange={(e) => setKitSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 focus:border-[#2500ba]"
+              />
             </div>
+            <select
+              value={kitCategoryFilter}
+              onChange={(e) => setKitCategoryFilter(e.target.value as any)}
+              className="px-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 font-medium"
+            >
+              <option value="All">All Categories</option>
+              <option value="Food Item">Food Item</option>
+              <option value="Non-Food Item">Non-Food Item</option>
+            </select>
+          </div>
+
+          <div className="max-h-[380px] overflow-y-auto pr-1">
+            {filteredKitTypes.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-xs">
+                No kit types found matching criteria.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredKitTypes.map((kit) => (
+                  <div key={kit.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
+                          kit.category === 'Food Item' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {kit.category}
+                        </span>
+                        <h3 className="text-sm font-bold text-gray-900 mt-1">{kit.name}</h3>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingKit(kit);
+                            setEditKitName(kit.name);
+                            setEditKitCategory(kit.category);
+                            setEditKitUnit(kit.unitType);
+                            setEditKitDesc(kit.description || '');
+                          }}
+                          className="p-1 rounded-lg text-gray-400 hover:text-[#2500ba] hover:bg-blue-50 transition cursor-pointer"
+                          title="Edit kit type"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteKit(kit.id)}
+                          className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                          title="Remove kit type"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-600 leading-relaxed">{kit.description}</p>
+                    <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
+                      <span>Unit: <strong className="text-gray-800">{kit.unitType}</strong></span>
+                      <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                        <ShieldCheck size={12} /> Active FNFI
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -393,33 +508,51 @@ export function MasterDataView() {
             </button>
           </div>
 
+          {/* Search Source */}
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search supply sources by name, region, or location..."
+              value={sourceSearch}
+              onChange={(e) => setSourceSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 focus:border-[#2500ba]"
+            />
+          </div>
+
           <div className="max-h-[380px] overflow-y-auto pr-1">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {sources.map((src) => (
-                <div key={src.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="inline-block px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[10px] font-bold">
-                        {src.facilityType}
-                      </span>
-                      <h3 className="text-sm font-bold text-gray-900 mt-1">{src.name}</h3>
+            {filteredSources.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 text-xs">
+                No supply sources found matching criteria.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredSources.map((src) => (
+                  <div key={src.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="inline-block px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[10px] font-bold">
+                          {src.facilityType}
+                        </span>
+                        <h3 className="text-sm font-bold text-gray-900 mt-1">{src.name}</h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSource(src.id)}
+                        className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                        title="Remove source"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSource(src.id)}
-                      className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                      title="Remove source"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="text-xs text-gray-600 space-y-0.5">
+                      <p>Region: <strong className="text-gray-800">{src.region}</strong></p>
+                      <p>Location: <span className="text-gray-700">{src.location}</span></p>
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-600 space-y-0.5">
-                    <p>Region: <strong className="text-gray-800">{src.region}</strong></p>
-                    <p>Location: <span className="text-gray-700">{src.location}</span></p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -541,6 +674,81 @@ export function MasterDataView() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT KIT TYPE */}
+      {editingKit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="text-sm font-bold text-gray-900">Edit Kit Type</h3>
+              <button type="button" onClick={() => setEditingKit(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleEditKit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Kit Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editKitName}
+                  onChange={(e) => setEditKitName(e.target.value)}
+                  placeholder="e.g. Water Purification Kit"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Category</label>
+                  <select
+                    value={editKitCategory}
+                    onChange={(e) => setEditKitCategory(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium"
+                  >
+                    <option value="Food Item">Food Item</option>
+                    <option value="Non-Food Item">Non-Food Item</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">Unit Type</label>
+                  <input
+                    type="text"
+                    value={editKitUnit}
+                    onChange={(e) => setEditKitUnit(e.target.value)}
+                    placeholder="kits, packs, boxes"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Description</label>
+                <textarea
+                  value={editKitDesc}
+                  onChange={(e) => setEditKitDesc(e.target.value)}
+                  placeholder="Specify standard contents and relief specifications"
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingKit(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-bold text-gray-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

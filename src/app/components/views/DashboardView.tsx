@@ -47,7 +47,7 @@ import type {
 } from '../../hooks/useInventoryState';
 import type { LguRecord, WarehouseRecord, KitTypeRecord } from '../../services/backendApi';
 import type { SynchronizedLgu } from '../../lib/lguSync';
-import { getLguStockForCategory } from '../../lib/lguSync';
+import { getLguStockForCategory, normalizeCategoryName } from '../../lib/lguSync';
 import { parseIncidentInfo, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
 import { DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
 import {
@@ -98,6 +98,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
     lguPriorityReports = [],
     lgusList = [],
     synchronizedLgusList = [],
+    kitTypesList = [],
     discrepancyReports = []
   } = inventoryState;
 
@@ -229,13 +230,26 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
   // Distinct Categories for Filter
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
-    DEFAULT_KIT_NAMES.forEach(c => set.add(c));
-    inventory.forEach(i => set.add(i.category));
-    outgoingReleasesList.forEach(r => {
-      if (r.fnfiCategory) set.add(r.fnfiCategory);
+    DEFAULT_KIT_NAMES.forEach(c => {
+      const canonical = normalizeCategoryName(c);
+      set.add(canonical || c);
     });
-    return Array.from(set).sort();
-  }, [inventory, outgoingReleasesList]);
+    kitTypesList.forEach(k => {
+      const canonical = normalizeCategoryName(k.name);
+      set.add(canonical || k.name);
+    });
+    inventory.forEach(i => {
+      const canonical = normalizeCategoryName(i.category);
+      set.add(canonical || i.category);
+    });
+    outgoingReleasesList.forEach(r => {
+      if (r.fnfiCategory) {
+        const canonical = normalizeCategoryName(r.fnfiCategory);
+        set.add(canonical || r.fnfiCategory);
+      }
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [inventory, outgoingReleasesList, kitTypesList]);
 
   // Filtered Releases based on all selected analytics filters
   const filteredReleases = useMemo(() => {
@@ -276,7 +290,13 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
 
       // 4. Category filter
       if (selectedCategoryFilter !== 'All') {
-        if (!r.fnfiCategory || r.fnfiCategory.toLowerCase() !== selectedCategoryFilter.toLowerCase()) return false;
+        const canonicalFilter = normalizeCategoryName(selectedCategoryFilter);
+        const canonicalRelease = normalizeCategoryName(r.fnfiCategory);
+        if (canonicalFilter && canonicalRelease) {
+          if (canonicalFilter !== canonicalRelease) return false;
+        } else {
+          if (!r.fnfiCategory || r.fnfiCategory.toLowerCase() !== selectedCategoryFilter.toLowerCase()) return false;
+        }
       }
 
       return true;
@@ -398,11 +418,23 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
 
   // CHART 3: Stock vs Demand & Shortage Analysis
   const stockVsDemandData = useMemo(() => {
-    const categories = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    const defaultCats = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    const catSet = new Set<string>(defaultCats);
+    kitTypesList.forEach(k => {
+      const canonical = normalizeCategoryName(k.name);
+      if (canonical) catSet.add(canonical);
+      else if (k.name?.trim()) catSet.add(k.name.trim());
+    });
+    inventory.forEach(i => {
+      const canonical = normalizeCategoryName(i.category);
+      if (canonical) catSet.add(canonical);
+      else if (i.category?.trim()) catSet.add(i.category.trim());
+    });
 
-    return categories.map((cat) => {
+    return Array.from(catSet).map((cat) => {
+      const canonical = normalizeCategoryName(cat);
       // 1. Warehouse stock
-      const whItem = inventory.find(i => i.category.toLowerCase().includes(cat.toLowerCase()));
+      const whItem = inventory.find(i => normalizeCategoryName(i.category) === canonical || i.category.toLowerCase().includes(cat.toLowerCase()));
       const warehouseStock = whItem ? (whItem.totalStock ?? (whItem.warehouseA + whItem.warehouseB)) : 0;
 
       // 2. LGU on-hand
@@ -412,12 +444,18 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
 
       // 3. Demand (requested)
       const demand = filteredReleases
-        .filter(r => r.fnfiCategory && r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()))
+        .filter(r => {
+          const rCanonical = normalizeCategoryName(r.fnfiCategory);
+          return r.fnfiCategory && (rCanonical === canonical || r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()));
+        })
         .reduce((sum, r) => sum + (Number(r.amountRequested) || 0), 0);
 
       // 4. Allocated (approved)
       const allocated = filteredReleases
-        .filter(r => r.fnfiCategory && r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()))
+        .filter(r => {
+          const rCanonical = normalizeCategoryName(r.fnfiCategory);
+          return r.fnfiCategory && (rCanonical === canonical || r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()));
+        })
         .reduce((sum, r) => sum + (Number(r.amountApproved || r.amountRequested) || 0), 0);
 
       const netGap = warehouseStock - demand;
@@ -433,7 +471,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
         status: isShortage ? 'Deficit' : 'Surplus'
       };
     });
-  }, [inventory, effectiveLgus, filteredReleases]);
+  }, [inventory, effectiveLgus, filteredReleases, kitTypesList]);
 
   // CHART 4: Incoming Expirations on LGUs and Warehouses
   const { expirationBuckets, expiringBatches } = useMemo(() => {
@@ -704,7 +742,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
             </div>
             <button
               type="button"
-              onClick={() => onNavigate('inventory-monitoring')}
+              onClick={() => onNavigate('inventory')}
               className="text-xs text-[#2500ba] font-bold hover:underline flex items-center gap-1"
             >
               <span>Manage Warehouses</span>

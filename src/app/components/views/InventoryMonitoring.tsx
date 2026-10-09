@@ -3,6 +3,7 @@ import { Package, TrendingDown, AlertTriangle, TrendingUp, RefreshCw, ChevronLef
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import type { LguRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
+import { normalizeCategoryName } from '../../lib/lguSync';
 
 interface InventoryState {
   inventory: { category: string; warehouseA: number; warehouseB: number }[];
@@ -39,17 +40,25 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const dynamicCategories = useMemo(() => {
     const set = new Set<string>();
     inventory.forEach((i) => {
-      if (i.category?.trim()) set.add(i.category.trim());
+      const canonical = normalizeCategoryName(i.category);
+      if (canonical) set.add(canonical);
+      else if (i.category?.trim()) set.add(i.category.trim());
     });
     incomingGoodsList.forEach((i) => {
-      if (i.fnfiCategory?.trim()) set.add(i.fnfiCategory.trim());
+      const canonical = normalizeCategoryName(i.fnfiCategory);
+      if (canonical) set.add(canonical);
+      else if (i.fnfiCategory?.trim()) set.add(i.fnfiCategory.trim());
     });
     outgoingReleasesList.forEach((o) => {
-      if (o.fnfiCategory?.trim()) set.add(o.fnfiCategory.trim());
+      const canonical = normalizeCategoryName(o.fnfiCategory);
+      if (canonical) set.add(canonical);
+      else if (o.fnfiCategory?.trim()) set.add(o.fnfiCategory.trim());
     });
     lgusList.forEach((lgu) => {
       Object.keys(lgu.currentStock ?? {}).forEach((category) => {
-        if (category.trim()) set.add(category.trim());
+        const canonical = normalizeCategoryName(category);
+        if (canonical) set.add(canonical);
+        else if (category.trim()) set.add(category.trim());
       });
     });
     return Array.from(set).sort();
@@ -71,7 +80,10 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
           init[cat] = 0;
         });
         Object.entries(baseStock ?? {}).forEach(([category, value]) => {
-          init[category] = Number(value) || 0;
+          const canonical = normalizeCategoryName(category) || category.trim();
+          const val = Number(value) || 0;
+          init[canonical] = (init[canonical] || 0) + val;
+          init[category] = val;
         });
         map.set(trimmed, init);
       }
@@ -99,7 +111,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       const lgu = cleanLguName(raw);
       const record = ensureLgu(lgu);
       const qty = release.amountApproved || release.amountRequested || 0;
-      const cat = release.fnfiCategory;
+      const cat = normalizeCategoryName(release.fnfiCategory) || release.fnfiCategory;
       if (cat) {
         record[cat] = (record[cat] || 0) + qty;
       }
@@ -113,7 +125,7 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
       const sourceLgu = cleanLguName(rawSource);
       const record = ensureLgu(sourceLgu);
       const qty = release.amountApproved || release.amountRequested || 0;
-      const cat = release.fnfiCategory;
+      const cat = normalizeCategoryName(release.fnfiCategory) || release.fnfiCategory;
       if (cat && qty > 0) {
         record[cat] = Math.max(0, (record[cat] || 0) - qty);
       }
@@ -141,16 +153,25 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
   const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   const displayData: InventoryItem[] = dynamicCategories.map(category => {
-    const item = inventory.find(i => i.category?.toLowerCase() === category.toLowerCase()) || {
-      category,
-      warehouseA: 0,
-      warehouseB: 0
-    };
+    const canonicalCategory = normalizeCategoryName(category);
+    const matchingItems = inventory.filter(i =>
+      normalizeCategoryName(i.category) === canonicalCategory || i.category?.toLowerCase() === category.toLowerCase()
+    );
+    const warehouseA = matchingItems.reduce((sum, i) => sum + (i.warehouseA || 0), 0);
+    const warehouseB = matchingItems.reduce((sum, i) => sum + (i.warehouseB || 0), 0);
+
     const released = outgoingReleasesList
-      .filter(release => (release.fnfiCategory || '').toLowerCase() === category.toLowerCase() && releaseStatuses.includes(release.deliveryStatus))
+      .filter(release => {
+        const relCanonical = normalizeCategoryName(release.fnfiCategory);
+        return (relCanonical === canonicalCategory || (release.fnfiCategory || '').toLowerCase() === category.toLowerCase()) && releaseStatuses.includes(release.deliveryStatus);
+      })
       .reduce((sum, release) => sum + (release.amountApproved || release.amountRequested || 0), 0);
+
     const expiringItems = incomingGoodsList
-      .filter(incoming => (incoming.fnfiCategory || '').toLowerCase() === category.toLowerCase() && (incoming.status === 'Verified' || incoming.status === 'Minted'))
+      .filter(incoming => {
+        const incCanonical = normalizeCategoryName(incoming.fnfiCategory);
+        return (incCanonical === canonicalCategory || (incoming.fnfiCategory || '').toLowerCase() === category.toLowerCase()) && (incoming.status === 'Verified' || incoming.status === 'Minted');
+      })
       .filter(incoming => {
         if (!incoming.expirationDate) return false;
         const expirationDate = new Date(incoming.expirationDate);
@@ -160,11 +181,11 @@ export function InventoryMonitoring({ inventoryState }: InventoryMonitoringProps
 
     return {
       category,
-      warehouseA: item.warehouseA || 0,
-      warehouseB: item.warehouseB || 0,
-      totalStock: (item.warehouseA || 0) + (item.warehouseB || 0),
+      warehouseA,
+      warehouseB,
+      totalStock: warehouseA + warehouseB,
       released,
-      available: (item.warehouseA || 0) + (item.warehouseB || 0),
+      available: warehouseA + warehouseB,
       expiringItems
     };
   });

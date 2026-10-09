@@ -439,16 +439,32 @@ const emptyInventoryItem = (category: string): InventoryItem => ({
 });
 
 const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: KitTypeRecord[]): InventoryItem[] => {
-  const categorySet = new Set<string>();
-  DEFAULT_KIT_TYPES.forEach(k => { if (k.name) categorySet.add(k.name.trim()); });
-  kitTypes.forEach(k => { if (k.name) categorySet.add(k.name.trim()); });
-  warehouses.forEach(wh => {
-    if (wh.currentStock) {
-      Object.keys(wh.currentStock).forEach(cat => categorySet.add(cat.trim()));
+  const STANDARD_CATEGORIES = ['Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sack', 'RTEF'];
+  const canonicalCategories = new Set<string>(STANDARD_CATEGORIES);
+
+  // Add custom kit types from database
+  kitTypes.forEach(k => {
+    if (k.name && k.isActive !== false) {
+      const canonical = normalizeCategoryName(k.name);
+      if (!STANDARD_CATEGORIES.includes(canonical)) {
+        canonicalCategories.add(canonical || k.name.trim());
+      }
     }
   });
 
-  const categoryNames = Array.from(categorySet);
+  // Add any custom items found in warehouse currentStock
+  warehouses.forEach(wh => {
+    if (wh.currentStock) {
+      Object.keys(wh.currentStock).forEach(cat => {
+        const canonical = normalizeCategoryName(cat);
+        if (!STANDARD_CATEGORIES.includes(canonical)) {
+          canonicalCategories.add(canonical || cat.trim());
+        }
+      });
+    }
+  });
+
+  const categoryNames = Array.from(canonicalCategories);
   const itemsMap = new Map<string, InventoryItem>();
 
   categoryNames.forEach(category => {
@@ -460,13 +476,13 @@ const calculateWarehouseInventory = (warehouses: WarehouseRecord[], kitTypes: Ki
     warehouses.forEach((wh, idx) => {
       let stock = 0;
       const catLower = category.toLowerCase();
-      if (catLower.includes('food pack')) stock = Number(wh.foodPacks ?? 0);
-      else if (catLower.includes('hygiene')) stock = Number(wh.hygieneKits ?? 0);
-      else if (catLower.includes('sleeping')) stock = Number(wh.sleepingKits ?? 0);
-      else if (catLower.includes('kitchen')) stock = Number(wh.kitchenKits ?? 0);
-      else if (catLower.includes('family kit')) stock = Number(wh.familyKits ?? 0);
-      else if (catLower.includes('sack')) stock = Number(wh.laminatedSacks ?? 0);
-      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) stock = Number(wh.rtef ?? 0);
+      if (category === 'Food Pack' || catLower.includes('food pack')) stock = Number(wh.foodPacks ?? 0);
+      else if (category === 'Hygiene Kit' || catLower.includes('hygiene')) stock = Number(wh.hygieneKits ?? 0);
+      else if (category === 'Sleeping Kit' || catLower.includes('sleeping')) stock = Number(wh.sleepingKits ?? 0);
+      else if (category === 'Kitchen Kit' || catLower.includes('kitchen')) stock = Number(wh.kitchenKits ?? 0);
+      else if (category === 'Family Kit' || catLower.includes('family kit')) stock = Number(wh.familyKits ?? 0);
+      else if (category === 'Laminated Sack' || catLower.includes('sack')) stock = Number(wh.laminatedSacks ?? 0);
+      else if (category === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) stock = Number(wh.rtef ?? 0);
       else if (wh.currentStock && wh.currentStock[category] !== undefined) stock = Number(wh.currentStock[category] ?? 0);
       else stock = 0;
 
@@ -618,6 +634,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const addStock = (category: string, warehouse: WarehouseName, quantity: number) => {
+    const canonical = normalizeCategoryName(category);
     const isOton = warehouse.toLowerCase().includes('oton');
     const isPototan = warehouse.toLowerCase().includes('pototan');
 
@@ -628,26 +645,29 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
       const catLower = category.toLowerCase();
       const updated = { ...wh };
-      if (catLower.includes('food pack') || catLower === 'food pack') updated.foodPacks = (updated.foodPacks || 0) + quantity;
-      else if (catLower.includes('hygiene') || catLower === 'hygiene kit') updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
-      else if (catLower.includes('sleeping') || catLower === 'sleeping kit') updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
-      else if (catLower.includes('kitchen') || catLower === 'kitchen kit') updated.kitchenKits = (updated.kitchenKits || 0) + quantity;
-      else if (catLower.includes('family kit') || catLower === 'family kit') updated.familyKits = (updated.familyKits || 0) + quantity;
-      else if (catLower.includes('sack') || catLower === 'laminated sack') updated.laminatedSacks = (updated.laminatedSacks || 0) + quantity;
-      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = (updated.rtef || 0) + quantity;
+      if (canonical === 'Food Pack' || catLower.includes('food pack')) updated.foodPacks = (updated.foodPacks || 0) + quantity;
+      else if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
+      else if (canonical === 'Sleeping Kit' || catLower.includes('sleeping')) updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
+      else if (canonical === 'Kitchen Kit' || catLower.includes('kitchen')) updated.kitchenKits = (updated.kitchenKits || 0) + quantity;
+      else if (canonical === 'Family Kit' || catLower.includes('family kit')) updated.familyKits = (updated.familyKits || 0) + quantity;
+      else if (canonical === 'Laminated Sack' || catLower.includes('sack')) updated.laminatedSacks = (updated.laminatedSacks || 0) + quantity;
+      else if (canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = (updated.rtef || 0) + quantity;
 
       const currentMap = { ...(updated.currentStock || {}) };
-      currentMap[category] = (currentMap[category] || 0) + quantity;
+      const curVal = currentMap[canonical] !== undefined ? currentMap[canonical] : (currentMap[category] ?? 0);
+      const nextVal = curVal + quantity;
+      if (canonical) currentMap[canonical] = nextVal;
+      currentMap[category] = nextVal;
       updated.currentStock = currentMap;
       return updated;
     }));
 
     // 2. Update inventory state immediately
     setInventory(prev => {
-      const existingItem = prev.find(item => item.category.toLowerCase() === category.toLowerCase());
+      const existingItem = prev.find(item => normalizeCategoryName(item.category) === canonical || item.category.toLowerCase() === category.toLowerCase());
       if (existingItem) {
         return prev.map(item =>
-          item.category.toLowerCase() === category.toLowerCase()
+          (normalizeCategoryName(item.category) === canonical || item.category.toLowerCase() === category.toLowerCase())
             ? {
                 ...item,
                 warehouseA: isOton ? item.warehouseA + quantity : item.warehouseA,
@@ -664,7 +684,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return [
         ...prev,
         {
-          category,
+          category: canonical || category,
           warehouseA: isOton ? quantity : 0,
           warehouseB: isPototan ? quantity : 0,
           totalStock: quantity,
@@ -680,7 +700,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const deductStock = (category: string, warehouse: WarehouseName, quantity: number): boolean => {
-    const item = inventory.find(i => i.category.toLowerCase() === category.toLowerCase());
+    const canonical = normalizeCategoryName(category);
+    const item = inventory.find(i => normalizeCategoryName(i.category) === canonical || i.category.toLowerCase() === category.toLowerCase());
     if (!item) return false;
 
     const currentStock = item.warehouseBreakdown?.[warehouse] ??
@@ -696,23 +717,26 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
       const catLower = category.toLowerCase();
       const updated = { ...wh };
-      if (catLower.includes('food pack') || catLower === 'food pack') updated.foodPacks = Math.max(0, (updated.foodPacks || 0) - quantity);
-      else if (catLower.includes('hygiene') || catLower === 'hygiene kit') updated.hygieneKits = Math.max(0, (updated.hygieneKits || 0) - quantity);
-      else if (catLower.includes('sleeping') || catLower === 'sleeping kit') updated.sleepingKits = Math.max(0, (updated.sleepingKits || 0) - quantity);
-      else if (catLower.includes('kitchen') || catLower === 'kitchen kit') updated.kitchenKits = Math.max(0, (updated.kitchenKits || 0) - quantity);
-      else if (catLower.includes('family kit') || catLower === 'family kit') updated.familyKits = Math.max(0, (updated.familyKits || 0) - quantity);
-      else if (catLower.includes('sack') || catLower === 'laminated sack') updated.laminatedSacks = Math.max(0, (updated.laminatedSacks || 0) - quantity);
-      else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = Math.max(0, (updated.rtef || 0) - quantity);
+      if (canonical === 'Food Pack' || catLower.includes('food pack')) updated.foodPacks = Math.max(0, (updated.foodPacks || 0) - quantity);
+      else if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) updated.hygieneKits = Math.max(0, (updated.hygieneKits || 0) - quantity);
+      else if (canonical === 'Sleeping Kit' || catLower.includes('sleeping')) updated.sleepingKits = Math.max(0, (updated.sleepingKits || 0) - quantity);
+      else if (canonical === 'Kitchen Kit' || catLower.includes('kitchen')) updated.kitchenKits = Math.max(0, (updated.kitchenKits || 0) - quantity);
+      else if (canonical === 'Family Kit' || catLower.includes('family kit')) updated.familyKits = Math.max(0, (updated.familyKits || 0) - quantity);
+      else if (canonical === 'Laminated Sack' || catLower.includes('sack')) updated.laminatedSacks = Math.max(0, (updated.laminatedSacks || 0) - quantity);
+      else if (canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = Math.max(0, (updated.rtef || 0) - quantity);
 
       const currentMap = { ...(updated.currentStock || {}) };
-      currentMap[category] = Math.max(0, (currentMap[category] || 0) - quantity);
+      const curVal = currentMap[canonical] !== undefined ? currentMap[canonical] : (currentMap[category] ?? 0);
+      const nextVal = Math.max(0, curVal - quantity);
+      if (canonical) currentMap[canonical] = nextVal;
+      currentMap[category] = nextVal;
       updated.currentStock = currentMap;
       return updated;
     }));
 
     setInventory(prev =>
       prev.map(it =>
-        it.category.toLowerCase() === category.toLowerCase()
+        (normalizeCategoryName(it.category) === canonical || it.category.toLowerCase() === category.toLowerCase())
           ? {
               ...it,
               warehouseA: isOton ? Math.max(0, it.warehouseA - quantity) : it.warehouseA,
@@ -735,19 +759,23 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const getAvailableStock = (category: string, warehouse: WarehouseName): number => {
+    const canonical = normalizeCategoryName(category);
     const targetWh = warehousesList.find(w => w.name.toLowerCase() === warehouse.toLowerCase());
     if (targetWh) {
       const catLower = category.toLowerCase();
-      if (catLower.includes('food pack')) return targetWh.foodPacks;
-      if (catLower.includes('hygiene')) return targetWh.hygieneKits;
-      if (catLower.includes('sleeping')) return targetWh.sleepingKits;
-      if (catLower.includes('kitchen')) return targetWh.kitchenKits;
-      if (catLower.includes('family kit')) return targetWh.familyKits;
-      if (catLower.includes('sack')) return targetWh.laminatedSacks;
-      if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) return targetWh.rtef;
-      if (targetWh.currentStock && targetWh.currentStock[category] !== undefined) return targetWh.currentStock[category];
+      if (canonical === 'Food Pack' || catLower.includes('food pack')) return targetWh.foodPacks;
+      if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) return targetWh.hygieneKits;
+      if (canonical === 'Sleeping Kit' || catLower.includes('sleeping')) return targetWh.sleepingKits;
+      if (canonical === 'Kitchen Kit' || catLower.includes('kitchen')) return targetWh.kitchenKits;
+      if (canonical === 'Family Kit' || catLower.includes('family kit')) return targetWh.familyKits;
+      if (canonical === 'Laminated Sack' || catLower.includes('sack')) return targetWh.laminatedSacks;
+      if (canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) return targetWh.rtef;
+      if (targetWh.currentStock) {
+        if (targetWh.currentStock[category] !== undefined) return targetWh.currentStock[category];
+        if (targetWh.currentStock[canonical] !== undefined) return targetWh.currentStock[canonical];
+      }
     }
-    const item = inventory.find(i => i.category.toLowerCase() === category.toLowerCase());
+    const item = inventory.find(i => normalizeCategoryName(i.category) === canonical || i.category.toLowerCase() === category.toLowerCase());
     return item?.warehouseBreakdown?.[warehouse] || (warehouse.toLowerCase().includes('oton') ? item?.warehouseA : item?.warehouseB) || 0;
   };
 
@@ -1498,28 +1526,36 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         return { ok: false, message: 'LGU not found.' };
       }
 
+      const canonicalNewStock: Record<string, number> = {};
+      Object.entries(newStock).forEach(([k, v]) => {
+        const canonical = normalizeCategoryName(k);
+        const val = Number(v) || 0;
+        if (canonical) canonicalNewStock[canonical] = val;
+        canonicalNewStock[k] = val;
+      });
+
       await backendApi.emergencyCorrectLguStock(
         lguId,
-        newStock,
+        canonicalNewStock,
         reason,
         currentActor.name
       );
 
       // Update in-memory lgusList state immediately
       setLgusList(prev => prev.map(lgu => {
-        if (lgu.id !== lguId) return lgu;
+        if (lgu.id !== lguId && lgu.municipality.toLowerCase() !== targetLgu.municipality.toLowerCase()) return lgu;
         return {
           ...lgu,
-          foodPacks: newStock['Food Pack'] !== undefined ? newStock['Food Pack'] : lgu.foodPacks,
-          hygieneKits: newStock['Hygiene Kit'] !== undefined ? newStock['Hygiene Kit'] : lgu.hygieneKits,
-          familyKits: newStock['Family Kit'] !== undefined ? newStock['Family Kit'] : lgu.familyKits,
-          sleepingKits: newStock['Sleeping Kit'] !== undefined ? newStock['Sleeping Kit'] : lgu.sleepingKits,
-          kitchenKits: newStock['Kitchen Kit'] !== undefined ? newStock['Kitchen Kit'] : lgu.kitchenKits,
-          laminatedSacks: newStock['Laminated Sack'] !== undefined ? newStock['Laminated Sack'] : lgu.laminatedSacks,
-          rtef: newStock['RTEF'] !== undefined ? newStock['RTEF'] : lgu.rtef,
+          foodPacks: canonicalNewStock['Food Pack'] !== undefined ? canonicalNewStock['Food Pack'] : lgu.foodPacks,
+          hygieneKits: canonicalNewStock['Hygiene Kit'] !== undefined ? canonicalNewStock['Hygiene Kit'] : lgu.hygieneKits,
+          familyKits: canonicalNewStock['Family Kit'] !== undefined ? canonicalNewStock['Family Kit'] : lgu.familyKits,
+          sleepingKits: canonicalNewStock['Sleeping Kit'] !== undefined ? canonicalNewStock['Sleeping Kit'] : lgu.sleepingKits,
+          kitchenKits: canonicalNewStock['Kitchen Kit'] !== undefined ? canonicalNewStock['Kitchen Kit'] : lgu.kitchenKits,
+          laminatedSacks: canonicalNewStock['Laminated Sack'] !== undefined ? canonicalNewStock['Laminated Sack'] : lgu.laminatedSacks,
+          rtef: canonicalNewStock['RTEF'] !== undefined ? canonicalNewStock['RTEF'] : lgu.rtef,
           currentStock: {
             ...(lgu.currentStock || {}),
-            ...newStock
+            ...canonicalNewStock
           }
         };
       }));
@@ -1527,7 +1563,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       // Update in-memory lguPriorityReports state immediately
       setLguPriorityReports(prev => prev.map(rep => {
         if (rep.id !== lguId && rep.municipality.toLowerCase() !== targetLgu.municipality.toLowerCase()) return rep;
-        const updatedFood = newStock['Food Pack'] !== undefined ? newStock['Food Pack'] : rep.foodPacks;
+        const updatedFood = canonicalNewStock['Food Pack'] !== undefined ? canonicalNewStock['Food Pack'] : rep.foodPacks;
         const maxStock = Number(rep.maxStock) > 0 ? Number(rep.maxStock) : (Number(targetLgu.maxStock) > 0 ? Number(targetLgu.maxStock) : 3000);
         const evalRes = evaluatePriorityIndicator({
           foodPacks: updatedFood,
@@ -1537,8 +1573,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         return {
           ...rep,
           foodPacks: updatedFood,
-          hygieneKits: newStock['Hygiene Kit'] !== undefined ? newStock['Hygiene Kit'] : rep.hygieneKits,
-          familyKits: newStock['Family Kit'] !== undefined ? newStock['Family Kit'] : rep.familyKits,
+          hygieneKits: canonicalNewStock['Hygiene Kit'] !== undefined ? canonicalNewStock['Hygiene Kit'] : rep.hygieneKits,
+          familyKits: canonicalNewStock['Family Kit'] !== undefined ? canonicalNewStock['Family Kit'] : rep.familyKits,
           maxStock,
           urgencyScore: evalRes.urgencyScore,
           priorityColor: evalRes.priorityColor,
@@ -1549,6 +1585,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           systemResponse: evalRes.systemResponse
         };
       }));
+
+      // Refresh full DB record in background to ensure all calculated fields are in sync
+      void refreshLgus();
 
       return {
         ok: true,

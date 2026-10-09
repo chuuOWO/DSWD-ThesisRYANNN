@@ -369,6 +369,20 @@ export const backendApi = {
     return data;
   },
 
+  async updateProvince(id: string, name: string, region?: string): Promise<{ ok: boolean }> {
+    const updates: Record<string, unknown> = {
+      name: name.trim(),
+      updated_at: new Date().toISOString()
+    };
+    if (region && region.trim()) updates.region = region.trim();
+    const { error } = await supabase
+      .from('provinces')
+      .update(updates)
+      .eq('id', id);
+    throwIfError(error, 'Failed to update province');
+    return { ok: true };
+  },
+
   async deleteProvince(id: string): Promise<{ ok: boolean }> {
     const { error } = await supabase
       .from('provinces')
@@ -549,8 +563,12 @@ export const backendApi = {
         updates.rtef = Math.max(0, (wh.rtef || 0) - quantity);
       }
 
+      const canonical = normalizeCategoryName(category);
       const stockMap = { ...(wh.current_stock || {}) };
-      stockMap[category] = Math.max(0, (stockMap[category] || 0) - quantity);
+      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const nextVal = Math.max(0, currentVal - quantity);
+      if (canonical) stockMap[canonical] = nextVal;
+      stockMap[category] = nextVal;
       updates.current_stock = stockMap;
 
       const { error } = await supabase.from('warehouses').update(updates).eq('id', wh.id);
@@ -581,28 +599,32 @@ export const backendApi = {
       }
 
       const catLower = category.toLowerCase();
+      const canonical = normalizeCategoryName(category);
       const updates: Record<string, unknown> = {
         updated_at: new Date().toISOString()
       };
 
-      if (catLower.includes('food pack') || catLower === 'food pack') {
+      if (catLower.includes('food pack') || catLower === 'food pack' || canonical === 'Food Pack') {
         updates.food_packs = (wh.food_packs || 0) + quantity;
-      } else if (catLower.includes('hygiene') || catLower === 'hygiene kit') {
+      } else if (catLower.includes('hygiene') || catLower === 'hygiene kit' || canonical === 'Hygiene Kit') {
         updates.hygiene_kits = (wh.hygiene_kits || 0) + quantity;
-      } else if (catLower.includes('sleeping') || catLower === 'sleeping kit') {
+      } else if (catLower.includes('sleeping') || catLower === 'sleeping kit' || canonical === 'Sleeping Kit') {
         updates.sleeping_kits = (wh.sleeping_kits || 0) + quantity;
-      } else if (catLower.includes('kitchen') || catLower === 'kitchen kit') {
+      } else if (catLower.includes('kitchen') || catLower === 'kitchen kit' || canonical === 'Kitchen Kit') {
         updates.kitchen_kits = (wh.kitchen_kits || 0) + quantity;
-      } else if (catLower.includes('family kit') || catLower === 'family kit') {
+      } else if (catLower.includes('family kit') || catLower === 'family kit' || canonical === 'Family Kit') {
         updates.family_kits = (wh.family_kits || 0) + quantity;
-      } else if (catLower.includes('sack') || catLower === 'laminated sack') {
+      } else if (catLower.includes('sack') || catLower === 'laminated sack' || canonical === 'Laminated Sack') {
         updates.laminated_sacks = (wh.laminated_sacks || 0) + quantity;
-      } else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) {
+      } else if (catLower.includes('rtef') || catLower.includes('ready-to-eat') || canonical === 'RTEF') {
         updates.rtef = (wh.rtef || 0) + quantity;
       }
 
       const stockMap = { ...(wh.current_stock || {}) };
-      stockMap[category] = (stockMap[category] || 0) + quantity;
+      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const nextVal = currentVal + quantity;
+      if (canonical) stockMap[canonical] = nextVal;
+      stockMap[category] = nextVal;
       updates.current_stock = stockMap;
 
       const { error } = await supabase.from('warehouses').update(updates).eq('id', wh.id);
@@ -749,7 +771,9 @@ export const backendApi = {
     Object.entries(stockUpdates).forEach(([k, v]) => {
       const canonical = normalizeCategoryName(k);
       const val = Number(v) || 0;
-      if (canonical) canonicalUpdates[canonical] = val;
+      if (canonical) {
+        canonicalUpdates[canonical] = val;
+      }
       canonicalUpdates[k] = val;
     });
 
@@ -770,7 +794,7 @@ export const backendApi = {
       const { data: currentLgu } = await supabase.from('lgus').select('max_stock, affected_families, food_packs').eq('id', lguId).maybeSingle();
       if (currentLgu) {
         const targetQuota = Number(currentLgu.max_stock ?? 3000);
-        const evalFood = stockUpdates['Food Pack'] !== undefined ? Number(stockUpdates['Food Pack']) : Number(currentLgu.food_packs ?? 0);
+        const evalFood = canonicalUpdates['Food Pack'] !== undefined ? Number(canonicalUpdates['Food Pack']) : Number(currentLgu.food_packs ?? 0);
         const evalRes = evaluatePriorityIndicator({
           foodPacks: evalFood,
           affectedFamilies: Number(currentLgu.affected_families ?? 0),
@@ -849,6 +873,24 @@ export const backendApi = {
     return data;
   },
 
+  async updateSupplySource(id: string, payload: Partial<SupplySourceInput>): Promise<{ ok: boolean }> {
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString()
+    };
+    if (payload.name !== undefined) updates.name = payload.name.trim();
+    if (payload.shortCode !== undefined) updates.short_code = payload.shortCode.trim();
+    if (payload.facilityType !== undefined) updates.facility_type = payload.facilityType.trim();
+    if (payload.region !== undefined) updates.region = payload.region.trim();
+    if (payload.location !== undefined) updates.location = payload.location.trim();
+
+    const { error } = await supabase
+      .from('supply_sources')
+      .update(updates)
+      .eq('id', id);
+    throwIfError(error, 'Failed to update supply source');
+    return { ok: true };
+  },
+
   async deleteSupplySource(id: string): Promise<{ ok: boolean }> {
     const { error } = await supabase.from('supply_sources').delete().eq('id', id);
     throwIfError(error, 'Failed to delete supply source');
@@ -905,6 +947,23 @@ export const backendApi = {
       .single();
     throwIfError(error, 'Failed to create kit type');
     return data;
+  },
+
+  async updateKitType(id: string, payload: Partial<KitTypeInput>): Promise<{ ok: boolean }> {
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString()
+    };
+    if (payload.name !== undefined) updates.name = payload.name.trim();
+    if (payload.category !== undefined) updates.category = payload.category;
+    if (payload.unitType !== undefined) updates.unit_type = payload.unitType.trim();
+    if (payload.description !== undefined) updates.description = payload.description.trim();
+
+    const { error } = await supabase
+      .from('kit_types')
+      .update(updates)
+      .eq('id', id);
+    throwIfError(error, 'Failed to update kit type');
+    return { ok: true };
   },
 
   async deleteKitType(id: string): Promise<{ ok: boolean }> {

@@ -201,6 +201,7 @@ export default function App() {
       case 'outgoing':
         return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
       case 'inventory':
+      case 'inventory-monitoring':
         return <InventoryMonitoring inventoryState={inventoryState} />;
       case 'lgu-monitoring':
         return <LGUMonitoring inventoryState={inventoryState} currentRole={currentRole} />;
@@ -211,7 +212,7 @@ export default function App() {
       case 'accounts':
         return <AccountManagement currentAdminEmail={activeProfile.email} releases={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
       case 'master-data':
-        return <MasterDataView />;
+        return <MasterDataView inventoryState={inventoryState} />;
       case 'dashboard':
       default:
         return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} adminProfile={activeProfile} />;
@@ -277,6 +278,13 @@ export default function App() {
         onSignOut={requestSignOut}
         adminActionsEnabled={inventoryState.adminActionsEnabled}
         onToggleAdminActions={inventoryState.setAdminActionsEnabled}
+        onMasterDataChanged={() => {
+          inventoryState.refreshKitTypes();
+          inventoryState.refreshSupplySources();
+          inventoryState.refreshWarehouses();
+          inventoryState.refreshProvinces();
+          inventoryState.refreshLgus();
+        }}
       />
 
       <ConfirmLogoutModal

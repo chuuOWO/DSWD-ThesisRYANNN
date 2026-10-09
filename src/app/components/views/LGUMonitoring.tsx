@@ -5,7 +5,7 @@ import { EditLGUModal } from '../modals/EditLGUModal';
 import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
 import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
-import { computeSynchronizedLgus, getLguStockForCategory, type SynchronizedLgu } from '../../lib/lguSync';
+import { computeSynchronizedLgus, getLguStockForCategory, normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
 import { evaluatePriorityIndicator } from '../../lib/priorityLogic';
 
 export type LGUDelivery = SynchronizedLgu;
@@ -126,12 +126,26 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
-    (inventoryState?.kitTypesList ?? []).forEach(k => { if (k?.name) set.add(k.name.trim()); });
-    (inventoryState?.outgoingReleasesList ?? []).forEach(r => { if (r?.fnfiCategory) set.add(r.fnfiCategory.trim()); });
-    (inventoryState?.incomingGoodsList ?? []).forEach(g => { if (g?.fnfiCategory) set.add(g.fnfiCategory.trim()); });
-    if (set.size === 0) {
-      DEFAULT_KIT_NAMES.forEach(c => set.add(c));
-    }
+    (inventoryState?.kitTypesList ?? []).forEach(k => {
+      const canonical = normalizeCategoryName(k?.name);
+      if (canonical) set.add(canonical);
+      else if (k?.name) set.add(k.name.trim());
+    });
+    (inventoryState?.outgoingReleasesList ?? []).forEach(r => {
+      const canonical = normalizeCategoryName(r?.fnfiCategory);
+      if (canonical) set.add(canonical);
+      else if (r?.fnfiCategory) set.add(r.fnfiCategory.trim());
+    });
+    (inventoryState?.incomingGoodsList ?? []).forEach(g => {
+      const canonical = normalizeCategoryName(g?.fnfiCategory);
+      if (canonical) set.add(canonical);
+      else if (g?.fnfiCategory) set.add(g.fnfiCategory.trim());
+    });
+    DEFAULT_KIT_NAMES.forEach(c => {
+      const canonical = normalizeCategoryName(c);
+      if (canonical) set.add(canonical);
+      else set.add(c);
+    });
     return Array.from(set).sort();
   }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList]);
 
@@ -189,7 +203,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                              (lgu?.province || '').toLowerCase() === (selectedProvinceTab || '').toLowerCase();
 
       const matchesCategory = selectedCategory === 'All' ||
-                             (lgu?.currentStock && (Number(lgu.currentStock[selectedCategory]) || 0) > 0);
+                             getLguStockForCategory(lgu, selectedCategory) > 0;
 
       return matchesSearch && matchesProvince && matchesCategory;
     });

@@ -46,6 +46,7 @@ interface SettingsModalProps {
   onSignOut?: () => void;
   adminActionsEnabled?: boolean;
   onToggleAdminActions?: (enabled: boolean) => void;
+  onMasterDataChanged?: () => void;
 }
 
 type SettingsTab = 'profile' | 'metamask' | 'data' | 'admin';
@@ -58,7 +59,8 @@ export function SettingsModal({
   initialTab = 'profile',
   onSignOut,
   adminActionsEnabled: adminActionsEnabledProp,
-  onToggleAdminActions
+  onToggleAdminActions,
+  onMasterDataChanged
 }: SettingsModalProps) {
   const { refreshProfile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
@@ -435,6 +437,7 @@ export function SettingsModal({
       setNewKit({ name: '', category: 'Food Item', unitType: 'packs', description: '' });
       setIsAddingKit(false);
       setMasterDataFeedback({ type: 'success', text: 'Kit type created successfully.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create kit type.' });
     } finally {
@@ -450,6 +453,7 @@ export function SettingsModal({
       setKitTypes(prev => prev.filter(k => k.id !== id));
       setSelectedKitIds(prev => prev.filter(kId => kId !== id));
       setMasterDataFeedback({ type: 'success', text: 'Kit type deleted.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete kit type.' });
     } finally {
@@ -466,6 +470,7 @@ export function SettingsModal({
       setKitTypes(prev => prev.filter(k => !selectedKitIds.includes(k.id)));
       setSelectedKitIds([]);
       setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedKitIds.length} kit type(s).` });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete kit types.' });
     } finally {
@@ -504,6 +509,7 @@ export function SettingsModal({
       setNewSource({ name: '', shortCode: '', facilityType: 'Regional Logistics Hub', region: 'Region VI (Western Visayas)', location: '' });
       setIsAddingSource(false);
       setMasterDataFeedback({ type: 'success', text: 'Supply source created successfully.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create supply source.' });
     } finally {
@@ -519,6 +525,7 @@ export function SettingsModal({
       setSources(prev => prev.filter(s => s.id !== id));
       setSelectedSourceIds(prev => prev.filter(sId => sId !== id));
       setMasterDataFeedback({ type: 'success', text: 'Supply source deleted.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete supply source.' });
     } finally {
@@ -535,6 +542,7 @@ export function SettingsModal({
       setSources(prev => prev.filter(s => !selectedSourceIds.includes(s.id)));
       setSelectedSourceIds([]);
       setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedSourceIds.length} source(s).` });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete sources.' });
     } finally {
@@ -581,6 +589,7 @@ export function SettingsModal({
       });
       setIsAddingWarehouse(false);
       setMasterDataFeedback({ type: 'success', text: 'Warehouse created successfully.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create warehouse.' });
     } finally {
@@ -596,6 +605,7 @@ export function SettingsModal({
       setWarehouses(prev => prev.filter(w => w.id !== id));
       setSelectedWarehouseIds(prev => prev.filter(wId => wId !== id));
       setMasterDataFeedback({ type: 'success', text: 'Warehouse deleted.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete warehouse.' });
     } finally {
@@ -612,6 +622,7 @@ export function SettingsModal({
       setWarehouses(prev => prev.filter(w => !selectedWarehouseIds.includes(w.id)));
       setSelectedWarehouseIds([]);
       setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedWarehouseIds.length} warehouse(s).` });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete warehouses.' });
     } finally {
@@ -644,6 +655,7 @@ export function SettingsModal({
       setNewProvince({ name: '', region: 'Region VI (Western Visayas)' });
       setIsAddingProvince(false);
       setMasterDataFeedback({ type: 'success', text: 'Province created successfully.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to create province.' });
     } finally {
@@ -659,6 +671,7 @@ export function SettingsModal({
       setProvinces(prev => prev.filter(p => p.id !== id));
       setSelectedProvinceIds(prev => prev.filter(pId => pId !== id));
       setMasterDataFeedback({ type: 'success', text: 'Province deleted.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete province.' });
     } finally {
@@ -675,6 +688,7 @@ export function SettingsModal({
       setProvinces(prev => prev.filter(p => !selectedProvinceIds.includes(p.id)));
       setSelectedProvinceIds([]);
       setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedProvinceIds.length} province(s).` });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete provinces.' });
     } finally {
@@ -734,6 +748,7 @@ export function SettingsModal({
       });
       setIsAddingLgu(false);
       setMasterDataFeedback({ type: 'success', text: 'Municipality / LGU added successfully.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to add LGU.' });
     } finally {
@@ -749,6 +764,7 @@ export function SettingsModal({
       setDbLgus(prev => prev.filter(l => l.id !== id));
       setSelectedLguIds(prev => prev.filter(lId => lId !== id));
       setMasterDataFeedback({ type: 'success', text: 'Municipality / LGU deleted.' });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete LGU.' });
     } finally {
@@ -765,6 +781,7 @@ export function SettingsModal({
       setDbLgus(prev => prev.filter(l => !selectedLguIds.includes(l.id)));
       setSelectedLguIds([]);
       setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedLguIds.length} LGU(s).` });
+      onMasterDataChanged?.();
     } catch (err) {
       setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete LGUs.' });
     } finally {
@@ -787,6 +804,7 @@ export function SettingsModal({
       const updated = await backendApi.getLgus();
       setDbLgus(updated);
       setMasterDataFeedback({ type: 'success', text: result.message || 'LGU stock overridden and audit log saved.' });
+      onMasterDataChanged?.();
     } else {
       setMasterDataFeedback({ type: 'error', text: result.message || 'Failed to update LGU stock.' });
     }
