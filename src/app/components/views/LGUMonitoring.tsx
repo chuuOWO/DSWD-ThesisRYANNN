@@ -3,6 +3,7 @@ import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, Chev
 import type { LGUPriorityReport, UserRole, OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { EditLGUModal } from '../modals/EditLGUModal';
 import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
+import { LGUDetailModal } from '../modals/LGUDetailModal';
 import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type KitTypeRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { computeSynchronizedLgus, getLguStockForCategory, normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
@@ -56,6 +57,13 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyLguId, setEmergencyLguId] = useState<string | undefined>(undefined);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedLguForDetails, setSelectedLguForDetails] = useState<LGUDelivery | null>(null);
+
+  const openDetailModal = (lgu: LGUDelivery) => {
+    setSelectedLguForDetails(lgu);
+    setShowDetailModal(true);
+  };
 
   // Administrative Actions State (synced from inventoryState or localStorage)
   const [internalAdminActions, setInternalAdminActions] = useState<boolean>(() => {
@@ -510,120 +518,143 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       {viewMode === 'cards' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {paginatedLGUs.map((lgu) => (
-            <div key={lgu.id} className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <MapPin className="w-5 h-5 text-blue-600" />
+            <div
+              key={lgu.id}
+              onClick={() => openDetailModal(lgu)}
+              className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                      <MapPin className="w-5 h-5 text-blue-600 group-hover:text-white transition-colors" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="inline-block text-[10px] font-mono font-semibold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5 truncate max-w-full" title={lgu.id}>
+                        {lgu.id}
+                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="font-bold text-base text-gray-900 group-hover:text-blue-600 transition-colors truncate" title={lgu.municipality}>{lgu.municipality}</h3>
+                        {lgu.isActive === false && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
+                            Archived
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="inline-block text-[10px] font-mono font-semibold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5 truncate max-w-full" title={lgu.id}>
-                      {lgu.id}
-                    </span>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h3 className="font-bold text-base text-gray-900 truncate" title={lgu.municipality}>{lgu.municipality}</h3>
-                      {lgu.isActive === false && (
-                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
-                          Archived
-                        </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditModal(lgu);
+                    }}
+                    className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
+                    title="Edit LGU"
+                  >
+                    <Edit className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-gray-600">Total Items Released</span>
+                    <span className="font-bold text-blue-600 text-sm">{lgu.totalItemsReleased.toLocaleString()}</span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-gray-600">Deliveries</span>
+                    <span className="font-bold text-gray-900">{lgu.deliveryCount} total</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100 text-[11px]">
+                    <div className="flex justify-between items-center bg-green-50 px-2 py-1 rounded">
+                      <span className="text-green-700">Completed</span>
+                      <span className="font-bold text-green-800">{lgu.completedDeliveries}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-orange-50 px-2 py-1 rounded">
+                      <span className="text-orange-700">Pending</span>
+                      <span className="font-bold text-orange-800">{lgu.pendingDeliveries}</span>
+                    </div>
+                  </div>
+
+                  {/* On-Hand Relief Inventory (Prominent & Automated) */}
+                  <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Package className="w-4 h-4 text-purple-700" />
+                        <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
+                      </div>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                        {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} / {(lgu.maxStock ?? 3000).toLocaleString()} Max
+                      </span>
+                    </div>
+
+                    {/* Category Breakdown Chips */}
+                    <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+                      {Object.entries(lgu.currentStock || {})
+                        .filter(([_, qty]) => Number(qty) > 0)
+                        .map(([category, qty]) => (
+                          <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
+                            <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
+                            <p className="text-xs font-bold text-purple-900 mt-0.5">{(Number(qty) || 0).toLocaleString()}</p>
+                          </div>
+                        ))}
+                      {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
+                        <div className="col-span-2 text-center py-2 text-[11px] text-purple-600 font-medium italic">
+                          No relief stock recorded on-hand
+                        </div>
                       )}
                     </div>
-                    <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => openEditModal(lgu)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
-                  title="Edit LGU"
-                >
-                  <Edit className="w-4 h-4 text-gray-600" />
-                </button>
-              </div>
 
-              <div className="space-y-2.5">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-semibold text-gray-600">Total Items Released</span>
-                  <span className="font-bold text-blue-600 text-sm">{lgu.totalItemsReleased.toLocaleString()}</span>
-                </div>
-
-                <div className="flex justify-between items-center text-xs">
-                  <span className="font-semibold text-gray-600">Deliveries</span>
-                  <span className="font-bold text-gray-900">{lgu.deliveryCount} total</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100 text-[11px]">
-                  <div className="flex justify-between items-center bg-green-50 px-2 py-1 rounded">
-                    <span className="text-green-700">Completed</span>
-                    <span className="font-bold text-green-800">{lgu.completedDeliveries}</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-orange-50 px-2 py-1 rounded">
-                    <span className="text-orange-700">Pending</span>
-                    <span className="font-bold text-orange-800">{lgu.pendingDeliveries}</span>
-                  </div>
-                </div>
-
-                {/* On-Hand Relief Inventory (Prominent & Automated) */}
-                <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Package className="w-4 h-4 text-purple-700" />
-                      <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
+                    <div className="flex items-center justify-between text-[10px] text-purple-700 pt-1 border-t border-purple-200/60">
+                      <span className="flex items-center gap-1">
+                        <Lock className="w-3 h-3 text-purple-500" />
+                        Automated via deliveries
+                      </span>
+                      {adminActionsEnabled && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEmergencyLguId(lgu.id);
+                            setShowEmergencyModal(true);
+                          }}
+                          className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
+                        >
+                          Emergency Recount
+                        </button>
+                      )}
                     </div>
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                      {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} / {(lgu.maxStock ?? 3000).toLocaleString()} Max
-                    </span>
                   </div>
 
-                  {/* Category Breakdown Chips */}
-                  <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
-                    {Object.entries(lgu.currentStock || {})
-                      .filter(([_, qty]) => Number(qty) > 0)
-                      .map(([category, qty]) => (
-                        <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
-                          <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
-                          <p className="text-xs font-bold text-purple-900 mt-0.5">{(Number(qty) || 0).toLocaleString()}</p>
-                        </div>
-                      ))}
-                    {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
-                      <div className="col-span-2 text-center py-2 text-[11px] text-purple-600 font-medium italic">
-                        No relief stock recorded on-hand
+                  <div className="pt-2 border-t border-gray-100 space-y-1 text-[11px] text-gray-500">
+                    <div className="flex justify-between">
+                      <span>Last delivery:</span>
+                      <span className="font-medium text-gray-700">{lgu.lastDeliveryDate || 'N/A'}</span>
+                    </div>
+                    {(lgu.contactPerson || lgu.contactNumber) && (
+                      <div className="flex justify-between">
+                        <span className="truncate max-w-[140px]">Contact: {lgu.contactPerson || 'Office'}</span>
+                        <span className="font-mono">{lgu.contactNumber || ''}</span>
                       </div>
                     )}
                   </div>
-
-                  <div className="flex items-center justify-between text-[10px] text-purple-700 pt-1 border-t border-purple-200/60">
-                    <span className="flex items-center gap-1">
-                      <Lock className="w-3 h-3 text-purple-500" />
-                      Automated via deliveries
-                    </span>
-                    {adminActionsEnabled && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEmergencyLguId(lgu.id);
-                          setShowEmergencyModal(true);
-                        }}
-                        className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
-                      >
-                        Emergency Recount
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-gray-100 space-y-1 text-[11px] text-gray-500">
-                  <div className="flex justify-between">
-                    <span>Last delivery:</span>
-                    <span className="font-medium text-gray-700">{lgu.lastDeliveryDate || 'N/A'}</span>
-                  </div>
-                  {(lgu.contactPerson || lgu.contactNumber) && (
-                    <div className="flex justify-between">
-                      <span className="truncate max-w-[140px]">Contact: {lgu.contactPerson || 'Office'}</span>
-                      <span className="font-mono">{lgu.contactNumber || ''}</span>
-                    </div>
-                  )}
                 </div>
               </div>
+
+              {/* View Transactions & Ledger Action Button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openDetailModal(lgu);
+                }}
+                className="w-full mt-3 py-2 px-3 bg-blue-50 group-hover:bg-blue-600 text-blue-700 group-hover:text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              >
+                <span>View Transactions &amp; Stock Ledger</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           ))}
         </div>
@@ -649,7 +680,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <div>
                         <span className="block text-[10px] font-mono text-purple-700 font-semibold leading-tight">{lgu.id}</span>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-sm text-gray-900">{lgu.municipality}</span>
+                          <button
+                            type="button"
+                            onClick={() => openDetailModal(lgu)}
+                            className="font-bold text-sm text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left"
+                            title="View Transactions & Ledger"
+                          >
+                            {lgu.municipality}
+                          </button>
                           {lgu.isActive === false && (
                             <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
                               Archived
@@ -698,6 +736,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openDetailModal(lgu)}
+                          className="p-1.5 hover:bg-blue-50 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
+                          title="View Transactions & Inventory Ledger"
+                        >
+                          <List className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => openEditModal(lgu)}
                           className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
@@ -874,6 +920,20 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             }
             return backendApi.emergencyCorrectLguStock(lguId, newStock, reason);
           }}
+        />
+      )}
+
+      {/* LGU Incoming & Outgoing Transactions and Inventory Ledger Modal */}
+      {showDetailModal && selectedLguForDetails && (
+        <LGUDetailModal
+          isOpen={showDetailModal}
+          onClose={() => {
+            setShowDetailModal(false);
+            setSelectedLguForDetails(null);
+          }}
+          lgu={selectedLguForDetails}
+          outgoingReleases={inventoryState?.outgoingReleasesList}
+          incomingGoods={inventoryState?.incomingGoodsList}
         />
       )}
     </div>
