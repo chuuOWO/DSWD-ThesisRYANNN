@@ -709,9 +709,10 @@ export const backendApi = {
       }
 
       const stockMap = { ...(lgu.current_stock || {}) };
-      stockMap[category] = (stockMap[category] || 0) + quantity;
-      if (canonical) {
-        stockMap[canonical] = (stockMap[canonical] || 0) + quantity;
+      const canonicalKey = canonical || category;
+      stockMap[canonicalKey] = (stockMap[canonicalKey] || 0) + quantity;
+      if (category !== canonicalKey) {
+        stockMap[category] = stockMap[canonicalKey];
       }
       updates.current_stock = stockMap;
 
@@ -744,18 +745,26 @@ export const backendApi = {
     reason: string,
     actorName?: string
   ): Promise<{ ok: boolean }> {
+    const canonicalUpdates: Record<string, number> = {};
+    Object.entries(stockUpdates).forEach(([k, v]) => {
+      const canonical = normalizeCategoryName(k);
+      const val = Number(v) || 0;
+      if (canonical) canonicalUpdates[canonical] = val;
+      canonicalUpdates[k] = val;
+    });
+
     const updates: Record<string, unknown> = {
-      current_stock: stockUpdates,
+      current_stock: canonicalUpdates,
       updated_at: new Date().toISOString(),
       last_reported_at: new Date().toISOString()
     };
-    if (stockUpdates['Food Pack'] !== undefined) updates.food_packs = stockUpdates['Food Pack'];
-    if (stockUpdates['Hygiene Kit'] !== undefined) updates.hygiene_kits = stockUpdates['Hygiene Kit'];
-    if (stockUpdates['Sleeping Kit'] !== undefined) updates.sleeping_kits = stockUpdates['Sleeping Kit'];
-    if (stockUpdates['Kitchen Kit'] !== undefined) updates.kitchen_kits = stockUpdates['Kitchen Kit'];
-    if (stockUpdates['Family Kit'] !== undefined) updates.family_kits = stockUpdates['Family Kit'];
-    if (stockUpdates['Laminated Sack'] !== undefined) updates.laminated_sacks = stockUpdates['Laminated Sack'];
-    if (stockUpdates['RTEF'] !== undefined) updates.rtef = stockUpdates['RTEF'];
+    if (canonicalUpdates['Food Pack'] !== undefined) updates.food_packs = canonicalUpdates['Food Pack'];
+    if (canonicalUpdates['Hygiene Kit'] !== undefined) updates.hygiene_kits = canonicalUpdates['Hygiene Kit'];
+    if (canonicalUpdates['Sleeping Kit'] !== undefined) updates.sleeping_kits = canonicalUpdates['Sleeping Kit'];
+    if (canonicalUpdates['Kitchen Kit'] !== undefined) updates.kitchen_kits = canonicalUpdates['Kitchen Kit'];
+    if (canonicalUpdates['Family Kit'] !== undefined) updates.family_kits = canonicalUpdates['Family Kit'];
+    if (canonicalUpdates['Laminated Sack'] !== undefined) updates.laminated_sacks = canonicalUpdates['Laminated Sack'];
+    if (canonicalUpdates['RTEF'] !== undefined) updates.rtef = canonicalUpdates['RTEF'];
 
     try {
       const { data: currentLgu } = await supabase.from('lgus').select('max_stock, affected_families, food_packs').eq('id', lguId).maybeSingle();
@@ -944,34 +953,34 @@ export const backendApi = {
 
       return activeRows.map((row: Record<string, any>) => {
         const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
-        const foodPacks = Math.max(
-          Number(row.food_packs ?? 0),
-          Number(rawStock['Food Pack'] ?? rawStock['food_packs'] ?? 0)
-        );
-        const hygieneKits = Math.max(
-          Number(row.hygiene_kits ?? 0),
-          Number(rawStock['Hygiene Kit'] ?? rawStock['hygiene_kits'] ?? 0)
-        );
-        const sleepingKits = Math.max(
-          Number(row.sleeping_kits ?? 0),
-          Number(rawStock['Sleeping Kit'] ?? rawStock['sleeping_kits'] ?? 0)
-        );
-        const kitchenKits = Math.max(
-          Number(row.kitchen_kits ?? 0),
-          Number(rawStock['Kitchen Kit'] ?? rawStock['kitchen_kits'] ?? 0)
-        );
-        const familyKits = Math.max(
-          Number(row.family_kits ?? 0),
-          Number(rawStock['Family Kit'] ?? rawStock['family_kits'] ?? 0)
-        );
-        const laminatedSacks = Math.max(
-          Number(row.laminated_sacks ?? 0),
-          Number(rawStock['Laminated Sack'] ?? rawStock['laminated_sacks'] ?? 0)
-        );
-        const rtef = Math.max(
-          Number(row.rtef ?? 0),
-          Number(rawStock['RTEF'] ?? rawStock['rtef'] ?? 0)
-        );
+
+        let extractedFoodPacks = Number(row.food_packs ?? 0);
+        let extractedHygieneKits = Number(row.hygiene_kits ?? 0);
+        let extractedSleepingKits = Number(row.sleeping_kits ?? 0);
+        let extractedKitchenKits = Number(row.kitchen_kits ?? 0);
+        let extractedFamilyKits = Number(row.family_kits ?? 0);
+        let extractedLaminatedSacks = Number(row.laminated_sacks ?? 0);
+        let extractedRtef = Number(row.rtef ?? 0);
+
+        Object.entries(rawStock).forEach(([key, val]) => {
+          const canonical = normalizeCategoryName(key);
+          const num = Number(val) || 0;
+          if (canonical === 'Food Pack') extractedFoodPacks = Math.max(extractedFoodPacks, num);
+          else if (canonical === 'Hygiene Kit') extractedHygieneKits = Math.max(extractedHygieneKits, num);
+          else if (canonical === 'Sleeping Kit') extractedSleepingKits = Math.max(extractedSleepingKits, num);
+          else if (canonical === 'Kitchen Kit') extractedKitchenKits = Math.max(extractedKitchenKits, num);
+          else if (canonical === 'Family Kit') extractedFamilyKits = Math.max(extractedFamilyKits, num);
+          else if (canonical === 'Laminated Sack') extractedLaminatedSacks = Math.max(extractedLaminatedSacks, num);
+          else if (canonical === 'RTEF') extractedRtef = Math.max(extractedRtef, num);
+        });
+
+        const foodPacks = extractedFoodPacks;
+        const hygieneKits = extractedHygieneKits;
+        const sleepingKits = extractedSleepingKits;
+        const kitchenKits = extractedKitchenKits;
+        const familyKits = extractedFamilyKits;
+        const laminatedSacks = extractedLaminatedSacks;
+        const rtef = extractedRtef;
 
         const maxStock = Number(row.max_stock ?? 3000);
         const evalRes = evaluatePriorityIndicator({
@@ -984,7 +993,6 @@ export const backendApi = {
         const priorityColor: 'Red' | 'Yellow' | 'Green' | 'Orange' = (row.priority_color as any) || evalRes.priorityColor;
 
         const stockMerged: Record<string, number> = {
-          ...rawStock,
           'Food Pack': foodPacks,
           'Hygiene Kit': hygieneKits,
           'Sleeping Kit': sleepingKits,
@@ -993,6 +1001,14 @@ export const backendApi = {
           'Laminated Sack': laminatedSacks,
           'RTEF': rtef
         };
+
+        // Also preserve custom / dynamic non-standard categories
+        Object.entries(rawStock).forEach(([key, val]) => {
+          const canonical = normalizeCategoryName(key);
+          if (!['Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sack', 'RTEF'].includes(canonical)) {
+            stockMerged[canonical || key] = Number(val) || 0;
+          }
+        });
 
         return {
           id: String(row.id),
@@ -1109,14 +1125,22 @@ export const backendApi = {
     if (payload.maxStock !== undefined) updates.max_stock = Number(payload.maxStock) || 3000;
 
     if (payload.initialStock) {
-      updates.current_stock = payload.initialStock;
-      if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
-      if (payload.initialStock['Hygiene Kit'] !== undefined) updates.hygiene_kits = payload.initialStock['Hygiene Kit'];
-      if (payload.initialStock['Sleeping Kit'] !== undefined) updates.sleeping_kits = payload.initialStock['Sleeping Kit'];
-      if (payload.initialStock['Kitchen Kit'] !== undefined) updates.kitchen_kits = payload.initialStock['Kitchen Kit'];
-      if (payload.initialStock['Family Kit'] !== undefined) updates.family_kits = payload.initialStock['Family Kit'];
-      if (payload.initialStock['Laminated Sack'] !== undefined) updates.laminated_sacks = payload.initialStock['Laminated Sack'];
-      if (payload.initialStock['RTEF'] !== undefined) updates.rtef = payload.initialStock['RTEF'];
+      const canonicalInitial: Record<string, number> = {};
+      Object.entries(payload.initialStock).forEach(([k, v]) => {
+        const canonical = normalizeCategoryName(k);
+        const val = Number(v) || 0;
+        if (canonical) canonicalInitial[canonical] = val;
+        canonicalInitial[k] = val;
+      });
+
+      updates.current_stock = canonicalInitial;
+      if (canonicalInitial['Food Pack'] !== undefined) updates.food_packs = canonicalInitial['Food Pack'];
+      if (canonicalInitial['Hygiene Kit'] !== undefined) updates.hygiene_kits = canonicalInitial['Hygiene Kit'];
+      if (canonicalInitial['Sleeping Kit'] !== undefined) updates.sleeping_kits = canonicalInitial['Sleeping Kit'];
+      if (canonicalInitial['Kitchen Kit'] !== undefined) updates.kitchen_kits = canonicalInitial['Kitchen Kit'];
+      if (canonicalInitial['Family Kit'] !== undefined) updates.family_kits = canonicalInitial['Family Kit'];
+      if (canonicalInitial['Laminated Sack'] !== undefined) updates.laminated_sacks = canonicalInitial['Laminated Sack'];
+      if (canonicalInitial['RTEF'] !== undefined) updates.rtef = canonicalInitial['RTEF'];
       updates.last_reported_at = new Date().toISOString();
     }
 
@@ -1129,6 +1153,9 @@ export const backendApi = {
 
     if (payload.initialStock && payload.municipality) {
       try {
+        const foodReport = updates.food_packs !== undefined ? Number(updates.food_packs) : 0;
+        const hygieneReport = updates.hygiene_kits !== undefined ? Number(updates.hygiene_kits) : 0;
+        const familyReport = updates.family_kits !== undefined ? Number(updates.family_kits) : 0;
         await supabase
           .from('lgu_inventory_reports')
           .insert({
@@ -1136,9 +1163,9 @@ export const backendApi = {
             municipality: payload.municipality.trim(),
             province: payload.province?.trim() || 'Iloilo',
             lgu_name: payload.lguName?.trim() || `${payload.municipality.trim()} Municipal Office`,
-            food_packs: payload.initialStock['Food Pack'] || 0,
-            hygiene_kits: payload.initialStock['Hygiene Kit'] || 0,
-            family_kits: payload.initialStock['Family Kit'] || 0,
+            food_packs: foodReport,
+            hygiene_kits: hygieneReport,
+            family_kits: familyReport,
             reported_at: new Date().toISOString()
           });
       } catch (err) {
@@ -1328,6 +1355,17 @@ export const backendApi = {
 
     // Materialize authoritative stock & priority metrics into public.lgus
     try {
+      const { data: existingLgu } = await supabase
+        .from('lgus')
+        .select('current_stock')
+        .ilike('municipality', payload.municipality.trim())
+        .maybeSingle();
+
+      const nextStock: Record<string, number> = { ...(existingLgu?.current_stock || {}) };
+      nextStock['Food Pack'] = payload.foodPacks;
+      nextStock['Hygiene Kit'] = payload.hygieneKits;
+      nextStock['Family Kit'] = payload.familyKits;
+
       await supabase
         .from('lgus')
         .update({
@@ -1339,7 +1377,8 @@ export const backendApi = {
           urgency_score: payload.urgencyScore,
           priority_color: payload.priorityColor,
           recommendation: payload.recommendation,
-          last_reported_at: new Date().toISOString()
+          last_reported_at: new Date().toISOString(),
+          current_stock: nextStock
         })
         .ilike('municipality', payload.municipality.trim());
     } catch (lguErr) {

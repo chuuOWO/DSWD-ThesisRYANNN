@@ -554,10 +554,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                   </div>
 
                   {/* Category Breakdown Chips */}
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
                     {Object.entries(lgu.currentStock || {})
                       .filter(([_, qty]) => Number(qty) > 0)
-                      .slice(0, 4)
                       .map(([category, qty]) => (
                         <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
                           <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
@@ -655,10 +654,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                           </span>
                           <span className="text-[10px] text-gray-400 font-medium">/ {(lgu.maxStock ?? 3000).toLocaleString()} max</span>
                         </div>
-                        <div className="flex flex-wrap gap-1 max-w-xs">
+                        <div className="flex flex-wrap gap-1 max-w-sm">
                           {Object.entries(lgu.currentStock || {})
                             .filter(([_, qty]) => Number(qty) > 0)
-                            .slice(0, 3)
                             .map(([cat, qty]) => (
                               <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
                                 {cat}: {(Number(qty) || 0).toLocaleString()}

@@ -774,9 +774,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       else if (catLower.includes('rtef') || canonical === 'RTEF') updated.rtef = (updated.rtef || 0) + quantity;
 
       const currentMap = { ...(updated.currentStock || {}) };
-      currentMap[category] = (currentMap[category] || 0) + quantity;
-      if (canonical) {
-        currentMap[canonical] = (currentMap[canonical] || 0) + quantity;
+      const canonicalKey = canonical || category;
+      currentMap[canonicalKey] = (currentMap[canonicalKey] || 0) + quantity;
+      if (category !== canonicalKey) {
+        currentMap[category] = currentMap[canonicalKey];
       }
       updated.currentStock = currentMap;
       return updated;
@@ -827,11 +828,31 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     try {
       setLgusList(prev => prev.map(lgu => {
         if (lgu.id !== id) return lgu;
+        const initial = updates.initialStock || {};
+        const canonicalInitial: Record<string, number> = {};
+        Object.entries(initial).forEach(([k, v]) => {
+          const canonical = normalizeCategoryName(k);
+          const val = Number(v) || 0;
+          if (canonical) canonicalInitial[canonical] = val;
+          canonicalInitial[k] = val;
+        });
+
+        const nextCurrentStock = updates.initialStock
+          ? { ...(lgu.currentStock || {}), ...canonicalInitial }
+          : lgu.currentStock;
+
         return {
           ...lgu,
           ...updates,
+          foodPacks: canonicalInitial['Food Pack'] !== undefined ? canonicalInitial['Food Pack'] : lgu.foodPacks,
+          hygieneKits: canonicalInitial['Hygiene Kit'] !== undefined ? canonicalInitial['Hygiene Kit'] : lgu.hygieneKits,
+          sleepingKits: canonicalInitial['Sleeping Kit'] !== undefined ? canonicalInitial['Sleeping Kit'] : lgu.sleepingKits,
+          kitchenKits: canonicalInitial['Kitchen Kit'] !== undefined ? canonicalInitial['Kitchen Kit'] : lgu.kitchenKits,
+          familyKits: canonicalInitial['Family Kit'] !== undefined ? canonicalInitial['Family Kit'] : lgu.familyKits,
+          laminatedSacks: canonicalInitial['Laminated Sack'] !== undefined ? canonicalInitial['Laminated Sack'] : lgu.laminatedSacks,
+          rtef: canonicalInitial['RTEF'] !== undefined ? canonicalInitial['RTEF'] : lgu.rtef,
           maxStock: updates.maxStock !== undefined ? Number(updates.maxStock) || 3000 : (lgu.maxStock ?? 3000),
-          currentStock: updates.initialStock ? { ...lgu.currentStock, ...updates.initialStock } : lgu.currentStock
+          currentStock: nextCurrentStock
         };
       }));
 

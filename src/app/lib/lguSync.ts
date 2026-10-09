@@ -45,16 +45,15 @@ export interface SynchronizedLgu extends LguRecord {
 export function normalizeCategoryName(cat?: string | null): string {
   if (!cat) return '';
   const c = cat.trim().toLowerCase();
-  if (c.includes('food pack') || c === 'food packs') return 'Food Pack';
+  if (c.includes('food pack') || c === 'food packs' || c === 'food' || c === 'family food pack' || c === 'family food packs') return 'Food Pack';
   if (c.includes('hygiene')) return 'Hygiene Kit';
-  if (c.includes('family')) return 'Family Kit';
+  if (c.includes('family kit') || c === 'family kits' || (c.includes('family') && !c.includes('food'))) return 'Family Kit';
   if (c.includes('sleeping')) return 'Sleeping Kit';
   if (c.includes('kitchen')) return 'Kitchen Kit';
   if (c.includes('laminated') || c.includes('sack')) return 'Laminated Sack';
   if (c.includes('rtef') || c.includes('ready-to-eat')) return 'RTEF';
   return cat.trim();
 }
-
 
 /**
  * Retrieves stock count for any category name with case-insensitive and alias fallbacks.
@@ -65,30 +64,30 @@ export function getLguStockForCategory(
 ): number {
   if (!lgu || !category) return 0;
   const stock = lgu.currentStock || {};
+  const canonical = normalizeCategoryName(category);
 
   if (stock[category] !== undefined && stock[category] !== null) {
     return Number(stock[category]) || 0;
   }
 
-  const normalized = normalizeCategoryName(category);
-  if (stock[normalized] !== undefined && stock[normalized] !== null) {
-    return Number(stock[normalized]) || 0;
+  if (canonical && stock[canonical] !== undefined && stock[canonical] !== null) {
+    return Number(stock[canonical]) || 0;
   }
 
   const catLower = category.trim().toLowerCase();
   for (const [k, v] of Object.entries(stock)) {
-    if (k.trim().toLowerCase() === catLower) {
+    if (normalizeCategoryName(k).toLowerCase() === canonical.toLowerCase() || k.trim().toLowerCase() === catLower) {
       return Number(v) || 0;
     }
   }
 
-  if (catLower.includes('food pack')) return Number(lgu.foodPacks) || 0;
-  if (catLower.includes('hygiene')) return Number(lgu.hygieneKits) || 0;
-  if (catLower.includes('family kit')) return Number(lgu.familyKits) || 0;
-  if (catLower.includes('sleeping')) return Number(lgu.sleepingKits) || 0;
-  if (catLower.includes('kitchen')) return Number(lgu.kitchenKits) || 0;
-  if (catLower.includes('sack')) return Number(lgu.laminatedSacks) || 0;
-  if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) return Number(lgu.rtef) || 0;
+  if (canonical === 'Food Pack' || catLower.includes('food')) return Number(lgu.foodPacks) || 0;
+  if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) return Number(lgu.hygieneKits) || 0;
+  if (canonical === 'Family Kit' || catLower.includes('family')) return Number(lgu.familyKits) || 0;
+  if (canonical === 'Sleeping Kit' || catLower.includes('sleeping')) return Number(lgu.sleepingKits) || 0;
+  if (canonical === 'Kitchen Kit' || catLower.includes('kitchen')) return Number(lgu.kitchenKits) || 0;
+  if (canonical === 'Laminated Sack' || catLower.includes('sack')) return Number(lgu.laminatedSacks) || 0;
+  if (canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) return Number(lgu.rtef) || 0;
 
   return 0;
 }
@@ -161,82 +160,61 @@ export function computeSynchronizedLgus(params: {
     const lastDate = inboundReleases[0]?.dateAllocated || (report ? report.reportedAt?.slice(0, 10) : (lgu.lastReportedAt?.slice(0, 10) || 'N/A'));
 
     // 5. Baseline stock from record or emergency recount
-    const stock: Record<string, number> = {
-      ...(lgu.currentStock && typeof lgu.currentStock === 'object' ? lgu.currentStock : {})
+    const rawStock = (lgu.currentStock && typeof lgu.currentStock === 'object') ? lgu.currentStock : {};
+    const canonicalStock: Record<string, number> = {
+      'Food Pack': 0,
+      'Hygiene Kit': 0,
+      'Family Kit': 0,
+      'Sleeping Kit': 0,
+      'Kitchen Kit': 0,
+      'Laminated Sack': 0,
+      'RTEF': 0
     };
-    stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(lgu.foodPacks) || 0);
-    stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(lgu.hygieneKits) || 0);
-    stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(lgu.familyKits) || 0);
-    stock['Sleeping Kit'] = Math.max(Number(stock['Sleeping Kit']) || 0, Number(lgu.sleepingKits) || 0);
-    stock['Kitchen Kit'] = Math.max(Number(stock['Kitchen Kit']) || 0, Number(lgu.kitchenKits) || 0);
-    stock['Laminated Sack'] = Math.max(Number(stock['Laminated Sack']) || 0, Number(lgu.laminatedSacks) || 0);
-    stock['RTEF'] = Math.max(Number(stock['RTEF']) || 0, Number(lgu.rtef) || 0);
 
-    // 6. Aggregate verified inbound arrivals from completed deliveries and direct manifests
-    const arrivalsMap: Record<string, number> = {};
-    inboundReleases.forEach((r) => {
-      if (['Delivered', 'Accepted', 'Distributed'].includes(r.deliveryStatus) && r.fnfiCategory) {
-        const canonical = normalizeCategoryName(r.fnfiCategory);
-        const qty = Number(r.amountApproved) || Number(r.amountRequested) || 0;
-        arrivalsMap[canonical] = (arrivalsMap[canonical] || 0) + qty;
+    // First consolidate all keys in rawStock into their canonical names
+    Object.entries(rawStock).forEach(([k, v]) => {
+      const canonical = normalizeCategoryName(k);
+      const val = Number(v) || 0;
+      if (canonical) {
+        canonicalStock[canonical] = Math.max(canonicalStock[canonical] || 0, val);
       }
     });
+
+    // Merge dedicated columns from lgu record
+    canonicalStock['Food Pack'] = Math.max(canonicalStock['Food Pack'] || 0, Number(lgu.foodPacks) || 0);
+    canonicalStock['Hygiene Kit'] = Math.max(canonicalStock['Hygiene Kit'] || 0, Number(lgu.hygieneKits) || 0);
+    canonicalStock['Family Kit'] = Math.max(canonicalStock['Family Kit'] || 0, Number(lgu.familyKits) || 0);
+    canonicalStock['Sleeping Kit'] = Math.max(canonicalStock['Sleeping Kit'] || 0, Number(lgu.sleepingKits) || 0);
+    canonicalStock['Kitchen Kit'] = Math.max(canonicalStock['Kitchen Kit'] || 0, Number(lgu.kitchenKits) || 0);
+    canonicalStock['Laminated Sack'] = Math.max(canonicalStock['Laminated Sack'] || 0, Number(lgu.laminatedSacks) || 0);
+    canonicalStock['RTEF'] = Math.max(canonicalStock['RTEF'] || 0, Number(lgu.rtef) || 0);
+
+    // 6. Direct incoming goods to LGU (if any pending direct incoming manifests)
     lguIncomingDirect.forEach((inc) => {
       if (inc.fnfiCategory && Number(inc.quantity) > 0) {
         const canonical = normalizeCategoryName(inc.fnfiCategory);
-        arrivalsMap[canonical] = (arrivalsMap[canonical] || 0) + Number(inc.quantity);
+        canonicalStock[canonical] = (canonicalStock[canonical] || 0) + Number(inc.quantity);
       }
     });
 
-    Object.entries(arrivalsMap).forEach(([cat, arrivalQty]) => {
-      stock[cat] = Math.max(Number(stock[cat]) || 0, arrivalQty);
-    });
-
-    // 7. Priority report baseline if reported on-hand stock is higher
-    if (report) {
-      if (report.foodPacks) stock['Food Pack'] = Math.max(Number(stock['Food Pack']) || 0, Number(report.foodPacks));
-      if (report.hygieneKits) stock['Hygiene Kit'] = Math.max(Number(stock['Hygiene Kit']) || 0, Number(report.hygieneKits));
-      if (report.familyKits) stock['Family Kit'] = Math.max(Number(stock['Family Kit']) || 0, Number(report.familyKits));
-    }
-
-    // 8. Deduct outbound dispatches immediately where this LGU is the source
+    // 7. Deduct outbound dispatches immediately where this LGU is the source
     outboundReleases.forEach((r) => {
       if (r.fnfiCategory) {
         const canonical = normalizeCategoryName(r.fnfiCategory);
         const dispatchQty = Number(r.amountApproved) || Number(r.amountRequested) || 0;
-        stock[canonical] = Math.max(0, (Number(stock[canonical]) || 0) - dispatchQty);
+        if (canonicalStock[canonical] !== undefined) {
+          canonicalStock[canonical] = Math.max(0, canonicalStock[canonical] - dispatchQty);
+        }
       }
     });
 
-    // 9. Consolidate into strictly unique canonical categories (no duplicate alias keys)
-    const canonicalStock: Record<string, number> = {
-      'Food Pack': Math.max(0, Number(stock['Food Pack']) || 0),
-      'Hygiene Kit': Math.max(0, Number(stock['Hygiene Kit']) || 0),
-      'Family Kit': Math.max(0, Number(stock['Family Kit']) || 0),
-      'Sleeping Kit': Math.max(0, Number(stock['Sleeping Kit']) || 0),
-      'Kitchen Kit': Math.max(0, Number(stock['Kitchen Kit']) || 0),
-      'Laminated Sack': Math.max(0, Number(stock['Laminated Sack'] ?? stock['Laminated Sacks']) || 0),
-      'RTEF': Math.max(0, Number(stock['RTEF'] ?? stock['Ready-to-Eat Food']) || 0)
-    };
-
-    // Any other custom non-standard categories that are not standard kit aliases
-    Object.entries(stock).forEach(([k, v]) => {
-      const canonical = normalizeCategoryName(k);
-      if (['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'].includes(canonical)) {
-        return;
-      }
-      if (Number(v) > 0) {
-        canonicalStock[canonical] = Math.max(0, Number(v) || 0);
-      }
-    });
-
-    const foodPacks = canonicalStock['Food Pack'];
-    const hygieneKits = canonicalStock['Hygiene Kit'];
-    const familyKits = canonicalStock['Family Kit'];
-    const sleepingKits = canonicalStock['Sleeping Kit'];
-    const kitchenKits = canonicalStock['Kitchen Kit'];
-    const laminatedSacks = canonicalStock['Laminated Sack'];
-    const rtef = canonicalStock['RTEF'];
+    const foodPacks = canonicalStock['Food Pack'] || 0;
+    const hygieneKits = canonicalStock['Hygiene Kit'] || 0;
+    const familyKits = canonicalStock['Family Kit'] || 0;
+    const sleepingKits = canonicalStock['Sleeping Kit'] || 0;
+    const kitchenKits = canonicalStock['Kitchen Kit'] || 0;
+    const laminatedSacks = canonicalStock['Laminated Sack'] || 0;
+    const rtef = canonicalStock['RTEF'] || 0;
 
     const maxStock = Number(lgu.maxStock) > 0 ? Number(lgu.maxStock) : 3000;
 

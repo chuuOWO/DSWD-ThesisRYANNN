@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, MapPin, AlertCircle, Edit, Lock, Package, ShieldAlert } from 'lucide-react';
+import { X, MapPin, AlertCircle, Edit, Lock, Unlock, Package, ShieldAlert } from 'lucide-react';
 import { sanitizeTextOnly, sanitizePhone } from '../../lib/inputValidation';
 import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { normalizeCategoryName, getLguStockForCategory } from '../../lib/lguSync';
@@ -60,6 +60,30 @@ export function EditLGUModal({
   const totalOnHandItems = useMemo(() => {
     return categoriesToRender.reduce((sum, cat) => sum + getLguStockForCategory(formData, cat), 0);
   }, [categoriesToRender, formData]);
+
+  const handleStockChange = (category: string, rawVal: string) => {
+    const val = rawVal === '' ? 0 : Math.max(0, parseInt(rawVal, 10) || 0);
+    const canonical = normalizeCategoryName(category);
+    setFormData(prev => {
+      const nextStock = { ...(prev.currentStock || {}) };
+      nextStock[category] = val;
+      if (canonical) {
+        nextStock[canonical] = val;
+      }
+      const updated: LGUDelivery = {
+        ...prev,
+        currentStock: nextStock
+      };
+      if (canonical === 'Food Pack') updated.foodPacks = val;
+      else if (canonical === 'Hygiene Kit') updated.hygieneKits = val;
+      else if (canonical === 'Sleeping Kit') updated.sleepingKits = val;
+      else if (canonical === 'Kitchen Kit') updated.kitchenKits = val;
+      else if (canonical === 'Family Kit') updated.familyKits = val;
+      else if (canonical === 'Laminated Sack') updated.laminatedSacks = val;
+      else if (canonical === 'RTEF') updated.rtef = val;
+      return updated;
+    });
+  };
 
   const handleChange = (field: keyof LGUDelivery, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -257,12 +281,24 @@ export function EditLGUModal({
             </div>
           </div>
 
-          {/* Current Stock (Read-Only / Automated) */}
-          <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-4 space-y-3">
+          {/* Current Stock (Admin Mode: Editable / Read-Only otherwise) */}
+          <div className={`rounded-xl p-4 space-y-3 border ${
+            adminActionsEnabled
+              ? 'bg-purple-50/90 border-purple-300'
+              : 'bg-purple-50/70 border-purple-200'
+          }`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-purple-900 font-bold text-sm">
-                <Lock className="w-4 h-4 text-purple-700" />
-                <span>On-Hand Inventory (Locked & Automated)</span>
+                {adminActionsEnabled ? (
+                  <Unlock className="w-4 h-4 text-purple-700" />
+                ) : (
+                  <Lock className="w-4 h-4 text-purple-700" />
+                )}
+                <span>
+                  {adminActionsEnabled
+                    ? 'On-Hand Inventory (Admin Edit Active)'
+                    : 'On-Hand Inventory (Locked & Automated)'}
+                </span>
               </div>
               <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
                 {totalOnHandItems.toLocaleString()} Total Items
@@ -270,16 +306,28 @@ export function EditLGUModal({
             </div>
 
             <p className="text-xs text-purple-700 leading-relaxed">
-              LGU inventory balances are automatically updated when releases are accepted and direct incoming goods are stocked. Manual editing is restricted here to ensure chain-of-custody integrity.
+              {adminActionsEnabled
+                ? 'Administrative mode active. You may directly adjust on-hand inventory balances across all relief kit and pack categories for this LGU.'
+                : 'LGU inventory balances are automatically updated when releases are accepted and direct incoming goods are stocked. Enable Administrative Actions in Settings to edit directly.'}
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
               {categoriesToRender.map(category => {
                 const qty = getLguStockForCategory(formData, category);
                 return (
-                  <div key={category} className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-xs">
-                    <p className="text-[11px] font-semibold text-gray-500 truncate" title={category}>{category}</p>
-                    <p className="text-base font-bold text-gray-900 mt-0.5">{qty.toLocaleString()}</p>
+                  <div key={category} className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-xs space-y-1">
+                    <p className="text-[11px] font-semibold text-gray-600 truncate" title={category}>{category}</p>
+                    {adminActionsEnabled ? (
+                      <input
+                        type="number"
+                        min="0"
+                        value={qty}
+                        onChange={(e) => handleStockChange(category, e.target.value)}
+                        className="w-full px-2 py-1 text-sm font-bold text-gray-900 border border-purple-300 rounded focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono"
+                      />
+                    ) : (
+                      <p className="text-base font-bold text-gray-900">{qty.toLocaleString()}</p>
+                    )}
                   </div>
                 );
               })}
