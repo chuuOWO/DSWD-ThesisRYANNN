@@ -184,43 +184,65 @@ export async function executeGaslessCall(params: GaslessExecutionParams): Promis
     });
   }
 
-  // Attempt ERC-4337 UserOperation dispatch via Bundler & Paymaster
+  // Attempt ERC-4337 UserOperation dispatch via Alchemy Bundler & Gas Manager Paymaster
   if (BUNDLER_URL && PAYMASTER_URL) {
     try {
-      const userOp: Record<string, unknown> = {
-        sender: smartAccountAddress,
-        callData,
-        callGasLimit: '0x30d40',
-        verificationGasLimit: '0x249f0',
-        preVerificationGas: '0xc350',
-        maxFeePerGas: '0xb2d05e00',
-        maxPriorityFeePerGas: '0x59682f00',
-        paymasterAndData: '0x',
-        signature,
+      const pmPayload = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'alchemy_requestGasAndPaymasterAndData',
+        params: [{
+          policyId: PAYMASTER_POLICY_ID,
+          entryPoint: ENTRYPOINT_ADDRESS,
+          dummySignature: '0xfffffffffffffffffffffffffffffff0000000000000000000000000000000007aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1c',
+          userOperation: {
+            sender: smartAccountAddress,
+            nonce: '0x0',
+            callData,
+          }
+        }]
       };
-
-      const sponsorParams: unknown[] = [userOp, ENTRYPOINT_ADDRESS];
-      if (PAYMASTER_POLICY_ID) {
-        sponsorParams.push({ policyId: PAYMASTER_POLICY_ID });
-      }
 
       const pmRes = await fetch(PAYMASTER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'pm_sponsorUserOperation',
-          params: sponsorParams,
-        }),
+        body: JSON.stringify(pmPayload),
       });
+
+      let paymasterAndData = '0x';
+      let callGasLimit = '0x30d40';
+      let verificationGasLimit = '0x249f0';
+      let preVerificationGas = '0xc350';
+      let maxFeePerGas = '0xb2d05e00';
+      let maxPriorityFeePerGas = '0x59682f00';
 
       if (pmRes.ok) {
         const pmJson = await pmRes.json();
-        if (pmJson?.result?.paymasterAndData) {
-          userOp.paymasterAndData = pmJson.result.paymasterAndData;
+        if (pmJson?.result) {
+          paymasterAndData = pmJson.result.paymasterAndData || paymasterAndData;
+          callGasLimit = pmJson.result.callGasLimit || callGasLimit;
+          verificationGasLimit = pmJson.result.verificationGasLimit || verificationGasLimit;
+          preVerificationGas = pmJson.result.preVerificationGas || preVerificationGas;
+          maxFeePerGas = pmJson.result.maxFeePerGas || maxFeePerGas;
+          maxPriorityFeePerGas = pmJson.result.maxPriorityFeePerGas || maxPriorityFeePerGas;
+        } else if (pmJson?.error) {
+          console.warn('Alchemy Gas Manager error:', pmJson.error);
         }
       }
+
+      const userOp: Record<string, unknown> = {
+        sender: smartAccountAddress,
+        nonce: '0x0',
+        initCode: '0x',
+        callData,
+        callGasLimit,
+        verificationGasLimit,
+        preVerificationGas,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+        paymasterAndData,
+        signature,
+      };
 
       const bundlerRes = await fetch(BUNDLER_URL, {
         method: 'POST',
@@ -242,10 +264,12 @@ export async function executeGaslessCall(params: GaslessExecutionParams): Promis
             smartAccountAddress,
             mode: 'bundler_paymaster',
           };
+        } else if (bundlerJson?.error) {
+          console.warn('Alchemy Bundler eth_sendUserOperation error:', bundlerJson.error);
         }
       }
     } catch (bundlerErr) {
-      console.warn('Paymaster bundler dispatch fallback to signature:', bundlerErr);
+      console.warn('Alchemy Paymaster bundler dispatch fallback to signature:', bundlerErr);
     }
   }
 

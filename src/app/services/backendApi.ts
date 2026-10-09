@@ -219,6 +219,36 @@ export interface DiscrepancyReportPayload {
   reportedByWallet?: string;
 }
 
+export interface ActivityLogRecord {
+  id: string;
+  actorId?: string;
+  actorName: string;
+  actorEmail: string;
+  actorRole: string;
+  actorWallet?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  details: string;
+  metadata?: Record<string, unknown>;
+  txHash?: string;
+  createdAt: string;
+}
+
+export interface ActivityLogInput {
+  actorId?: string;
+  actorName?: string;
+  actorEmail?: string;
+  actorRole?: string;
+  actorWallet?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  details: string;
+  metadata?: Record<string, unknown>;
+  txHash?: string;
+}
+
 export interface OutgoingUpdatePayload {
   amountApproved?: number;
   amountRequested?: number;
@@ -337,18 +367,27 @@ export const backendApi = {
   },
 
   // --- PROVINCES ---
-  async getProvinces(): Promise<ProvinceRecord[]> {
+  async getProvinces(includeArchived = false): Promise<ProvinceRecord[]> {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('provinces')
         .select('*')
         .order('name', { ascending: true });
+
+      if (!includeArchived) {
+        query = query.neq('is_active', false);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         return DEFAULT_PROVINCES;
       }
 
-      return (data ?? []).filter((r: any) => r.is_active !== false).map(row => ({
+      const rows = data ?? [];
+      const filtered = includeArchived ? rows : rows.filter((r: any) => r.is_active !== false);
+
+      return filtered.map(row => ({
         id: String(row.id),
         name: String(row.name),
         region: String(row.region ?? 'Region VI (Western Visayas)'),
@@ -388,9 +427,27 @@ export const backendApi = {
   async deleteProvince(id: string): Promise<{ ok: boolean }> {
     const { error } = await supabase
       .from('provinces')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to archive province');
+    return { ok: true };
+  },
+
+  async restoreProvince(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('provinces')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to restore province');
+    return { ok: true };
+  },
+
+  async permanentDeleteProvince(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('provinces')
       .delete()
       .eq('id', id);
-    throwIfError(error, 'Failed to delete province');
+    throwIfError(error, 'Failed to permanently delete province');
     return { ok: true };
   },
 
@@ -398,9 +455,19 @@ export const backendApi = {
     if (ids.length === 0) return { ok: true };
     const { error } = await supabase
       .from('provinces')
-      .delete()
+      .update({ is_active: false, updated_at: new Date().toISOString() })
       .in('id', ids);
-    throwIfError(error, 'Failed to batch delete provinces');
+    throwIfError(error, 'Failed to batch archive provinces');
+    return { ok: true };
+  },
+
+  async restoreProvincesBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase
+      .from('provinces')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .in('id', ids);
+    throwIfError(error, 'Failed to batch restore provinces');
     return { ok: true };
   },
 
@@ -982,7 +1049,7 @@ export const backendApi = {
   },
 
   // --- LGUS ---
-  async getLgus(provinceFilter?: string): Promise<LguRecord[]> {
+  async getLgus(provinceFilter?: string, includeArchived = false): Promise<LguRecord[]> {
     const filteredDefaults = (provinceFilter && provinceFilter !== 'All')
       ? DEFAULT_PANAY_LGUS.filter(l => l.province.toLowerCase() === provinceFilter.trim().toLowerCase())
       : DEFAULT_PANAY_LGUS;
@@ -996,6 +1063,10 @@ export const backendApi = {
         query = query.ilike('province', provinceFilter.trim());
       }
 
+      if (!includeArchived) {
+        query = query.neq('is_active', false);
+      }
+
       const { data, error } = await query
         .order('province', { ascending: true })
         .order('municipality', { ascending: true });
@@ -1004,13 +1075,10 @@ export const backendApi = {
         if (error) {
           console.warn('Could not fetch LGUs from Supabase, using authoritative regional directory:', error.message);
         }
-        return filteredDefaults;
+        return includeArchived ? filteredDefaults : filteredDefaults.filter(l => l.isActive !== false);
       }
 
-      const activeRows = (data ?? []).filter((r: any) => r.is_active !== false);
-      if (activeRows.length === 0) {
-        return filteredDefaults;
-      }
+      const activeRows = includeArchived ? data : (data ?? []).filter((r: any) => r.is_active !== false);
 
       return activeRows.map((row: Record<string, any>) => {
         const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
@@ -1108,15 +1176,46 @@ export const backendApi = {
   },
 
   async deleteLgu(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('lgus')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to archive LGU');
+    return { ok: true };
+  },
+
+  async restoreLgu(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('lgus')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to restore LGU');
+    return { ok: true };
+  },
+
+  async permanentDeleteLgu(id: string): Promise<{ ok: boolean }> {
     const { error } = await supabase.from('lgus').delete().eq('id', id);
-    throwIfError(error, 'Failed to delete LGU');
+    throwIfError(error, 'Failed to permanently delete LGU');
     return { ok: true };
   },
 
   async deleteLgusBatch(ids: string[]): Promise<{ ok: boolean }> {
     if (ids.length === 0) return { ok: true };
-    const { error } = await supabase.from('lgus').delete().in('id', ids);
-    throwIfError(error, 'Failed to batch delete LGUs');
+    const { error } = await supabase
+      .from('lgus')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .in('id', ids);
+    throwIfError(error, 'Failed to batch archive LGUs');
+    return { ok: true };
+  },
+
+  async restoreLgusBatch(ids: string[]): Promise<{ ok: boolean }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase
+      .from('lgus')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .in('id', ids);
+    throwIfError(error, 'Failed to batch restore LGUs');
     return { ok: true };
   },
 
@@ -1767,6 +1866,121 @@ export const backendApi = {
     }
   },
 
+  // --- ACTIVITY LOGS ---
+  async logActivity(entry: ActivityLogInput): Promise<{ ok: boolean }> {
+    try {
+      let actorId = entry.actorId;
+      let actorName = entry.actorName;
+      let actorEmail = entry.actorEmail;
+      let actorRole = entry.actorRole;
+      let actorWallet = entry.actorWallet;
+
+      if (!actorEmail || !actorName) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          actorId = actorId || user.id;
+          actorEmail = actorEmail || user.email || 'system@dswd.gov.ph';
+          actorName = actorName || user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+          actorRole = actorRole || user.user_metadata?.role || 'user';
+          actorWallet = actorWallet || user.user_metadata?.wallet_address;
+        }
+      }
+
+      const { error } = await supabase
+        .from('activity_logs')
+        .insert({
+          actor_id: actorId || null,
+          actor_name: actorName || 'System User',
+          actor_email: actorEmail || 'system@dswd.gov.ph',
+          actor_role: actorRole || 'system',
+          actor_wallet: actorWallet || null,
+          action: entry.action,
+          entity_type: entry.entityType,
+          entity_id: entry.entityId || null,
+          details: entry.details,
+          metadata: entry.metadata || {},
+          tx_hash: entry.txHash || null,
+          created_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.warn('Could not insert activity log:', error.message);
+        return { ok: false };
+      }
+      return { ok: true };
+    } catch (err) {
+      console.warn('logActivity exception:', err);
+      return { ok: false };
+    }
+  },
+
+  async getActivityLogs(options?: {
+    limit?: number;
+    offset?: number;
+    search?: string;
+    action?: string;
+    entityType?: string;
+  }): Promise<ActivityLogRecord[]> {
+    try {
+      const limit = options?.limit ?? 100;
+      const offset = options?.offset ?? 0;
+
+      let query = supabase
+        .from('activity_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (options?.action && options.action !== 'all') {
+        query = query.eq('action', options.action);
+      }
+
+      if (options?.entityType && options.entityType !== 'all') {
+        query = query.eq('entity_type', options.entityType);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('Error fetching activity logs:', error.message);
+        return [];
+      }
+
+      let rows = (data ?? []).map((r: any) => ({
+        id: String(r.id),
+        actorId: r.actor_id,
+        actorName: String(r.actor_name || 'System'),
+        actorEmail: String(r.actor_email || ''),
+        actorRole: String(r.actor_role || ''),
+        actorWallet: r.actor_wallet,
+        action: String(r.action),
+        entityType: String(r.entity_type),
+        entityId: r.entity_id,
+        details: String(r.details || ''),
+        metadata: (r.metadata && typeof r.metadata === 'object') ? r.metadata : {},
+        txHash: r.tx_hash,
+        createdAt: String(r.created_at)
+      }));
+
+      if (options?.search && options.search.trim()) {
+        const q = options.search.trim().toLowerCase();
+        rows = rows.filter(r =>
+          r.actorName.toLowerCase().includes(q) ||
+          r.actorEmail.toLowerCase().includes(q) ||
+          r.action.toLowerCase().includes(q) ||
+          r.entityType.toLowerCase().includes(q) ||
+          (r.entityId && r.entityId.toLowerCase().includes(q)) ||
+          r.details.toLowerCase().includes(q) ||
+          (r.txHash && r.txHash.toLowerCase().includes(q))
+        );
+      }
+
+      return rows;
+    } catch (err) {
+      console.warn('getActivityLogs exception:', err);
+      return [];
+    }
+  },
+
   subscribeDashboard(onChange: () => void) {
     const channelName = `dashboard-db-changes-${crypto.randomUUID().slice(0, 8)}`;
     const channel = supabase
@@ -1781,6 +1995,7 @@ export const backendApi = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'provinces' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_sources' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'kit_types' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, onChange)
       .subscribe();
 
     return () => {

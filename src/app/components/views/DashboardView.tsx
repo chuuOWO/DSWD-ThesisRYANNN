@@ -127,10 +127,10 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
   const [lguPriorityTab, setLguPriorityTab] = useState<'All' | 'Red' | 'Orange' | 'Yellow' | 'Green'>('All');
   const [lguPrioritySearch, setLguPrioritySearch] = useState('');
 
-  // Use synchronized LGUs if provided, otherwise fallback to master lgusList
+  // Use synchronized LGUs if provided, otherwise fallback to master lgusList (filtering out archived)
   const effectiveLgus: (LguRecord | SynchronizedLgu)[] = useMemo(() => {
-    if (synchronizedLgusList && synchronizedLgusList.length > 0) return synchronizedLgusList;
-    return lgusList;
+    const list = (synchronizedLgusList && synchronizedLgusList.length > 0) ? synchronizedLgusList : lgusList;
+    return list.filter(l => l.isActive !== false);
   }, [synchronizedLgusList, lgusList]);
 
   // Harmonized Priority Reports matching Table 1 System Logic
@@ -519,6 +519,17 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
         urgency = 'fresh';
       }
 
+      // Exclude batches destined for decommissioned or archived LGUs from active emergency shelf-life watch
+      const destLower = (item.destination || '').trim().toLowerCase();
+      const isWarehouse = item.destinationType === 'Warehouse' || destLower.includes('warehouse') || destLower.includes('vdrc') || destLower.includes('ldrc');
+      if (!isWarehouse && destLower && effectiveLgus.length > 0) {
+        const isMatchedActive = effectiveLgus.some(l =>
+          l.municipality.toLowerCase() === destLower ||
+          l.lguName.toLowerCase().includes(destLower)
+        );
+        if (!isMatchedActive) return;
+      }
+
       batches.push({
         id: item.id,
         category: item.fnfiCategory,
@@ -537,7 +548,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile }: Dash
       expirationBuckets: buckets,
       expiringBatches: batches.slice(0, 5)
     };
-  }, [incomingGoodsList]);
+  }, [incomingGoodsList, effectiveLgus]);
 
   // BOTTOM HISTORY LOG DATA: Requests, Allocated, and Releases
   const filteredHistory = useMemo(() => {

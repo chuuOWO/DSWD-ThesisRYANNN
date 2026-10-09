@@ -13,7 +13,9 @@ import {
   Trash2,
   ExternalLink,
   Pencil,
-  Search
+  Search,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import {
   backendApi,
@@ -46,6 +48,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [dbLgus, setDbLgus] = useState<LguRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedProvinceFilter, setSelectedProvinceFilter] = useState('All');
+  const [lguStatusFilter, setLguStatusFilter] = useState<'active' | 'archived'>('active');
 
   // Search & Filter state
   const [kitSearch, setKitSearch] = useState('');
@@ -107,8 +110,8 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         backendApi.getKitTypes(),
         backendApi.getSupplySources(),
         backendApi.getWarehouses(),
-        backendApi.getProvinces(),
-        backendApi.getLgus()
+        backendApi.getProvinces(true),
+        backendApi.getLgus(undefined, true)
       ]);
       setKitTypes(kits);
       setSources(srcs);
@@ -269,6 +272,44 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     }
   };
 
+  const handleArchiveLgu = async (id: string) => {
+    try {
+      const lgu = dbLgus.find(l => l.id === id);
+      await backendApi.deleteLgu(id);
+      await backendApi.logActivity({
+        action: 'ARCHIVE_LGU',
+        entityType: 'lgu',
+        entityId: id,
+        details: `Archived municipality ${lgu?.municipality || id} (${lgu?.province || ''})`
+      });
+      const updated = await backendApi.getLgus(undefined, true);
+      setDbLgus(updated);
+      await inventoryState?.refreshLgus?.();
+      showToast(`Archived municipality: ${lgu?.municipality || id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to archive LGU');
+    }
+  };
+
+  const handleRestoreLgu = async (id: string) => {
+    try {
+      const lgu = dbLgus.find(l => l.id === id);
+      await backendApi.restoreLgu(id);
+      await backendApi.logActivity({
+        action: 'RESTORE_LGU',
+        entityType: 'lgu',
+        entityId: id,
+        details: `Restored municipality ${lgu?.municipality || id} (${lgu?.province || ''})`
+      });
+      const updated = await backendApi.getLgus(undefined, true);
+      setDbLgus(updated);
+      await inventoryState?.refreshLgus?.();
+      showToast(`Restored municipality: ${lgu?.municipality || id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to restore LGU');
+    }
+  };
+
   const handleAddWarehouse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWhName.trim()) return;
@@ -312,9 +353,12 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     return true;
   });
 
-  const filteredLgus = selectedProvinceFilter === 'All' 
-    ? dbLgus 
-    : dbLgus.filter(l => l.province.toLowerCase() === selectedProvinceFilter.toLowerCase());
+  const filteredLgus = dbLgus.filter(l => {
+    const matchesStatus = lguStatusFilter === 'active' ? (l.isActive !== false) : (l.isActive === false);
+    if (!matchesStatus) return false;
+    if (selectedProvinceFilter === 'All') return true;
+    return l.province.toLowerCase() === selectedProvinceFilter.toLowerCase();
+  });
 
   return (
     <div className="space-y-6">
@@ -585,33 +629,56 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
             </div>
           </div>
 
-          {/* Province Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            <button
-              type="button"
-              onClick={() => setSelectedProvinceFilter('All')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                selectedProvinceFilter === 'All'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              All Provinces
-            </button>
-            {provinces.map((prov) => (
+          {/* Status Filter Toggle & Province Filter Pills */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl w-fit">
               <button
-                key={prov.id}
                 type="button"
-                onClick={() => setSelectedProvinceFilter(prov.name)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-                  selectedProvinceFilter === prov.name
+                onClick={() => setLguStatusFilter('active')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  lguStatusFilter === 'active' ? 'bg-[#2500ba] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Active ({dbLgus.filter(l => l.isActive !== false).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setLguStatusFilter('archived')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  lguStatusFilter === 'archived' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Archived ({dbLgus.filter(l => l.isActive === false).length})
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+              <button
+                type="button"
+                onClick={() => setSelectedProvinceFilter('All')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  selectedProvinceFilter === 'All'
                     ? 'bg-blue-600 text-white'
                     : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
                 }`}
               >
-                {prov.name}
+                All Provinces
               </button>
-            ))}
+              {provinces.map((prov) => (
+                <button
+                  key={prov.id}
+                  type="button"
+                  onClick={() => setSelectedProvinceFilter(prov.name)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                    selectedProvinceFilter === prov.name
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {prov.name}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* LGUs Grid */}
@@ -619,10 +686,38 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
             {filteredLgus.map((lgu: any) => (
               <div key={lgu.id || lgu.municipality} className="p-3.5 rounded-xl border border-gray-200 bg-white shadow-xs space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-gray-900">{lgu.municipality}</h4>
-                  <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                    {lgu.province}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <h4 className="text-xs font-bold text-gray-900">{lgu.municipality}</h4>
+                    {lgu.isActive === false && (
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300">
+                        Archived
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                      {lgu.province}
+                    </span>
+                    {lgu.isActive === false ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreLgu(lgu.id)}
+                        className="p-1 rounded-md text-emerald-700 hover:bg-emerald-50 transition cursor-pointer"
+                        title="Restore Municipality"
+                      >
+                        <RotateCcw size={12} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleArchiveLgu(lgu.id)}
+                        className="p-1 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition cursor-pointer"
+                        title="Archive Municipality"
+                      >
+                        <Archive size={12} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="text-[11px] text-gray-500 font-mono">
                   GPS: {(lgu.latitude ?? lgu.lat)?.toFixed(4)}, {(lgu.longitude ?? lgu.lng)?.toFixed(4)}
@@ -632,6 +727,11 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                 )}
               </div>
             ))}
+            {filteredLgus.length === 0 && (
+              <div className="col-span-full text-center py-8 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                {lguStatusFilter === 'active' ? 'No active municipalities found matching filter.' : 'No archived municipalities found.'}
+              </div>
+            )}
           </div>
         </div>
       )}

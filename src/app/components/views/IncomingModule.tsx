@@ -88,6 +88,23 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [actionModal, setActionModal] = useState<IncomingActionModalState | null>(null);
 
+  const isArchivedDestination = (destination?: string, destinationType?: string) => {
+    if (!destination) return false;
+    const dest = destination.trim().toLowerCase();
+    if (destinationType === 'Warehouse' || dest.includes('warehouse')) {
+      const wh = warehousesList.find(w => w.name.toLowerCase() === dest);
+      return wh ? wh.isActive === false : false;
+    }
+    if (lgusList.length > 0) {
+      const matched = lgusList.find(l =>
+        l.municipality.toLowerCase() === dest ||
+        l.lguName.toLowerCase().includes(dest)
+      );
+      if (!matched || matched.isActive === false) return true;
+    }
+    return false;
+  };
+
   const destinationOptions = useMemo(() => {
     const set = new Set<string>();
     warehousesList?.forEach(w => {
@@ -376,6 +393,11 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                         {item.destinationType === 'Warehouse' ? 'Warehouse' : 'LGU'}
                       </span>
                       <span className="font-semibold text-sm text-gray-900">{item.destination}</span>
+                      {isArchivedDestination(item.destination, item.destinationType) && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
+                          Archived
+                        </span>
+                      )}
                     </div>
                     <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                       <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">RIS Ref:</span>

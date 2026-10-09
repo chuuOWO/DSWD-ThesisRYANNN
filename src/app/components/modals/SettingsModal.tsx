@@ -23,7 +23,9 @@ import {
   Map,
   Search,
   Filter,
-  ShieldAlert
+  ShieldAlert,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
@@ -133,6 +135,8 @@ export function SettingsModal({
   // LGU Filters
   const [lguProvinceFilter, setLguProvinceFilter] = useState('All');
   const [lguSearchQuery, setLguSearchQuery] = useState('');
+  const [provinceStatusFilter, setProvinceStatusFilter] = useState<'active' | 'archived'>('active');
+  const [lguStatusFilter, setLguStatusFilter] = useState<'active' | 'archived'>('active');
 
   // Add Item states
   const [isAddingKit, setIsAddingKit] = useState(false);
@@ -209,8 +213,8 @@ export function SettingsModal({
         backendApi.getKitTypes(),
         backendApi.getSupplySources(),
         backendApi.getWarehouses(),
-        backendApi.getProvinces(),
-        backendApi.getLgus()
+        backendApi.getProvinces(true),
+        backendApi.getLgus(undefined, true)
       ]);
       setKitTypes(kitsData);
       setSources(sourcesData);
@@ -613,6 +617,13 @@ export function SettingsModal({
   };
 
   // --- PROVINCES ---
+  const filteredProvinces = useMemo(() => {
+    return provinces.filter(p => {
+      if (provinceStatusFilter === 'active') return p.isActive !== false;
+      return p.isActive === false;
+    });
+  }, [provinces, provinceStatusFilter]);
+
   const handleAddProvince = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProvince.name.trim()) return;
@@ -620,7 +631,7 @@ export function SettingsModal({
     setMasterDataFeedback(null);
     try {
       await backendApi.createProvince(newProvince.name.trim(), newProvince.region.trim());
-      const updated = await backendApi.getProvinces();
+      const updated = await backendApi.getProvinces(true);
       setProvinces(updated);
       setNewProvince({ name: '', region: 'Region VI (Western Visayas)' });
       setIsAddingProvince(false);
@@ -633,34 +644,85 @@ export function SettingsModal({
     }
   };
 
-  const handleDeleteSingleProvince = async (id: string) => {
+  const handleArchiveSingleProvince = async (id: string) => {
     setIsMutatingMasterData(true);
     setMasterDataFeedback(null);
     try {
+      const prov = provinces.find(p => p.id === id);
       await backendApi.deleteProvince(id);
-      setProvinces(prev => prev.filter(p => p.id !== id));
+      await backendApi.logActivity({
+        action: 'ARCHIVE_PROVINCE',
+        entityType: 'province',
+        entityId: id,
+        details: `Archived province ${prov?.name || id}`
+      });
+      const updated = await backendApi.getProvinces(true);
+      setProvinces(updated);
       setSelectedProvinceIds(prev => prev.filter(pId => pId !== id));
-      setMasterDataFeedback({ type: 'success', text: 'Province deleted.' });
+      setMasterDataFeedback({ type: 'success', text: 'Province archived.' });
       onMasterDataChanged?.();
     } catch (err) {
-      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete province.' });
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to archive province.' });
     } finally {
       setIsMutatingMasterData(false);
     }
   };
 
-  const handleDeleteSelectedProvinces = async () => {
+  const handleRestoreSingleProvince = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      const prov = provinces.find(p => p.id === id);
+      await backendApi.restoreProvince(id);
+      await backendApi.logActivity({
+        action: 'RESTORE_PROVINCE',
+        entityType: 'province',
+        entityId: id,
+        details: `Restored province ${prov?.name || id}`
+      });
+      const updated = await backendApi.getProvinces(true);
+      setProvinces(updated);
+      setSelectedProvinceIds(prev => prev.filter(pId => pId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Province restored to active status.' });
+      onMasterDataChanged?.();
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to restore province.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleArchiveSelectedProvinces = async () => {
     if (selectedProvinceIds.length === 0) return;
     setIsMutatingMasterData(true);
     setMasterDataFeedback(null);
     try {
       await backendApi.deleteProvincesBatch(selectedProvinceIds);
-      setProvinces(prev => prev.filter(p => !selectedProvinceIds.includes(p.id)));
+      const updated = await backendApi.getProvinces(true);
+      setProvinces(updated);
       setSelectedProvinceIds([]);
-      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedProvinceIds.length} province(s).` });
+      setMasterDataFeedback({ type: 'success', text: `Archived ${selectedProvinceIds.length} province(s).` });
       onMasterDataChanged?.();
     } catch (err) {
-      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete provinces.' });
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch archive provinces.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleRestoreSelectedProvinces = async () => {
+    if (selectedProvinceIds.length === 0) return;
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.restoreProvincesBatch(selectedProvinceIds);
+      const updated = await backendApi.getProvinces(true);
+      setProvinces(updated);
+      setSelectedProvinceIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Restored ${selectedProvinceIds.length} province(s).` });
+      onMasterDataChanged?.();
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch restore provinces.' });
     } finally {
       setIsMutatingMasterData(false);
     }
@@ -671,16 +733,19 @@ export function SettingsModal({
   };
 
   const handleToggleSelectAllProvinces = () => {
-    if (selectedProvinceIds.length === provinces.length) {
+    const ids = filteredProvinces.map(p => p.id);
+    if (selectedProvinceIds.length === ids.length) {
       setSelectedProvinceIds([]);
     } else {
-      setSelectedProvinceIds(provinces.map(p => p.id));
+      setSelectedProvinceIds(ids);
     }
   };
 
   // --- MUNICIPALITIES / LGUS ---
   const filteredLgus = useMemo(() => {
     return dbLgus.filter(lgu => {
+      const matchStatus = lguStatusFilter === 'active' ? (lgu.isActive !== false) : (lgu.isActive === false);
+      if (!matchStatus) return false;
       const matchProv = lguProvinceFilter === 'All' || lgu.province.toLowerCase() === lguProvinceFilter.toLowerCase();
       const matchSearch = !lguSearchQuery.trim() ||
         lgu.municipality.toLowerCase().includes(lguSearchQuery.trim().toLowerCase()) ||
@@ -688,7 +753,7 @@ export function SettingsModal({
         lgu.lguName.toLowerCase().includes(lguSearchQuery.trim().toLowerCase());
       return matchProv && matchSearch;
     });
-  }, [dbLgus, lguProvinceFilter, lguSearchQuery]);
+  }, [dbLgus, lguProvinceFilter, lguSearchQuery, lguStatusFilter]);
 
   const handleAddLgu = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -705,7 +770,7 @@ export function SettingsModal({
         latitude: Number(newLgu.latitude) || 10.7,
         longitude: Number(newLgu.longitude) || 122.5
       });
-      const updated = await backendApi.getLgus();
+      const updated = await backendApi.getLgus(undefined, true);
       setDbLgus(updated);
       setNewLgu({
         municipality: '',
@@ -726,34 +791,85 @@ export function SettingsModal({
     }
   };
 
-  const handleDeleteSingleLgu = async (id: string) => {
+  const handleArchiveSingleLgu = async (id: string) => {
     setIsMutatingMasterData(true);
     setMasterDataFeedback(null);
     try {
+      const lgu = dbLgus.find(l => l.id === id);
       await backendApi.deleteLgu(id);
-      setDbLgus(prev => prev.filter(l => l.id !== id));
+      await backendApi.logActivity({
+        action: 'ARCHIVE_LGU',
+        entityType: 'lgu',
+        entityId: id,
+        details: `Archived municipality ${lgu?.municipality || id} (${lgu?.province || ''})`
+      });
+      const updated = await backendApi.getLgus(undefined, true);
+      setDbLgus(updated);
       setSelectedLguIds(prev => prev.filter(lId => lId !== id));
-      setMasterDataFeedback({ type: 'success', text: 'Municipality / LGU deleted.' });
+      setMasterDataFeedback({ type: 'success', text: 'Municipality archived.' });
       onMasterDataChanged?.();
     } catch (err) {
-      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to delete LGU.' });
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to archive LGU.' });
     } finally {
       setIsMutatingMasterData(false);
     }
   };
 
-  const handleDeleteSelectedLgus = async () => {
+  const handleRestoreSingleLgu = async (id: string) => {
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      const lgu = dbLgus.find(l => l.id === id);
+      await backendApi.restoreLgu(id);
+      await backendApi.logActivity({
+        action: 'RESTORE_LGU',
+        entityType: 'lgu',
+        entityId: id,
+        details: `Restored municipality ${lgu?.municipality || id} (${lgu?.province || ''})`
+      });
+      const updated = await backendApi.getLgus(undefined, true);
+      setDbLgus(updated);
+      setSelectedLguIds(prev => prev.filter(lId => lId !== id));
+      setMasterDataFeedback({ type: 'success', text: 'Municipality restored to active status.' });
+      onMasterDataChanged?.();
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to restore LGU.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleArchiveSelectedLgus = async () => {
     if (selectedLguIds.length === 0) return;
     setIsMutatingMasterData(true);
     setMasterDataFeedback(null);
     try {
       await backendApi.deleteLgusBatch(selectedLguIds);
-      setDbLgus(prev => prev.filter(l => !selectedLguIds.includes(l.id)));
+      const updated = await backendApi.getLgus(undefined, true);
+      setDbLgus(updated);
       setSelectedLguIds([]);
-      setMasterDataFeedback({ type: 'success', text: `Deleted ${selectedLguIds.length} LGU(s).` });
+      setMasterDataFeedback({ type: 'success', text: `Archived ${selectedLguIds.length} LGU(s).` });
       onMasterDataChanged?.();
     } catch (err) {
-      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch delete LGUs.' });
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch archive LGUs.' });
+    } finally {
+      setIsMutatingMasterData(false);
+    }
+  };
+
+  const handleRestoreSelectedLgus = async () => {
+    if (selectedLguIds.length === 0) return;
+    setIsMutatingMasterData(true);
+    setMasterDataFeedback(null);
+    try {
+      await backendApi.restoreLgusBatch(selectedLguIds);
+      const updated = await backendApi.getLgus(undefined, true);
+      setDbLgus(updated);
+      setSelectedLguIds([]);
+      setMasterDataFeedback({ type: 'success', text: `Restored ${selectedLguIds.length} LGU(s).` });
+      onMasterDataChanged?.();
+    } catch (err) {
+      setMasterDataFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to batch restore LGUs.' });
     } finally {
       setIsMutatingMasterData(false);
     }
@@ -1827,31 +1943,65 @@ export function SettingsModal({
               {/* Sub-Tab 4: Provinces */}
               {!isLoadingMasterData && dataSubTab === 'provinces' && (
                 <div className="space-y-3">
+                  {/* Status Segmented Switcher */}
+                  <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl w-fit">
+                    <button
+                      type="button"
+                      onClick={() => { setProvinceStatusFilter('active'); setSelectedProvinceIds([]); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        provinceStatusFilter === 'active' ? 'bg-[#2500ba] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Active ({provinces.filter(p => p.isActive !== false).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setProvinceStatusFilter('archived'); setSelectedProvinceIds([]); }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        provinceStatusFilter === 'archived' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      Archived ({provinces.filter(p => p.isActive === false).length})
+                    </button>
+                  </div>
+
                   {/* Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gray-50 border border-gray-200">
                     <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
-                        checked={provinces.length > 0 && selectedProvinceIds.length === provinces.length}
+                        checked={filteredProvinces.length > 0 && selectedProvinceIds.length === filteredProvinces.length}
                         onChange={handleToggleSelectAllProvinces}
                         className="w-4 h-4 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
                       />
                       <span className="text-xs font-semibold text-gray-700">
-                        Select All ({selectedProvinceIds.length}/{provinces.length})
+                        Select All ({selectedProvinceIds.length}/{filteredProvinces.length})
                       </span>
                     </label>
 
                     <div className="flex items-center gap-2">
                       {selectedProvinceIds.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleDeleteSelectedProvinces}
-                          disabled={isMutatingMasterData}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete Selected ({selectedProvinceIds.length})</span>
-                        </button>
+                        provinceStatusFilter === 'active' ? (
+                          <button
+                            type="button"
+                            onClick={handleArchiveSelectedProvinces}
+                            disabled={isMutatingMasterData}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                            <span>Archive Selected ({selectedProvinceIds.length})</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleRestoreSelectedProvinces}
+                            disabled={isMutatingMasterData}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Restore Selected ({selectedProvinceIds.length})</span>
+                          </button>
+                        )
                       )}
                       <button
                         type="button"
@@ -1918,7 +2068,7 @@ export function SettingsModal({
 
                   {/* Provinces List */}
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {provinces.map(prov => {
+                    {filteredProvinces.map(prov => {
                       const isSelected = selectedProvinceIds.includes(prov.id);
                       const linkedLguCount = dbLgus.filter(l => l.province.toLowerCase() === prov.name.toLowerCase()).length;
                       return (
@@ -1948,25 +2098,44 @@ export function SettingsModal({
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                              Active
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSingleProvince(prov.id)}
-                              disabled={isMutatingMasterData}
-                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
-                              title="Delete Province"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {prov.isActive === false ? (
+                              <>
+                                <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                                  Archived
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreSingleProvince(prov.id)}
+                                  disabled={isMutatingMasterData}
+                                  className="p-1 rounded text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer disabled:opacity-50"
+                                  title="Restore Province"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                  Active
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleArchiveSingleProvince(prov.id)}
+                                  disabled={isMutatingMasterData}
+                                  className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition cursor-pointer disabled:opacity-50"
+                                  title="Archive Province"
+                                >
+                                  <Archive className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       );
                     })}
-                    {provinces.length === 0 && (
+                    {filteredProvinces.length === 0 && (
                       <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                        No provinces defined in Supabase database. Click "+ Add Province" to create one.
+                        {provinceStatusFilter === 'active' ? 'No active provinces found.' : 'No archived provinces found.'}
                       </div>
                     )}
                   </div>
@@ -1976,35 +2145,58 @@ export function SettingsModal({
               {/* Sub-Tab 5: LGUs & Municipalities */}
               {!isLoadingMasterData && dataSubTab === 'lgus' && (
                 <div className="space-y-3">
-                  {/* Province Filter & Municipality Search Controls */}
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <div className="relative min-w-[200px]">
-                      <select
-                        value={lguProvinceFilter}
-                        onChange={e => setLguProvinceFilter(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-700 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                  {/* Status Segmented Switcher & Search Controls */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 p-1 bg-gray-100 rounded-xl w-fit">
+                      <button
+                        type="button"
+                        onClick={() => { setLguStatusFilter('active'); setSelectedLguIds([]); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          lguStatusFilter === 'active' ? 'bg-[#2500ba] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                        }`}
                       >
-                        <option value="All">All Provinces ({dbLgus.length} LGUs)</option>
-                        {provinces.map(prov => {
-                          const count = dbLgus.filter(l => l.province.toLowerCase() === prov.name.toLowerCase()).length;
-                          return (
-                            <option key={prov.id} value={prov.name}>
-                              {prov.name} ({count})
-                            </option>
-                          );
-                        })}
-                      </select>
+                        Active ({dbLgus.filter(l => l.isActive !== false).length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setLguStatusFilter('archived'); setSelectedLguIds([]); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                          lguStatusFilter === 'archived' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                        }`}
+                      >
+                        Archived ({dbLgus.filter(l => l.isActive === false).length})
+                      </button>
                     </div>
 
-                    <div className="relative flex-1">
-                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={lguSearchQuery}
-                        onChange={e => setLguSearchQuery(e.target.value)}
-                        placeholder="Search municipality or LGU name..."
-                        className="w-full pl-8 pr-3 py-2 rounded-xl border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      />
+                    <div className="flex items-center gap-2 flex-1 max-w-lg">
+                      <div className="relative min-w-[160px]">
+                        <select
+                          value={lguProvinceFilter}
+                          onChange={e => setLguProvinceFilter(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-xl border border-gray-300 bg-white text-xs font-semibold text-gray-700 focus:ring-2 focus:ring-blue-500 focus:outline-none cursor-pointer"
+                        >
+                          <option value="All">All Provinces</option>
+                          {provinces.map(prov => {
+                            const count = dbLgus.filter(l => l.province.toLowerCase() === prov.name.toLowerCase()).length;
+                            return (
+                              <option key={prov.id} value={prov.name}>
+                                {prov.name} ({count})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={lguSearchQuery}
+                          onChange={e => setLguSearchQuery(e.target.value)}
+                          placeholder="Search municipality..."
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-gray-300 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 
@@ -2024,15 +2216,27 @@ export function SettingsModal({
 
                     <div className="flex items-center gap-2">
                       {selectedLguIds.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleDeleteSelectedLgus}
-                          disabled={isMutatingMasterData}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete Selected ({selectedLguIds.length})</span>
-                        </button>
+                        lguStatusFilter === 'active' ? (
+                          <button
+                            type="button"
+                            onClick={handleArchiveSelectedLgus}
+                            disabled={isMutatingMasterData}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                            <span>Archive Selected ({selectedLguIds.length})</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleRestoreSelectedLgus}
+                            disabled={isMutatingMasterData}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition cursor-pointer disabled:opacity-50"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Restore Selected ({selectedLguIds.length})</span>
+                          </button>
+                        )
                       )}
                       <button
                         type="button"
@@ -2044,7 +2248,7 @@ export function SettingsModal({
                         title="Authorized Stock Overrides & Discrepancy Audits"
                       >
                         <ShieldAlert className="w-3.5 h-3.5 text-red-600" />
-                        <span>Emergency Stock Correction</span>
+                        <span>Emergency Recount</span>
                       </button>
                       <button
                         type="button"
@@ -2186,33 +2390,52 @@ export function SettingsModal({
                             <span className="text-[10px] font-mono text-gray-400">
                               {Number(lgu.latitude).toFixed(3)}, {Number(lgu.longitude).toFixed(3)}
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEmergencyCorrectionLguId(lgu.id);
-                                setIsEmergencyCorrectionOpen(true);
-                              }}
-                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                              title="Emergency Stock Recount"
-                            >
-                              <ShieldAlert className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSingleLgu(lgu.id)}
-                              disabled={isMutatingMasterData}
-                              className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-50"
-                              title="Delete LGU"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {lgu.isActive === false ? (
+                              <>
+                                <span className="text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                                  Archived
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestoreSingleLgu(lgu.id)}
+                                  disabled={isMutatingMasterData}
+                                  className="p-1 rounded text-gray-500 hover:text-emerald-700 hover:bg-emerald-50 transition cursor-pointer disabled:opacity-50"
+                                  title="Restore LGU"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEmergencyCorrectionLguId(lgu.id);
+                                    setIsEmergencyCorrectionOpen(true);
+                                  }}
+                                  className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                                  title="Emergency Stock Recount"
+                                >
+                                  <ShieldAlert className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleArchiveSingleLgu(lgu.id)}
+                                  disabled={isMutatingMasterData}
+                                  className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition cursor-pointer disabled:opacity-50"
+                                  title="Archive LGU"
+                                >
+                                  <Archive className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
                       );
                     })}
                     {filteredLgus.length === 0 && (
                       <div className="text-center py-6 text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                        No municipalities found matching your filter.
+                        {lguStatusFilter === 'active' ? 'No active municipalities found.' : 'No archived municipalities found.'}
                       </div>
                     )}
                   </div>

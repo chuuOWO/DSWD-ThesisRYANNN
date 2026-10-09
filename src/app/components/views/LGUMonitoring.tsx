@@ -192,9 +192,11 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   }, [inventoryState?.outgoingReleasesList]);
 
   const priorityReports = inventoryState?.lguPriorityReports || [];
+  const [showArchived, setShowArchived] = useState(false);
 
   const filteredLGUs = useMemo(() => {
     return baseLguList.filter(lgu => {
+      if (!showArchived && lgu?.isActive === false) return false;
       const q = (searchTerm || '').toLowerCase();
       const matchesSearch = (lgu?.lguName || '').toLowerCase().includes(q) ||
                             (lgu?.municipality || '').toLowerCase().includes(q);
@@ -207,7 +209,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
       return matchesSearch && matchesProvince && matchesCategory;
     });
-  }, [baseLguList, searchTerm, selectedProvinceTab, selectedCategory]);
+  }, [baseLguList, searchTerm, selectedProvinceTab, selectedCategory, showArchived]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLGUs.length / pageSize));
   const paginatedLGUs = useMemo(() => {
@@ -468,24 +470,39 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           </select>
         </div>
 
-        {/* View mode toggle */}
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200 self-end md:self-center">
-          <button
-            type="button"
-            onClick={() => setViewMode('cards')}
-            className={`p-2 rounded-md transition-all ${viewMode === 'cards' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
-            title="Card View"
-          >
-            <LayoutGrid className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode('table')}
-            className={`p-2 rounded-md transition-all ${viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
-            title="Table View"
-          >
-            <List className="w-4 h-4" />
-          </button>
+        {/* View mode & Archive toggles */}
+        <div className="flex items-center gap-3 self-end md:self-center">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-600 cursor-pointer select-none px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => {
+                setShowArchived(e.target.checked);
+                setCurrentPage(1);
+              }}
+              className="w-3.5 h-3.5 rounded text-[#2500ba] focus:ring-[#2500ba] border-gray-300 cursor-pointer"
+            />
+            <span>Show Archived</span>
+          </label>
+
+          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className={`p-2 rounded-md transition-all ${viewMode === 'cards' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
+              title="Card View"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`p-2 rounded-md transition-all ${viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
+              title="Table View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -503,7 +520,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     <span className="inline-block text-[10px] font-mono font-semibold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5 truncate max-w-full" title={lgu.id}>
                       {lgu.id}
                     </span>
-                    <h3 className="font-bold text-base text-gray-900 truncate" title={lgu.municipality}>{lgu.municipality}</h3>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="font-bold text-base text-gray-900 truncate" title={lgu.municipality}>{lgu.municipality}</h3>
+                      {lgu.isActive === false && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
+                          Archived
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
                   </div>
                 </div>
@@ -624,7 +648,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     <td className="px-6 py-4">
                       <div>
                         <span className="block text-[10px] font-mono text-purple-700 font-semibold leading-tight">{lgu.id}</span>
-                        <span className="font-bold text-sm text-gray-900">{lgu.municipality}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-sm text-gray-900">{lgu.municipality}</span>
+                          {lgu.isActive === false && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
+                              Archived
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-4">

@@ -1745,6 +1745,40 @@ where truck_id not in (
 and (current_dr_number is null or current_dr_number = '');
 
 -- ==============================================================================
+-- 14. TABLE: activity_logs (Platform Audit Trail & Action History)
+-- ==============================================================================
+create table if not exists public.activity_logs (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid references public.profiles(id) on delete set null,
+  actor_name text not null,
+  actor_email text not null,
+  actor_role text not null,
+  actor_wallet text,
+  action text not null,
+  entity_type text not null,
+  entity_id text,
+  details text not null,
+  metadata jsonb default '{}'::jsonb,
+  tx_hash text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_activity_logs_created_at on public.activity_logs (created_at desc);
+create index if not exists idx_activity_logs_action on public.activity_logs (action);
+
+alter table public.activity_logs enable row level security;
+
+create policy "Allow all authenticated users to read activity logs"
+  on public.activity_logs for select
+  to authenticated
+  using (true);
+
+create policy "Allow authenticated users to insert activity logs"
+  on public.activity_logs for insert
+  to authenticated
+  with check (true);
+
+-- ==============================================================================
 -- END OF SCHEMA SCRIPT
 -- ==============================================================================
 

@@ -1150,6 +1150,25 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       setIntegrationMode('mock');
     });
 
+    backendApi.logActivity({
+      action: 'MINT_BATCH_TOKEN',
+      entityType: 'BatchToken',
+      entityId: tokenId,
+      details: `Minted ERC-1155 batch token ${tokenId} (${item.quantity} ${item.unitType || 'units'} of ${item.fnfiCategory}) for manifest ${item.id}.`,
+      txHash: proof.hash,
+      actorRole,
+      actorWallet: proof.walletAddress,
+      metadata: {
+        manifestId: item.id,
+        batchTokenId: tokenId,
+        manifestHash: item.manifestHash,
+        category: item.fnfiCategory,
+        quantity: item.quantity,
+        destination: item.destination,
+        txHash: proof.hash
+      }
+    }).catch(() => {});
+
     return { ok: true, message: `${tokenId} minted and stock posted via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
   };
 
@@ -1409,6 +1428,27 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Sign outgoing release')(error);
       setIntegrationMode('mock');
     });
+
+    backendApi.logActivity({
+      action: 'SIGN_RELEASE',
+      entityType: 'OutgoingRelease',
+      entityId: drNumber,
+      details: `Signed custody handover for ${drNumber} departing ${release.warehouseSource} to ${release.lguName}.`,
+      txHash: proof.hash,
+      actorRole: 'Receiver',
+      actorWallet: proof.walletAddress,
+      metadata: {
+        drNumber,
+        handoverContractId,
+        category: release.fnfiCategory,
+        quantity: release.amountApproved || release.amountRequested,
+        from: release.warehouseSource,
+        to: release.lguName,
+        gps: senderGps,
+        txHash: proof.hash
+      }
+    }).catch(() => {});
+
     return { ok: true, message: `Sender signature recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
   };
 
@@ -1509,6 +1549,22 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Accept outgoing handover')(error);
     });
 
+    backendApi.logActivity({
+      action: 'CONFIRM_RECEIPT',
+      entityType: 'OutgoingRelease',
+      entityId: canonicalDr,
+      details: `Confirmed physical receipt of delivery ${canonicalDr} at ${release.lguName}. Handover finalized on-chain.`,
+      txHash: proof.hash,
+      actorRole: 'LGUReceiver',
+      actorWallet: proof.walletAddress,
+      metadata: {
+        drNumber: canonicalDr,
+        destination: release.lguName,
+        gps: latestGps,
+        txHash: proof.hash
+      }
+    }).catch(() => {});
+
     return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
   };
 
@@ -1537,6 +1593,21 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         reason,
         currentActor.name
       );
+
+      backendApi.logActivity({
+        action: 'STOCK_RECOUNT',
+        entityType: 'LGU',
+        entityId: lguId,
+        details: `Emergency physical stock correction for ${targetLgu.municipality}, ${targetLgu.province}. Reason: ${reason}.`,
+        actorRole: currentActor.role,
+        metadata: {
+          lguId,
+          municipality: targetLgu.municipality,
+          province: targetLgu.province,
+          reason,
+          newStock: canonicalNewStock
+        }
+      }).catch(() => {});
 
       // Update in-memory lgusList state immediately
       setLgusList(prev => prev.map(lgu => {
