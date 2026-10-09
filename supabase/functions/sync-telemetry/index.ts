@@ -10,7 +10,7 @@ const RELIEF_TRACKER_ABI = parseAbi([
 const RPC_URL = Deno.env.get('RPC_URL') || Deno.env.get('VITE_BLOCKCHAIN_RPC_URL') || 'https://eth-sepolia.g.alchemy.com/v2/demo';
 const CONTRACT_ADDRESS = (Deno.env.get('CONTRACT_ADDRESS') ||
   Deno.env.get('VITE_RELIEF_TRACKER_CONTRACT_ADDRESS') ||
-  '0x4ca82b943107a32a3e3fe05a2ad057f602d496e5') as `0x${string}`;
+  '0xd2e957dda5a5099980a66ecc736b541590892588') as `0x${string}`;
 const BACKEND_PRIVATE_KEY = Deno.env.get('BACKEND_SIGNER_PRIVATE_KEY') as `0x${string}`;
 
 serve(async (req) => {
