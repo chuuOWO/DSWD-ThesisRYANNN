@@ -4,7 +4,6 @@ import { Sidebar } from './components/layout/Sidebar';
 import { AuthPage } from './components/auth/AuthPage';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { ConfirmLogoutModal } from './components/modals/ConfirmLogoutModal';
-import { MetaMaskMismatchModal } from './components/modals/MetaMaskMismatchModal';
 import { useInventoryState, type UserRole } from './hooks/useInventoryState';
 import { useAuth } from './contexts/AuthContext';
 import { authApi, type UserProfile } from './services/authApi';
@@ -149,14 +148,6 @@ export default function App() {
           onAccept={inventoryState.receiverAcceptWithGps}
           onSignOut={requestSignOut}
         />
-        <MetaMaskMismatchModal
-          isOpen={walletMismatch && Boolean(profile?.walletAddress)}
-          registeredWallet={profile?.walletAddress || ''}
-          activeWallet={walletAddress}
-          onSignOut={async () => {
-            await signOut();
-          }}
-        />
         <ConfirmLogoutModal
           isOpen={isLogoutConfirmOpen}
           onConfirm={async () => {
@@ -174,14 +165,6 @@ export default function App() {
     return (
       <Suspense fallback={<ViewLoading />}>
         <ReceiverPage profile={activeProfile} lgusList={inventoryState.lgusList} onSignOut={requestSignOut} />
-        <MetaMaskMismatchModal
-          isOpen={walletMismatch && Boolean(profile?.walletAddress)}
-          registeredWallet={profile?.walletAddress || ''}
-          activeWallet={walletAddress}
-          onSignOut={async () => {
-            await signOut();
-          }}
-        />
         <ConfirmLogoutModal
           isOpen={isLogoutConfirmOpen}
           onConfirm={async () => {
@@ -294,15 +277,6 @@ export default function App() {
           await signOut();
         }}
         onCancel={() => setIsLogoutConfirmOpen(false)}
-      />
-
-      <MetaMaskMismatchModal
-        isOpen={walletMismatch && Boolean(profile?.walletAddress)}
-        registeredWallet={profile?.walletAddress || ''}
-        activeWallet={walletAddress}
-        onSignOut={async () => {
-          await signOut();
-        }}
       />
     </div>
   );
