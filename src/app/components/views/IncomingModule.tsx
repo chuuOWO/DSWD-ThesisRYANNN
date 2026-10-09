@@ -18,7 +18,6 @@ interface InventoryState {
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
   requestIncomingCorrection: (id: string, note: string) => void;
-  mintBatchToken: (id: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
 }
 
 interface IncomingModuleProps {
@@ -74,7 +73,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     submitIncomingForVerification,
     verifyIncomingReceipt,
     requestIncomingCorrection,
-    mintBatchToken,
     warehousesList = [],
     supplySourcesList = [],
     kitTypesList = [],
@@ -84,7 +82,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingIncoming, setEditingIncoming] = useState<IncomingGoods | null>(null);
-  const [isMintingId, setIsMintingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -516,43 +513,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                         <button onClick={() => openActionModal('verify', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
                           <CheckCircle className="w-3 h-3" /> Verify & Stock
                         </button>
-                      )}
-                      {item.status === 'Verified' && currentRole === 'Admin' && (
-                        <button
-                          onClick={async () => {
-                            setIsMintingId(item.id);
-                            try {
-                              const res = await mintBatchToken(item.id, currentRole);
-                              if (res.ok) {
-                                showResult(`Batch token for ${item.id} minted successfully on Sepolia.`);
-                              } else {
-                                showResult(res.message);
-                              }
-                            } catch (err: any) {
-                              showResult(err?.message || 'Failed to mint batch token on Sepolia.');
-                            } finally {
-                              setIsMintingId(null);
-                            }
-                          }}
-                          disabled={isMintingId === item.id}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold bg-[#2500ba] text-white rounded-lg hover:bg-blue-800 disabled:opacity-50 transition shadow-xs cursor-pointer"
-                          title="Mint ERC-1155 Batch Token on Sepolia Blockchain"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          {isMintingId === item.id ? 'Minting...' : 'Mint on Sepolia'}
-                        </button>
-                      )}
-                      {item.status === 'Minted' && item.blockchainTxHash && (
-                        <a
-                          href={`https://sepolia.etherscan.io/tx/${item.blockchainTxHash}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition shadow-xs"
-                          title="View on Sepolia Etherscan"
-                        >
-                          <ShieldCheck className="w-3 h-3 text-purple-600" />
-                          <span>Sepolia ({item.blockchainTxHash.slice(0, 6)}...{item.blockchainTxHash.slice(-4)})</span>
-                        </a>
                       )}
                       {['Verified', 'Minted', 'Correction Requested'].includes(item.status) && (
                         <button onClick={() => openActionModal('correction', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer">
