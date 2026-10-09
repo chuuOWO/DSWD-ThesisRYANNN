@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle } from 'lucide-react';
+import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle, Boxes, Building2, ArrowRight } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
@@ -68,7 +68,6 @@ interface IncomingActionModalState {
 export function IncomingModule({ inventoryState, currentRole }: IncomingModuleProps) {
   const {
     incomingGoodsList,
-    discrepancyReports,
     addIncomingGoods,
     updateIncomingGoods,
     submitIncomingForVerification,
@@ -239,7 +238,73 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     .filter(item => item.destinationType === 'Warehouse' && (item.status === 'Verified' || item.status === 'Minted'))
     .reduce((sum, item) => sum + item.quantity, 0);
 
-  const incomingDiscrepancies = discrepancyReports.filter(report => report.reportType === 'Incoming');
+  // Breakdown of intake volume by supply source
+  const sourceBreakdown = useMemo(() => {
+    const map = new Map<string, { count: number; totalQty: number }>();
+    let grandTotal = 0;
+
+    incomingGoodsList.forEach(item => {
+      const src = item.source?.trim() || 'Unspecified';
+      const prev = map.get(src) || { count: 0, totalQty: 0 };
+      prev.count += 1;
+      prev.totalQty += item.quantity || 0;
+      map.set(src, prev);
+      grandTotal += item.quantity || 0;
+    });
+
+    const entries = Array.from(map.entries())
+      .map(([source, stats]) => ({
+        source,
+        count: stats.count,
+        totalQty: stats.totalQty,
+        percentage: grandTotal > 0 ? Math.round((stats.totalQty / grandTotal) * 100) : 0
+      }))
+      .sort((a, b) => b.totalQty - a.totalQty);
+
+    return { entries, grandTotal };
+  }, [incomingGoodsList]);
+
+  // Breakdown of incoming stock allocated per destination facility
+  const destinationBreakdown = useMemo(() => {
+    const map = new Map<string, { count: number; totalQty: number }>();
+    let grandTotal = 0;
+
+    incomingGoodsList.forEach(item => {
+      const dest = item.destination?.trim() || 'Unspecified';
+      const prev = map.get(dest) || { count: 0, totalQty: 0 };
+      prev.count += 1;
+      prev.totalQty += item.quantity || 0;
+      map.set(dest, prev);
+      grandTotal += item.quantity || 0;
+    });
+
+    const entries = Array.from(map.entries())
+      .map(([destination, stats]) => ({
+        destination,
+        count: stats.count,
+        totalQty: stats.totalQty,
+        percentage: grandTotal > 0 ? Math.round((stats.totalQty / grandTotal) * 100) : 0
+      }))
+      .sort((a, b) => b.totalQty - a.totalQty);
+
+    return { entries, grandTotal };
+  }, [incomingGoodsList]);
+
+  // Most recent 5 incoming deliveries for the activity stream
+  const recentIntakes = useMemo(() => {
+    return [...incomingGoodsList]
+      .sort((a, b) => new Date(b.dateReceived || 0).getTime() - new Date(a.dateReceived || 0).getTime())
+      .slice(0, 5);
+  }, [incomingGoodsList]);
+
+  // Verification lifecycle pipeline counts
+  const pipelineStats = useMemo(() => {
+    const draft = incomingGoodsList.filter(i => i.status === 'Draft').length;
+    const pending = incomingGoodsList.filter(i => i.status === 'Pending Verification').length;
+    const verified = incomingGoodsList.filter(i => i.status === 'Verified' || i.status === 'Minted').length;
+    const correction = incomingGoodsList.filter(i => i.status === 'Correction Requested').length;
+    return { draft, pending, verified, correction };
+  }, [incomingGoodsList]);
 
   return (
     <div className="space-y-6">
@@ -529,38 +594,146 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
         )}
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-gray-900">Incoming Discrepancy Reports</h3>
-            <p className="text-sm text-gray-600">Reported quantity mismatches or receiving issues.</p>
+      {/* Intake Distribution & Verification Activity Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Supply Source & Allocation Distribution */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Boxes className="w-5 h-5 text-blue-600" />
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Supply Source Intake Distribution</h3>
+                <p className="text-xs text-gray-500">Volume and deliveries received per source facility</p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-200">
+              {sourceBreakdown.entries.length} {sourceBreakdown.entries.length === 1 ? 'Source' : 'Sources'}
+            </span>
           </div>
-          <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-bold">
-            {incomingDiscrepancies.length} total
-          </span>
-        </div>
-        <div className="p-6">
-          {incomingDiscrepancies.length > 0 ? (
-            <div className="space-y-3">
-              {incomingDiscrepancies.slice(0, 5).map(report => (
-                <div key={report.id} className="flex items-start justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-gray-900">{report.manifestNumber || 'Unknown Manifest'}</p>
-                    <p className="text-xs text-gray-600 mt-1">{report.note}</p>
-                    <p className="text-[11px] text-gray-500 mt-2">Reported {report.reportedAt}</p>
+
+          <div className="p-6 flex-1 flex flex-col justify-between">
+            {sourceBreakdown.entries.length > 0 ? (
+              <div className="space-y-4">
+                {sourceBreakdown.entries.slice(0, 5).map((item) => (
+                  <div key={item.source} className="space-y-1.5">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-bold text-gray-800 flex items-center gap-1.5">
+                        <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                        {item.source}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-500">{item.count} {item.count === 1 ? 'shipment' : 'shipments'}</span>
+                        <span className="font-bold text-gray-900">{item.totalQty.toLocaleString()} units</span>
+                        <span className="font-semibold text-blue-600 w-9 text-right">{item.percentage}%</span>
+                      </div>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(item.percentage, 3)}%` }}
+                      />
+                    </div>
                   </div>
-                  <span className="shrink-0 inline-flex items-center px-2 py-1 rounded-full text-[11px] font-bold bg-blue-100 text-blue-700">
-                    Incoming
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 text-center text-sm text-gray-500">
+                No incoming delivery records recorded yet.
+              </div>
+            )}
+
+            <div className="mt-6 pt-4 border-t border-gray-100">
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Destination Allocation</p>
+              <div className="flex flex-wrap gap-2">
+                {destinationBreakdown.entries.slice(0, 4).map((dest) => (
+                  <span
+                    key={dest.destination}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-gray-100 text-gray-700 text-xs"
+                  >
+                    <span className="font-medium text-gray-600">{dest.destination}:</span>
+                    <strong className="text-gray-900">{dest.totalQty.toLocaleString()}</strong>
                   </span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          ) : (
-            <div className="p-4 bg-green-50 rounded-lg border border-green-100">
-              <p className="text-sm font-bold text-green-900">No discrepancy reports yet</p>
-              <p className="text-xs text-green-700 mt-1">Incoming mismatches will appear here once filed.</p>
+          </div>
+        </div>
+
+        {/* Receiving Activity & Verification Pipeline */}
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <FileCheck2 className="w-5 h-5 text-indigo-600" />
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Receiving Activity & Verification Pipeline</h3>
+                <p className="text-xs text-gray-500">Verification lifecycle status and recent delivery receipts</p>
+              </div>
             </div>
-          )}
+            <span className="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">
+              {incomingGoodsList.length} Total Batches
+            </span>
+          </div>
+
+          <div className="p-6 flex-1 flex flex-col justify-between">
+            {/* Pipeline Stage Counters */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="p-2.5 rounded-lg bg-green-50 border border-green-100 text-center">
+                <span className="block text-xs font-medium text-green-700">Verified & Stocked</span>
+                <span className="block text-lg font-bold text-green-800">{pipelineStats.verified}</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-yellow-50 border border-yellow-100 text-center">
+                <span className="block text-xs font-medium text-yellow-700">For Verification</span>
+                <span className="block text-lg font-bold text-yellow-800">{pipelineStats.pending}</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-gray-100 border border-gray-200 text-center">
+                <span className="block text-xs font-medium text-gray-600">Drafts</span>
+                <span className="block text-lg font-bold text-gray-800">{pipelineStats.draft}</span>
+              </div>
+            </div>
+
+            {/* Recent Deliveries List */}
+            {recentIntakes.length > 0 ? (
+              <div className="space-y-2.5">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Recent Receipts</p>
+                {recentIntakes.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50 border border-gray-100 hover:bg-gray-100/70 transition text-xs"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-900 truncate">{item.fnfiCategory}</span>
+                        <span className="font-mono text-[11px] text-gray-500">
+                          {item.incidentCode ? item.incidentCode : item.id}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mt-0.5">
+                        <span>{item.source}</span>
+                        <ArrowRight className="w-3 h-3 text-gray-400" />
+                        <span className="font-medium text-gray-700">{item.destination}</span>
+                        <span>&middot;</span>
+                        <span>{item.quantity.toLocaleString()} {item.unitType}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end flex-shrink-0">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusStyles[item.status]}`}>
+                        {statusLabels[item.status]}
+                      </span>
+                      <span className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                        <Calendar className="w-2.5 h-2.5" />
+                        {item.dateReceived}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 text-center text-sm text-gray-500">
+                No recent incoming receipts recorded.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
