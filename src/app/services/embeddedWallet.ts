@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase';
 const RPC_URL = import.meta.env.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/demo';
 const BUNDLER_URL = import.meta.env.VITE_BUNDLER_RPC_URL;
 const PAYMASTER_URL = import.meta.env.VITE_PAYMASTER_RPC_URL;
+const PAYMASTER_POLICY_ID = import.meta.env.VITE_PAYMASTER_POLICY_ID;
 const CONTRACT_ADDRESS = (import.meta.env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
   '0x4ca82b943107a32a3e3fe05a2ad057f602d496e5') as Address;
 const ENTRYPOINT_ADDRESS = (import.meta.env.VITE_ENTRYPOINT_ADDRESS ||
@@ -170,6 +171,11 @@ export async function executeGaslessCall(params: GaslessExecutionParams): Promis
         signature,
       };
 
+      const sponsorParams: unknown[] = [userOp, ENTRYPOINT_ADDRESS];
+      if (PAYMASTER_POLICY_ID) {
+        sponsorParams.push({ policyId: PAYMASTER_POLICY_ID });
+      }
+
       const pmRes = await fetch(PAYMASTER_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -177,7 +183,7 @@ export async function executeGaslessCall(params: GaslessExecutionParams): Promis
           jsonrpc: '2.0',
           id: 1,
           method: 'pm_sponsorUserOperation',
-          params: [userOp, ENTRYPOINT_ADDRESS],
+          params: sponsorParams,
         }),
       });
 

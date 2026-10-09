@@ -41,8 +41,9 @@ jobs:
           VITE_BLOCKCHAIN_CHAIN_ID: '11155111'
           VITE_BLOCKCHAIN_CHAIN_NAME: 'Sepolia'
           VITE_BLOCKCHAIN_RPC_URL: ${{ secrets.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/omM_Iuble2BuREAtDvGm-' }}
-          VITE_BUNDLER_RPC_URL: ${{ secrets.VITE_BUNDLER_RPC_URL || 'https://api.pimlico.io/v2/11155111/rpc?apikey=pim_demo' }}
-          VITE_PAYMASTER_RPC_URL: ${{ secrets.VITE_PAYMASTER_RPC_URL || 'https://api.pimlico.io/v2/11155111/rpc?apikey=pim_demo' }}
+          VITE_BUNDLER_RPC_URL: ${{ secrets.VITE_BUNDLER_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/omM_Iuble2BuREAtDvGm-' }}
+          VITE_PAYMASTER_RPC_URL: ${{ secrets.VITE_PAYMASTER_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/omM_Iuble2BuREAtDvGm-' }}
+          VITE_PAYMASTER_POLICY_ID: ${{ secrets.VITE_PAYMASTER_POLICY_ID || '279eadf8-e338-4d09-ba15-52702854bbd6' }}
           VITE_ENTRYPOINT_ADDRESS: ${{ secrets.VITE_ENTRYPOINT_ADDRESS || '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' }}
           VITE_BACKEND_WORKER_ADDRESS: ${{ secrets.VITE_BACKEND_WORKER_ADDRESS || '0xd2e957dda5a5099980a66ecc736b541590892588' }}
         run: npm run build
