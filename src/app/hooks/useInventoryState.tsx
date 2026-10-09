@@ -1745,6 +1745,20 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
             affectedFamilies: l.affectedFamilies,
             targetQuota: maxStock
           });
+          const hasEmergency = Number(l.affectedFamilies ?? 0) > 0 || Number(l.damageIndex ?? 0) > 0;
+          const priorityColor: PriorityColor = hasEmergency
+            ? evalRes.priorityColor
+            : (l.priorityColor as PriorityColor)
+              || (evalRes.effectiveRate >= 75 ? 'Green' : evalRes.effectiveRate >= 50 ? 'Yellow' : evalRes.effectiveRate >= 25 ? 'Orange' : 'Green');
+          const priorityLevel: PriorityLevel = priorityColor === 'Red' ? 'Severe'
+            : priorityColor === 'Orange' ? 'Low'
+            : priorityColor === 'Yellow' ? 'Medium'
+            : 'Adequate';
+          const urgencyScore = priorityColor === 'Red' ? Math.max(75, evalRes.urgencyScore)
+            : priorityColor === 'Orange' ? Math.min(74, Math.max(50, evalRes.urgencyScore))
+            : priorityColor === 'Yellow' ? Math.min(49, Math.max(25, evalRes.urgencyScore))
+            : Math.min(24, Math.max(5, evalRes.urgencyScore));
+
           return {
             id: l.id,
             lguId: l.id,
@@ -1757,9 +1771,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
             affectedFamilies: l.affectedFamilies,
             damageIndex: l.damageIndex,
             maxStock,
-            urgencyScore: evalRes.urgencyScore,
-            priorityColor: evalRes.priorityColor,
-            priorityLevel: evalRes.priorityLevel,
+            urgencyScore,
+            priorityColor,
+            priorityLevel,
             stockRate: evalRes.stockRate,
             completionRate: evalRes.completionRate,
             effectiveRate: evalRes.effectiveRate,
@@ -1793,6 +1807,20 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           affectedFamilies: l.affectedFamilies,
           targetQuota: maxStock
         });
+        const hasEmergency = Number(l.affectedFamilies ?? 0) > 0 || Number(l.damageIndex ?? 0) > 0;
+        const priorityColor: PriorityColor = hasEmergency
+          ? evalRes.priorityColor
+          : (l.priorityColor as PriorityColor)
+            || (evalRes.effectiveRate >= 75 ? 'Green' : evalRes.effectiveRate >= 50 ? 'Yellow' : evalRes.effectiveRate >= 25 ? 'Orange' : 'Green');
+        const priorityLevel: PriorityLevel = priorityColor === 'Red' ? 'Severe'
+          : priorityColor === 'Orange' ? 'Low'
+          : priorityColor === 'Yellow' ? 'Medium'
+          : 'Adequate';
+        const urgencyScore = priorityColor === 'Red' ? Math.max(75, evalRes.urgencyScore)
+          : priorityColor === 'Orange' ? Math.min(74, Math.max(50, evalRes.urgencyScore))
+          : priorityColor === 'Yellow' ? Math.min(49, Math.max(25, evalRes.urgencyScore))
+          : Math.min(24, Math.max(5, evalRes.urgencyScore));
+
         return {
           id: l.id,
           lguId: l.id,
@@ -1805,9 +1833,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           affectedFamilies: l.affectedFamilies,
           damageIndex: l.damageIndex,
           maxStock,
-          urgencyScore: evalRes.urgencyScore,
-          priorityColor: evalRes.priorityColor,
-          priorityLevel: evalRes.priorityLevel,
+          urgencyScore,
+          priorityColor,
+          priorityLevel,
           stockRate: evalRes.stockRate,
           completionRate: evalRes.completionRate,
           effectiveRate: evalRes.effectiveRate,
