@@ -63,7 +63,7 @@ const contractAddress =
   import.meta.env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
   import.meta.env.VITE_BATCH_TOKEN_CONTRACT_ADDRESS ||
   import.meta.env.VITE_HANDOVER_CONTRACT_ADDRESS ||
-  '0x9d6FBCE1BDfc9c6fAD604c1640aB13252d3296A8';
+  '0xCde64aBedE22F9842F5678Fe4cd84781960863eC';
 const batchTokenContractAddress = contractAddress;
 const handoverContractAddress = contractAddress;
 const targetChainId = Number(import.meta.env.VITE_BLOCKCHAIN_CHAIN_ID ?? 11155111);

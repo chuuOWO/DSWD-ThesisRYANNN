@@ -3,9 +3,14 @@ const fs = require('fs');
 
 async function main() {
   const rpcUrl = process.env.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/omM_Iuble2BuREAtDvGm-';
-  const privateKey = process.env.VITE_SEPOLIA_RELAYER_PRIVATE_KEY;
+  let privateKey = process.env.VITE_SEPOLIA_RELAYER_PRIVATE_KEY;
+  if (!privateKey && fs.existsSync('.env')) {
+    const envContent = fs.readFileSync('.env', 'utf8');
+    const match = envContent.match(/VITE_SEPOLIA_RELAYER_PRIVATE_KEY\s*=\s*(.+)/);
+    if (match) privateKey = match[1].trim();
+  }
   if (!privateKey) {
-    throw new Error('VITE_SEPOLIA_RELAYER_PRIVATE_KEY required in environment');
+    throw new Error('VITE_SEPOLIA_RELAYER_PRIVATE_KEY required in environment or .env');
   }
   
   const provider = new ethers.JsonRpcProvider(rpcUrl);

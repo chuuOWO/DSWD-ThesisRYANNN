@@ -4648,7 +4648,8 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
         uint256 hid,
         string[] memory batchTokenIds,
         uint256[] memory batchQuantities,
-        uint256 expectedQuantity
+        uint256 expectedQuantity,
+        address driver
     ) internal {
         uint256 allocatedTotal = 0;
         for (uint256 i = 0; i < batchTokenIds.length; i++) {
@@ -4657,11 +4658,13 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
             require(batchQuantities[i] > 0, "Invalid batch qty");
             allocatedTotal += batchQuantities[i];
 
-            // If tokens were previously held by external wallet, ensure transferred to escrow
-            address tokenHolder = batches[batchId].mintedBy != address(0) ? batches[batchId].mintedBy : owner();
-            if (balanceOf(address(this), batchId) < batchQuantities[i] && tokenHolder != address(this)) {
-                _safeTransferFrom(tokenHolder, address(this), batchId, batchQuantities[i], "");
-            }
+            // Resolve token source: vault address(this), msg.sender, or owner()
+            address source = balanceOf(address(this), batchId) >= batchQuantities[i]
+                ? address(this)
+                : (balanceOf(msg.sender, batchId) >= batchQuantities[i] ? msg.sender : owner());
+
+            // Physical Token Hop 1: Warehouse / Vault -> Driver Wallet
+            _safeTransferFrom(source, driver, batchId, batchQuantities[i], "");
         }
         require(allocatedTotal == expectedQuantity, "Batch qty mismatch");
         handovers[hid].batchTokenIds = batchTokenIds;
@@ -4735,7 +4738,7 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
             senderGps,
             driver
         );
-        _executeReleaseBatchTransfers(newHandoverId, batchTokenIds, batchQuantities, quantity);
+        _executeReleaseBatchTransfers(newHandoverId, batchTokenIds, batchQuantities, quantity, driver);
 
         handoverIdByDrNumber[drNumber] = newHandoverId;
         handoverIdByContractId[handoverContractId] = newHandoverId;
@@ -4777,6 +4780,12 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
             note: bytes(note).length > 0 ? note : "Mid-Route Transshipment"
         }));
 
+        // Physical Token Hop: Driver A -> Driver B
+        for (uint256 i = 0; i < h.batchTokenIds.length; i++) {
+            uint256 batchId = batchIdByTokenId[h.batchTokenIds[i]];
+            _safeTransferFrom(previousDriver, newDriver, batchId, h.batchQuantities[i], "");
+        }
+
         emit CustodyTransshipped(hid, drNumber, previousDriver, newDriver, transferGps, block.timestamp);
         return hid;
     }
@@ -4797,7 +4806,7 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
         );
     }
 
-    // 5-argument confirmReceipt releasing tokens from Escrow directly into the verified LGU wallet
+    // 5-argument confirmReceipt releasing tokens directly into the verified LGU wallet
     function confirmReceiptForLgu(
         string memory drNumber,
         string memory handoverContractId,
@@ -4844,10 +4853,13 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
             note: "LGU Delivery Confirmed"
         }));
 
-        // Escrow Release: Transfer ERC-1155 tokens directly from address(this) to LGU
+        // Physical Token Hop: Delivering Driver (or Escrow) -> LGU Recipient
         for (uint256 i = 0; i < handover.batchTokenIds.length; i++) {
             uint256 batchId = batchIdByTokenId[handover.batchTokenIds[i]];
-            _safeTransferFrom(address(this), finalRecipient, batchId, handover.batchQuantities[i], "");
+            address tokenSource = balanceOf(deliveringDriver, batchId) >= handover.batchQuantities[i]
+                ? deliveringDriver
+                : (balanceOf(address(this), batchId) >= handover.batchQuantities[i] ? address(this) : owner());
+            _safeTransferFrom(tokenSource, finalRecipient, batchId, handover.batchQuantities[i], "");
         }
 
         emit ReceiptConfirmed(handoverId, drNumber, handoverContractId, receiverGps, finalRecipient);
