@@ -655,11 +655,28 @@ export const authApi = {
   },
 
   async verifyOldPassword(email: string, oldPassword: string): Promise<boolean> {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+    const { data: sessionData } = await supabase.auth.getSession();
+    const activeSessionEmail = sessionData?.session?.user?.email;
+
+    // 1. Try the active session's authenticated email first
+    const primaryEmail = (activeSessionEmail || email).trim();
+    const { error: primaryError } = await supabase.auth.signInWithPassword({
+      email: primaryEmail,
       password: oldPassword
     });
-    return !error;
+
+    if (!primaryError) return true;
+
+    // 2. Fallback: if session email differs from profile email, try profile email as alternate
+    if (activeSessionEmail && email.trim().toLowerCase() !== activeSessionEmail.trim().toLowerCase()) {
+      const { error: fallbackError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: oldPassword
+      });
+      return !fallbackError;
+    }
+
+    return false;
   },
 
   async changePasswordWithVerification(email: string, oldPassword: string, newPassword: string) {

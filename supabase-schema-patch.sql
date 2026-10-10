@@ -1941,6 +1941,71 @@ $$;
 grant execute on function public.admin_decline_email_change(uuid) to authenticated;
 
 -- ==============================================================================
+-- 16. AUTOMATIC BIDIRECTIONAL EMAIL SYNCHRONIZATION TRIGGERS
+-- ==============================================================================
+
+-- 16.1 Sync auth.users email -> public.profiles email
+create or replace function public.sync_auth_user_email_to_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if pg_trigger_depth() > 1 then
+    return new;
+  end if;
+
+  if new.email is distinct from old.email and new.email is not null then
+    update public.profiles
+    set email = lower(trim(new.email)),
+        updated_at = now()
+    where id = new.id;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_email_updated on auth.users;
+create trigger on_auth_user_email_updated
+  after update of email on auth.users
+  for each row
+  execute function public.sync_auth_user_email_to_profile();
+
+-- 16.2 Sync public.profiles email -> auth.users email
+create or replace function public.sync_profile_email_to_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  if pg_trigger_depth() > 1 then
+    return new;
+  end if;
+
+  if new.email is distinct from old.email and new.email is not null and trim(new.email) <> '' then
+    update auth.users
+    set email = lower(trim(new.email)),
+        raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('email', lower(trim(new.email))),
+        email_confirmed_at = coalesce(email_confirmed_at, now()),
+        updated_at = now()
+    where id = new.id;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_profile_email_updated on public.profiles;
+create trigger on_profile_email_updated
+  after update of email on public.profiles
+  for each row
+  execute function public.sync_profile_email_to_auth_user();
+
+-- ==============================================================================
 -- END OF SCHEMA SCRIPT
 -- ==============================================================================
+
 
