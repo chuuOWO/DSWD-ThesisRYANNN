@@ -175,11 +175,23 @@ const toTruckRoute = (
   profiles: UserProfile[] = [],
   lgus: LguRecord[] = []
 ): TruckRoute => {
-  const matchingProfile = profiles.find((p) =>
-    (p.truckId && p.truckId.trim().toUpperCase() === location.truck_id.trim().toUpperCase()) ||
-    (location.wallet_address && p.walletAddress && p.walletAddress.trim().toLowerCase() === location.wallet_address.trim().toLowerCase())
+  // 1. Look for verified receiver profile by exact truck_id match first (1-to-1 unique receiver UID mapping)
+  let matchingProfile = profiles.find((p) =>
+    p.role === 'receiver' &&
+    p.truckId &&
+    p.truckId.trim().toUpperCase() === location.truck_id.trim().toUpperCase()
   );
-  const driverName = matchingProfile?.fullName;
+
+  // 2. Fallback: match by receiver wallet address only if not found by truck_id
+  if (!matchingProfile && location.wallet_address) {
+    matchingProfile = profiles.find((p) =>
+      p.role === 'receiver' &&
+      p.walletAddress &&
+      p.walletAddress.trim().toLowerCase() === location.wallet_address.trim().toLowerCase()
+    );
+  }
+
+  const driverName = matchingProfile?.fullName || location.driver_name || undefined;
   const hasActiveProfile = Boolean(
     matchingProfile &&
     matchingProfile.role === 'receiver' &&
