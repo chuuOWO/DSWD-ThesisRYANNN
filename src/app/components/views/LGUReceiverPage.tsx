@@ -8,20 +8,20 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
-  Edit3,
   Layers,
   LocateFixed,
-  Minus,
   Package,
-  Plus,
-  Save,
   ScanLine,
   Settings,
   Truck,
   X,
   LogOut,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  Menu,
+  Home,
+  MapPin,
+  Clock
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -426,17 +426,12 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
 
   const routePath = roadRoute;
 
-  // 4. LGU Inventory Drawer State & Supabase Stock
+  // 4. Navigation Drawers & LGU Inventory State (Read-only for LGU recipient)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isUpcomingDeliveriesOpen, setIsUpcomingDeliveriesOpen] = useState(false);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [lguStock, setLguStock] = useState<{ foodPacks: number; hygieneKits: number; familyKits: number; lastReported?: string } | null>(null);
-
-  // Manage LGU stock states
-  const [isEditingStock, setIsEditingStock] = useState(false);
-  const [isSavingStock, setIsSavingStock] = useState(false);
-  const [editFoodPacks, setEditFoodPacks] = useState(0);
-  const [editHygieneKits, setEditHygieneKits] = useState(0);
-  const [editFamilyKits, setEditFamilyKits] = useState(0);
 
   const loadLguStock = async () => {
     if (!targetMuni) return;
@@ -459,9 +454,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
           familyKits: fk,
           lastReported: matched.reportedAt
         });
-        setEditFoodPacks(fp);
-        setEditHygieneKits(hk);
-        setEditFamilyKits(fk);
       }
     } catch {}
   };
@@ -469,57 +461,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   useEffect(() => {
     loadLguStock();
   }, [targetMuni, effectiveLguName]);
-
-  const handleSaveStock = async () => {
-    const muniName = canonicalUserLgu?.municipality || effectiveLguName;
-    if (!muniName) {
-      setToastMessage({ type: 'error', text: 'No LGU designated for this account.' });
-      return;
-    }
-    const provName = canonicalUserLgu?.province || 'Iloilo';
-    setIsSavingStock(true);
-    try {
-      const fp = Math.max(0, Number(editFoodPacks) || 0);
-      const hk = Math.max(0, Number(editHygieneKits) || 0);
-      const fk = Math.max(0, Number(editFamilyKits) || 0);
-
-      const urgencyScore = Math.max(10, Math.min(100, Math.round(100 - (fp / 5))));
-      const priorityColor: 'Red' | 'Yellow' | 'Green' = fp < 100 ? 'Red' : fp <= 300 ? 'Yellow' : 'Green';
-      const recommendation = fp < 100
-        ? 'Urgent restocking needed (stock below 100 packs).'
-        : fp <= 300
-          ? 'Moderate stock levels. Prepare replenishment request.'
-          : 'Stock levels sufficient.';
-
-      await backendApi.createLGUInventoryReport({
-        municipality: muniName,
-        province: provName,
-        lguName: `${muniName} Municipal Office`,
-        foodPacks: fp,
-        hygieneKits: hk,
-        familyKits: fk,
-        affectedFamilies: 0,
-        damageIndex: 0,
-        urgencyScore,
-        priorityColor,
-        recommendation
-      });
-
-      setLguStock({
-        foodPacks: fp,
-        hygieneKits: hk,
-        familyKits: fk,
-        lastReported: new Date().toISOString()
-      });
-
-      setIsEditingStock(false);
-      setToastMessage({ type: 'success', text: 'LGU inventory updated and synchronized with Supabase.' });
-    } catch (err) {
-      setToastMessage({ type: 'error', text: formatUserErrorMessage(err, 'Unable to update LGU stock. Please check your connection.') });
-    } finally {
-      setIsSavingStock(false);
-    }
-  };
 
   // 5. Camera QR Scanner & Direct Inventory Acceptance
   const [isScanning, setIsScanning] = useState(false);
@@ -636,12 +577,16 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         throw new Error(`Unable to determine verified shipment quantity for ${canonicalDrNumber}. QR payload and registered release record are missing a valid positive quantity.`);
       }
 
-      // Check if already accepted
-      if (matchingRelease?.deliveryStatus === 'Accepted' || locallyAcceptedDrs.includes(canonicalDrNumber.toUpperCase())) {
+      // Check if already accepted or delivered (double-scan protection & endpoint finality)
+      if (
+        matchingRelease?.deliveryStatus === 'Accepted' ||
+        matchingRelease?.deliveryStatus === 'Distributed' ||
+        locallyAcceptedDrs.includes(canonicalDrNumber.toUpperCase())
+      ) {
         setIsProcessing(false);
         setToastMessage({
           type: 'error',
-          text: `Shipment ${canonicalDrNumber} has already been received and accepted into ${effectiveLguName || 'LGU'} inventory. This QR code has completed its delivery cycle and is no longer active.`
+          text: `Shipment ${canonicalDrNumber} has already completed its delivery cycle and was accepted into ${effectiveLguName || 'LGU'} inventory. Double-scanning is prohibited.`
         });
         return;
       }
@@ -658,18 +603,20 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         }
       }
 
-      // OPTION A: STRICT DESTINATION VALIDATION
-      // Ensure this LGU only receives shipments assigned to their own municipality
-      if (effectiveLguName) {
-        const destMuni =
-          (matchingRelease && getReleaseDestinationMuni(matchingRelease)) ||
-          (rawTo && (findMatchingLgu(dbLgus, rawTo)?.municipality.toLowerCase() || normalizeLguName(rawTo))) ||
-          '';
+      // STRICT DESTINATION VALIDATION:
+      // LGU Receivers cannot scan shipments intended for other LGUs, and must have an assigned LGU
+      if (!targetMuni) {
+        throw new Error('Your account has no designated municipality assigned. Contact Central Admin before accepting deliveries.');
+      }
 
-        if (destMuni && targetMuni && destMuni !== targetMuni) {
-          const designatedName = findMatchingLgu(dbLgus, destMuni)?.municipality || destMuni || 'another municipality';
-          throw new Error(`Mismatched Destination: Shipment ${canonicalDrNumber} is designated for ${designatedName}, not ${canonicalUserLgu?.municipality || effectiveLguName}.`);
-        }
+      const destMuni =
+        (matchingRelease && getReleaseDestinationMuni(matchingRelease)) ||
+        (rawTo && (findMatchingLgu(dbLgus, rawTo)?.municipality.toLowerCase() || normalizeLguName(rawTo))) ||
+        '';
+
+      if (!destMuni || destMuni !== targetMuni) {
+        const designatedName = (destMuni && findMatchingLgu(dbLgus, destMuni)?.municipality) || destMuni || 'another municipality';
+        throw new Error(`Mismatched Destination: Shipment ${canonicalDrNumber} is designated for ${designatedName}, not ${canonicalUserLgu?.municipality || effectiveLguName}. LGU Receivers cannot scan deliveries for other municipalities.`);
       }
 
       // Resolve authoritative municipality name from database
@@ -1093,33 +1040,201 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               <div className="grid grid-cols-2 gap-2 pt-0.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (lguStock) {
-                      setEditFoodPacks(lguStock.foodPacks);
-                      setEditHygieneKits(lguStock.hygieneKits);
-                      setEditFamilyKits(lguStock.familyKits);
-                    }
-                    setIsEditingStock(false);
-                    setIsInventoryOpen(true);
-                  }}
+                  onClick={() => setIsInventoryOpen(true)}
                   className="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10.5px] font-bold transition flex items-center justify-center gap-1"
                 >
                   <Layers size={13} className="text-[#2500ba]" />
-                  Manage LGU Stock
+                  Current Stock
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setIsHistoryOpen(true)}
+                  onClick={() => setIsUpcomingDeliveriesOpen(true)}
                   className="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10.5px] font-bold transition flex items-center justify-center gap-1"
                 >
-                  <ClipboardList size={13} className="text-emerald-700" />
-                  History ({acceptedReleases.length})
+                  <Truck size={13} className="text-[#2500ba]" />
+                  Upcoming ({upcomingReleases.length})
                 </button>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Bottom Navigation matching Field Receiver */}
+        <nav className="flex h-16 w-full items-center justify-around border-t border-gray-200 bg-white px-6 shadow-lg z-20 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsUpcomingDeliveriesOpen(true)}
+            aria-label="Upcoming Deliveries"
+            className="p-2 transition text-gray-500 hover:text-[#2500ba] cursor-pointer flex flex-col items-center gap-0.5"
+            title="Upcoming Deliveries"
+          >
+            <Truck size={21} />
+            <span className="text-[9px] font-bold">Deliveries</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={startCamera}
+            aria-label="Scan Delivery QR Code"
+            className="-mt-7 flex h-14 w-14 items-center justify-center rounded-full bg-[#2500ba] text-white shadow-lg ring-4 ring-white active:scale-95 transition cursor-pointer"
+            title="Scan Delivery QR"
+          >
+            <ScanLine size={26} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Navigation Menu"
+            className="p-2 transition text-gray-500 hover:text-[#2500ba] cursor-pointer flex flex-col items-center gap-0.5"
+            title="Menu"
+          >
+            <Menu size={22} />
+            <span className="text-[9px] font-bold">Menu</span>
+          </button>
+        </nav>
+
+        {/* Slide-over Hamburger Sidebar Drawer */}
+        {isSidebarOpen && (
+          <div className="absolute inset-0 z-50 bg-black/50 flex justify-end animate-in fade-in duration-150">
+            <div className="w-[82%] max-w-xs h-full bg-white shadow-2xl flex flex-col justify-between p-5 animate-in slide-in-from-right duration-200">
+              <div className="space-y-4">
+                {/* Header with Close */}
+                <div className="flex items-center justify-between border-b pb-3.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-[#2500ba] text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      {(profile?.fullName || effectiveLguName || 'LG').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-black text-gray-900 leading-tight truncate max-w-[150px]">
+                        {profile?.fullName || 'LGU Officer'}
+                      </h3>
+                      <p className="text-[10px] text-gray-500 font-semibold truncate max-w-[150px]">
+                        {effectiveLguName ? `${effectiveLguName} LGU` : 'No LGU Assigned'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSidebarOpen(false)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Sepolia Smart Account Card */}
+                {profile?.walletAddress && (
+                  <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 text-left space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9.5px] font-bold text-purple-900 uppercase tracking-wide">Sepolia Smart Account</span>
+                      <a
+                        href={`https://sepolia.etherscan.io/address/${profile.walletAddress}#nfttransfers`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[9.5px] font-bold text-[#2500ba] hover:underline flex items-center gap-0.5"
+                      >
+                        <span>Etherscan</span>
+                        <ExternalLink size={10} />
+                      </a>
+                    </div>
+                    <p className="font-mono text-[10px] text-purple-800 break-all leading-tight">
+                      {profile.walletAddress}
+                    </p>
+                  </div>
+                )}
+
+                {/* Navigation Options */}
+                <div className="space-y-1.5 pt-1">
+                  {/* Option 1: Upcoming Relief Deliveries */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      setIsUpcomingDeliveriesOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Truck size={17} className="text-[#2500ba]" />
+                      <span>Upcoming Deliveries</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-[#2500ba] font-bold">
+                      {upcomingReleases.length}
+                    </span>
+                  </button>
+
+                  {/* Option 2: Current LGU Stock */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      setIsInventoryOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Layers size={17} className="text-teal-600" />
+                      <span>Current LGU Stock</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 font-bold">
+                      {((lguStock?.foodPacks || 0) + (lguStock?.hygieneKits || 0) + (lguStock?.familyKits || 0)).toLocaleString()}
+                    </span>
+                  </button>
+
+                  {/* Option 3: Profile & Smart Account Settings */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      setIsProfileModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Settings size={17} className="text-gray-600" />
+                      <span>Profile & Settings</span>
+                    </div>
+                    <ChevronRight size={14} className="text-gray-400" />
+                  </button>
+
+                  {/* Delivery History Option */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      setIsHistoryOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ClipboardList size={17} className="text-emerald-600" />
+                      <span>Accepted History</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                      {acceptedReleases.length}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Sidebar Footer */}
+              <div className="border-t pt-3">
+                {onSignOut && (
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold transition active:scale-98"
+                  >
+                    <LogOut size={14} />
+                    <span>Sign Out</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Camera Scanner Modal Overlay */}
         {isScanning && (
@@ -1175,7 +1290,93 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
           </div>
         )}
 
-        {/* LGU Inventory Drawer Modal */}
+        {/* Upcoming Deliveries Drawer Modal */}
+        {isUpcomingDeliveriesOpen && (
+          <div className="absolute inset-0 z-40 bg-black/50 flex flex-col justify-end animate-in fade-in duration-150">
+            <div className="bg-white rounded-t-[24px] p-5 space-y-4 max-h-[85%] overflow-y-auto animate-in slide-in-from-bottom duration-200">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center text-[#2500ba]">
+                    <Truck size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-gray-900">Upcoming Deliveries</h3>
+                    <p className="text-[10px] text-gray-500">Scheduled inbound shipments for {effectiveLguName || 'your LGU'}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsUpcomingDeliveriesOpen(false)}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {upcomingReleases.length === 0 ? (
+                <div className="text-center py-6 text-xs text-gray-400">
+                  <Package size={28} className="mx-auto mb-2 text-gray-300" />
+                  <p className="font-bold">No upcoming deliveries scheduled.</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Shipments dispatched by DSWD Central Admin to {effectiveLguName || 'your LGU'} will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2.5 max-h-72 overflow-y-auto">
+                  {upcomingReleases.map((r, idx) => (
+                    <div
+                      key={r.drNumber}
+                      onClick={() => {
+                        setSelectedIndex(idx);
+                        setIsUpcomingDeliveriesOpen(false);
+                      }}
+                      className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
+                        selectedIndex === idx
+                          ? 'border-[#2500ba] bg-blue-50/50 shadow-xs'
+                          : 'border-gray-200 hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-bold text-[#2500ba] text-[11px]">
+                          {r.drNumber}
+                        </span>
+                        {r.deliveryStatus === 'Delivered' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                            Arrived at Terminal
+                          </span>
+                        ) : r.deliveryStatus === 'In Transit' ? (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            In Transit
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-50 text-amber-800 border border-amber-300">
+                            Warehouse Prep
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-bold text-gray-900 mt-1">
+                        {(r.amountApproved || r.amountRequested || 0).toLocaleString()} {r.fnfiCategory}
+                      </p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">
+                        Source: {r.warehouseSource || 'DSWD Logistics Hub'} &bull; Vehicle: {r.assignedTruckId || 'Pending'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsUpcomingDeliveriesOpen(false)}
+                className="w-full py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition"
+              >
+                Close Deliveries View
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Read-Only LGU Inventory Drawer Modal */}
         {isInventoryOpen && (
           <div className="absolute inset-0 z-40 bg-black/50 flex flex-col justify-end animate-in fade-in duration-150">
             <div className="bg-white rounded-t-[24px] p-5 space-y-4 max-h-[88%] overflow-y-auto animate-in slide-in-from-bottom duration-200">
@@ -1186,45 +1387,23 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   </div>
                   <div>
                     <h3 className="text-sm font-extrabold text-gray-900">{effectiveLguName || 'LGU'} Warehouse Stock</h3>
-                    <p className="text-[10px] text-gray-500">Live inventory in Supabase</p>
+                    <p className="text-[10px] text-gray-500">Live on-hand inventory summary</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {!isEditingStock && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (lguStock) {
-                          setEditFoodPacks(lguStock.foodPacks);
-                          setEditHygieneKits(lguStock.hygieneKits);
-                          setEditFamilyKits(lguStock.familyKits);
-                        }
-                        setIsEditingStock(true);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-[#2500ba]/10 hover:bg-[#2500ba]/20 text-[#2500ba] text-[11px] font-bold transition flex items-center gap-1"
-                    >
-                      <Edit3 size={12} />
-                      Update Stock
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditingStock(false);
-                      setIsInventoryOpen(false);
-                    }}
-                    className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInventoryOpen(false)}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                >
+                  <X size={18} />
+                </button>
               </div>
 
               {/* Priority Status Badge */}
               <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-gray-50 border border-gray-200 text-xs">
                 <span className="font-semibold text-gray-600">Restocking Status:</span>
                 {(() => {
-                  const currentFp = isEditingStock ? editFoodPacks : (lguStock?.foodPacks ?? 0);
+                  const currentFp = lguStock?.foodPacks ?? 0;
                   if (currentFp < 100) {
                     return (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-200">
@@ -1247,177 +1426,46 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 })()}
               </div>
 
-              {!isEditingStock ? (
-                /* Read-only Stock Display */
-                <>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-                      <p className="text-lg font-black text-blue-900">
-                        {lguStock?.foodPacks?.toLocaleString() ?? 0}
-                      </p>
-                      <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Food Packs</p>
-                    </div>
-
-                    <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
-                      <p className="text-lg font-black text-teal-900">
-                        {lguStock?.hygieneKits?.toLocaleString() ?? 0}
-                      </p>
-                      <p className="text-[10px] font-bold text-teal-700 uppercase tracking-wide">Hygiene</p>
-                    </div>
-
-                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
-                      <p className="text-lg font-black text-purple-900">
-                        {lguStock?.familyKits?.toLocaleString() ?? 0}
-                      </p>
-                      <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">Family Kits</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-gray-50 p-3 text-xs space-y-1 text-gray-600 border border-gray-100">
-                    <p className="font-semibold text-gray-800">
-                      Designated Municipality: <span className="text-[#2500ba] font-bold">{effectiveLguName || 'Not specified'}</span>
-                    </p>
-                    <p className="text-[11px] text-gray-500">
-                      Accepted incoming shipments automatically increment these live amounts. Click &quot;Update Stock&quot; above to report relief distributions or manual counts.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsInventoryOpen(false)}
-                    className="w-full py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition"
-                  >
-                    Close Stock View
-                  </button>
-                </>
-              ) : (
-                /* Editable Stepper Controls */
-                <div className="space-y-3">
-                  <p className="text-xs text-gray-600">
-                    Adjust current on-hand quantities below (e.g. after local relief distribution to barangays):
+              {/* Read-only Stock Display */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                  <p className="text-lg font-black text-blue-900">
+                    {lguStock?.foodPacks?.toLocaleString() ?? 0}
                   </p>
-
-                  {/* Food Packs Control */}
-                  <div className="p-3 rounded-xl border border-blue-200 bg-blue-50/50 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-gray-900">Family Food Packs</p>
-                      <p className="text-[10px] text-gray-500">Target baseline: 300+ units</p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditFoodPacks(prev => Math.max(0, prev - 10))}
-                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <input
-                        type="number"
-                        min="0"
-                        value={editFoodPacks}
-                        onChange={(e) => setEditFoodPacks(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-16 h-8 text-center bg-white border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:outline-none focus:border-[#2500ba]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setEditFoodPacks(prev => prev + 10)}
-                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Hygiene Kits Control */}
-                  <div className="p-3 rounded-xl border border-teal-200 bg-teal-50/50 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-gray-900">Hygiene Kits</p>
-                      <p className="text-[10px] text-gray-500">Standard kits</p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditHygieneKits(prev => Math.max(0, prev - 10))}
-                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <input
-                        type="number"
-                        min="0"
-                        value={editHygieneKits}
-                        onChange={(e) => setEditHygieneKits(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-16 h-8 text-center bg-white border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:outline-none focus:border-[#2500ba]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setEditHygieneKits(prev => prev + 10)}
-                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Family Kits Control */}
-                  <div className="p-3 rounded-xl border border-purple-200 bg-purple-50/50 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-gray-900">Family Kits</p>
-                      <p className="text-[10px] text-gray-500">Non-food kits</p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditFamilyKits(prev => Math.max(0, prev - 10))}
-                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <input
-                        type="number"
-                        min="0"
-                        value={editFamilyKits}
-                        onChange={(e) => setEditFamilyKits(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-16 h-8 text-center bg-white border border-gray-300 rounded-lg text-xs font-black text-gray-800 focus:outline-none focus:border-[#2500ba]"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setEditFamilyKits(prev => prev + 10)}
-                        className="w-8 h-8 rounded-lg bg-white border border-gray-300 flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold active:scale-95"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingStock(false)}
-                      disabled={isSavingStock}
-                      className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveStock}
-                      disabled={isSavingStock}
-                      className="flex-[2] py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-[#1f009e] transition flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      {isSavingStock ? (
-                        <span>Saving to Supabase...</span>
-                      ) : (
-                        <>
-                          <Save size={14} />
-                          <span>Save Stock to Supabase</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Food Packs</p>
                 </div>
-              )}
+
+                <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
+                  <p className="text-lg font-black text-teal-900">
+                    {lguStock?.hygieneKits?.toLocaleString() ?? 0}
+                  </p>
+                  <p className="text-[10px] font-bold text-teal-700 uppercase tracking-wide">Hygiene</p>
+                </div>
+
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
+                  <p className="text-lg font-black text-purple-900">
+                    {lguStock?.familyKits?.toLocaleString() ?? 0}
+                  </p>
+                  <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">Family Kits</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-gray-50 p-3 text-xs space-y-1 text-gray-600 border border-gray-100">
+                <p className="font-semibold text-gray-800">
+                  Designated Municipality: <span className="text-[#2500ba] font-bold">{effectiveLguName || 'Not specified'}</span>
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Accepted incoming shipments automatically increment these live amounts. LGU Receivers act strictly as endpoint recipients.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsInventoryOpen(false)}
+                className="w-full py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition"
+              >
+                Close Stock View
+              </button>
             </div>
           </div>
         )}

@@ -20,6 +20,8 @@ import {
   Smartphone,
   Truck,
   UserRound,
+  Menu,
+  ChevronRight,
   X,
   ExternalLink,
   LogOut
@@ -830,6 +832,17 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const [verifiedQuantity, setVerifiedQuantity] = useState<number>(1);
   const [pendingVerifyPayload, setPendingVerifyPayload] = useState<QrPayload | null>(null);
   const [confirmedTxHash, setConfirmedTxHash] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isDeliveryHistoryOpen, setIsDeliveryHistoryOpen] = useState(false);
+  const [transitRemarks, setTransitRemarks] = useState('');
+
+  const completedReleases = useMemo(() => {
+    return allReleases.filter(
+      (r) =>
+        r.assigned_truck_id === receiverId &&
+        ['Delivered', 'Accepted', 'Distributed'].includes(r.delivery_status ?? '')
+    );
+  }, [allReleases, receiverId]);
 
   const activePackagesRef = useRef<QrPayload[]>(activePackages);
   useEffect(() => {
@@ -1185,20 +1198,33 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     setIsSigning(true);
 
     try {
-      // Guard against re-scanning already completed/accepted packages
-      let matchingDbRelease = allReleases.find((r) => r.dr_number === payload.drNumber);
+      // 1. Same-user double-scan guard: already in this driver's active cargo
+      if (activePackages.some((p) => p.drNumber.toUpperCase() === payload.drNumber.toUpperCase())) {
+        setHandoverToast(`Already in Cargo: Shipment ${payload.drNumber} is already in your active cargo list.`);
+        setTimeout(() => setHandoverToast(null), 6000);
+        nav('pickup');
+        return;
+      }
+
+      // 2. Terminal endpoint guard: check if already accepted by destination LGU
+      let matchingDbRelease = allReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
       if (!matchingDbRelease) {
         try {
           const freshReleases = await backendApi.getReceiverReleases();
-          matchingDbRelease = freshReleases.find((r) => r.dr_number === payload.drNumber);
+          matchingDbRelease = freshReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
         } catch {}
       }
 
-      if (matchingDbRelease && ['Delivered', 'Accepted', 'Distributed'].includes(matchingDbRelease.delivery_status ?? '')) {
-        setHandoverToast(`Delivery Already Completed: Shipment ${payload.drNumber} has already been delivered and accepted by the LGU. This QR code is closed and cannot be picked up again.`);
+      if (matchingDbRelease && ['Accepted', 'Distributed'].includes(matchingDbRelease.delivery_status ?? '')) {
+        setHandoverToast(`Chain of Custody Finalized: Shipment ${payload.drNumber} was already accepted and received by the destination LGU. It cannot be scanned into transit again.`);
         setTimeout(() => setHandoverToast(null), 8000);
         nav('pickup');
         return;
+      }
+
+      // 3. Driver-to-driver handover notice (if previously in transit with another vehicle)
+      if (matchingDbRelease && matchingDbRelease.assigned_truck_id && matchingDbRelease.assigned_truck_id !== receiverId && matchingDbRelease.delivery_status === 'In Transit') {
+        console.log(`Custody handover detected: Transferring shipment ${payload.drNumber} from ${matchingDbRelease.assigned_truck_id} to ${receiverId}.`);
       }
 
       // Auto-attach pinned GPS from Supabase if not present in scanned QR
@@ -2073,6 +2099,22 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     </button>
                   </div>
                 </div>
+                {/* Transit Remarks & Discrepancy Notes */}
+                <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-left">
+                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                    Transit Remarks / Discrepancy Notes (Optional)
+                  </label>
+                  <p className="text-[9.5px] text-gray-500 mb-1.5">
+                    Note cargo packaging condition, damaged units, count adjustments, or road relay info.
+                  </p>
+                  <textarea
+                    rows={2}
+                    value={transitRemarks}
+                    onChange={(e) => setTransitRemarks(e.target.value)}
+                    placeholder="e.g. 5 boxes have damp outer packaging; cargo transferred from vehicle RCVR-1002 due to engine overheat."
+                    className="w-full text-xs p-2 rounded-lg border border-gray-300 bg-white text-gray-800 placeholder-gray-400 focus:outline-hidden focus:border-[#2500ba] resize-none"
+                  />
+                </div>
               </div>
 
               <div className="mt-4">
@@ -2082,7 +2124,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     const activeDr = pendingVerifyPayload?.drNumber || activePayload?.drNumber;
                     if (activeDr) {
                       const origQty = pendingVerifyPayload?.quantity || activePayload?.quantity || verifiedQuantity;
-                      if (verifiedQuantity !== origQty) {
+                      const hasCountDiscrepancy = verifiedQuantity !== origQty;
+                      const hasRemarks = Boolean(transitRemarks && transitRemarks.trim());
+
+                      if (hasCountDiscrepancy) {
                         try {
                           await backendApi.updateOutgoing(activeDr, {
                             amountApproved: verifiedQuantity,
@@ -2092,6 +2137,38 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                           console.warn('Update verified quantity error:', err);
                         }
                       }
+
+                      if (hasRemarks || hasCountDiscrepancy) {
+                        const noteText = [
+                          hasCountDiscrepancy ? `Count mismatch: verified ${verifiedQuantity} vs manifest ${origQty}.` : '',
+                          hasRemarks ? transitRemarks.trim() : ''
+                        ].filter(Boolean).join(' ');
+
+                        try {
+                          await backendApi.createDiscrepancyReport({
+                            reportType: 'Outgoing',
+                            drNumber: activeDr,
+                            note: noteText,
+                            reportedByRole: 'Receiver',
+                            reportedByWallet: profile?.walletAddress || undefined
+                          });
+                          await backendApi.logActivity({
+                            actorId: profile?.id,
+                            actorName: profile?.fullName || receiverId,
+                            actorEmail: profile?.email,
+                            actorRole: 'receiver',
+                            actorWallet: profile?.walletAddress || undefined,
+                            action: 'DISCREPANCY_REPORTED',
+                            entityType: 'outgoing_request',
+                            entityId: activeDr,
+                            details: `Driver reported discrepancy / transit remarks for ${activeDr}: ${noteText}`,
+                            metadata: { drNumber: activeDr, truckId: receiverId, verifiedQuantity, origQty, note: noteText }
+                          });
+                        } catch (discErr) {
+                          console.warn('Failed to save discrepancy note:', discErr);
+                        }
+                      }
+
                       const updated = activePackages.map((pkg) =>
                         pkg.drNumber === activeDr ? { ...pkg, quantity: verifiedQuantity } : pkg
                       );
@@ -2100,6 +2177,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                       } catch {}
                       setActivePackages(updated);
                     }
+                    setTransitRemarks('');
                     setHandoverToast(`Custody confirmed: ${verifiedQuantity} packages in transit.`);
                     setTimeout(() => setHandoverToast(null), 5000);
                     setPendingVerifyPayload(null);
@@ -2116,7 +2194,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
         </div>
 
-        {/* Bottom Navigation Bar (Original UI) */}
+        {/* Bottom Navigation Bar */}
         <nav className="z-10 flex h-14 items-center justify-around border-t bg-white text-[#2500ba] shadow-sm">
           <button
             onClick={() => nav('pickup')}
@@ -2135,13 +2213,193 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           </button>
 
           <button
-            onClick={() => setIsProfileModalOpen(true)}
-            aria-label="Profile"
-            className="p-2 transition text-gray-400 hover:text-[#2500ba] cursor-pointer"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Menu"
+            className="p-2 transition text-gray-500 hover:text-[#2500ba] cursor-pointer"
+            title="Navigation Menu"
           >
-            <UserRound size={21} />
+            <Menu size={22} />
           </button>
         </nav>
+
+        {/* Slide-over Hamburger Sidebar Drawer */}
+        {isSidebarOpen && (
+          <div className="absolute inset-0 z-50 bg-black/50 flex justify-end animate-in fade-in duration-150">
+            <div className="w-[82%] max-w-xs h-full bg-white shadow-2xl flex flex-col justify-between p-5 animate-in slide-in-from-right duration-200">
+              <div className="space-y-4">
+                {/* Header with Close */}
+                <div className="flex items-center justify-between border-b pb-3.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-[#2500ba] text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      {(profile?.fullName || receiverId || 'RC').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-black text-gray-900 leading-tight truncate max-w-[150px]">
+                        {profile?.fullName || 'Driver / Receiver'}
+                      </h3>
+                      <p className="text-[10px] text-gray-500 font-mono">
+                        Plate: {receiverId}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsSidebarOpen(false)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Smart Account Card */}
+                {profile?.walletAddress && (
+                  <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 text-left space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9.5px] font-bold text-purple-900 uppercase tracking-wide">Sepolia Smart Account</span>
+                      <a
+                        href={`https://sepolia.etherscan.io/address/${profile.walletAddress}#nfttransfers`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[9.5px] font-bold text-[#2500ba] hover:underline flex items-center gap-0.5"
+                      >
+                        <span>Etherscan</span>
+                        <ExternalLink size={10} />
+                      </a>
+                    </div>
+                    <p className="font-mono text-[10px] text-purple-800 break-all leading-tight">
+                      {profile.walletAddress}
+                    </p>
+                  </div>
+                )}
+
+                {/* Navigation Options */}
+                <div className="space-y-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      nav('pickup');
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Package size={17} className="text-[#2500ba]" />
+                      <span>Active Cargo & Route</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-[#2500ba] font-bold">
+                      {activePackages.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      setIsDeliveryHistoryOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ClipboardList size={17} className="text-emerald-600" />
+                      <span>Delivery History</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                      {completedReleases.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSidebarOpen(false);
+                      setIsProfileModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Settings size={17} className="text-gray-600" />
+                      <span>Profile & Smart Account</span>
+                    </div>
+                    <ChevronRight size={14} className="text-gray-400" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Sidebar Footer */}
+              <div className="border-t pt-3">
+                {onSignOut && (
+                  <button
+                    type="button"
+                    onClick={onSignOut}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold transition active:scale-98"
+                  >
+                    <LogOut size={14} />
+                    <span>Sign Out</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Completed Deliveries History Drawer Modal */}
+        {isDeliveryHistoryOpen && (
+          <div className="absolute inset-0 z-50 bg-black/50 flex flex-col justify-end animate-in fade-in duration-150">
+            <div className="bg-white rounded-t-[24px] p-5 space-y-4 max-h-[85%] overflow-y-auto animate-in slide-in-from-bottom duration-200">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+                    <ClipboardList size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-gray-900">Delivery History</h3>
+                    <p className="text-[10px] text-gray-500">Completed shipments for vehicle {receiverId}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsDeliveryHistoryOpen(false)}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {completedReleases.length === 0 ? (
+                <div className="text-center py-6 text-xs text-gray-400">
+                  <Package size={28} className="mx-auto mb-2 text-gray-300" />
+                  <p className="font-bold">No completed deliveries yet.</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    Deliveries accepted by destination LGUs will be archived here.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-60 overflow-y-auto divide-y divide-gray-100">
+                  {completedReleases.map((r) => (
+                    <div key={r.dr_number} className="pt-2 pb-1 text-xs flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-gray-900">{r.dr_number}</p>
+                        <p className="text-[10px] text-gray-500">{r.category} • {r.amount_approved || r.amount_requested} units</p>
+                        <p className="text-[9.5px] text-gray-400">Destination: {r.destination_address || r.lgu_name || r.municipality || 'LGU'}</p>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[9.5px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        {r.delivery_status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsDeliveryHistoryOpen(false)}
+                className="w-full py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition"
+              >
+                Close History
+              </button>
+            </div>
+          </div>
+        )}
 
       </section>
     </main>
