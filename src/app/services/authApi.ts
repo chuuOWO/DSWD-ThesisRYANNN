@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { formatUserErrorMessage } from '../lib/errorUtils';
 import { backendApi } from './backendApi';
+import { provisionSmartAccountAddress } from './embeddedWallet';
 
 export type UserRole = 'dswd_admin' | 'receiver';
 export type AccountStatus = 'pending' | 'verified' | 'rejected';
@@ -103,6 +104,19 @@ export const authApi = {
           .maybeSingle();
 
         if (data) {
+          if (!data.wallet_address && (data.id || userId)) {
+            try {
+              const targetId = String(data.id || userId);
+              const targetEmail = String(data.email || cleanEmail || '');
+              const autoWallet = await provisionSmartAccountAddress(targetId, targetEmail);
+              if (autoWallet) {
+                await supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', targetId);
+                data.wallet_address = autoWallet;
+              }
+            } catch (autoErr) {
+              console.warn('Auto provision Sepolia wallet warning:', autoErr);
+            }
+          }
           return mapProfile(data);
         }
       }
@@ -117,6 +131,17 @@ export const authApi = {
           .maybeSingle();
 
         if (data) {
+          if (!data.wallet_address && data.id) {
+            try {
+              const autoWallet = await provisionSmartAccountAddress(String(data.id), String(data.email || cleanEmail));
+              if (autoWallet) {
+                await supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', data.id);
+                data.wallet_address = autoWallet;
+              }
+            } catch (autoErr) {
+              console.warn('Auto provision Sepolia wallet warning:', autoErr);
+            }
+          }
           return mapProfile(data);
         }
       }
@@ -314,6 +339,15 @@ export const authApi = {
     if (error) throw new Error(error.message);
 
     if (data.user) {
+      let finalWallet = payload.walletAddress || null;
+      if (!finalWallet) {
+        try {
+          finalWallet = await provisionSmartAccountAddress(data.user.id, normalizedEmail);
+        } catch (walletErr) {
+          console.warn('Auto-provisioning Sepolia wallet error:', walletErr);
+        }
+      }
+
       try {
         await supabase.from('profiles').upsert({
           id: data.user.id,
@@ -326,7 +360,7 @@ export const authApi = {
           work_id_url: payload.workIdUrl || null,
           role: payload.role,
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
-          wallet_address: payload.walletAddress || null,
+          wallet_address: finalWallet,
           lgu_name: null,
           status: 'pending'
         });

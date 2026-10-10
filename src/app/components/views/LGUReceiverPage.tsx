@@ -19,7 +19,9 @@ import {
   Settings,
   Truck,
   X,
-  LogOut
+  LogOut,
+  ExternalLink,
+  ShieldCheck
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -523,7 +525,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   const [isScanning, setIsScanning] = useState(false);
   const [cameraMessage, setCameraMessage] = useState('Align camera with shipment QR code');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string; txHash?: string } | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -680,6 +682,14 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       // Immediately mark as accepted locally so the package leaves the incoming card/map
       setLocallyAcceptedDrs((prev) => [...prev, canonicalDrNumber.toUpperCase()]);
 
+      // Execute on-chain acceptance through inventory state
+      const acceptResult = await onAccept(canonicalDrNumber, 'LGUReceiver', finalMuni, receiverGps);
+      if (!acceptResult.ok) {
+        throw new Error(acceptResult.message || 'Blockchain confirmation failed on Sepolia.');
+      }
+
+      const receiptTxHash = (acceptResult as any)?.txHash;
+
       // Record direct custody acceptance in Supabase
       await backendApi.recordLguReceipt({
         drNumber: canonicalDrNumber,
@@ -688,11 +698,10 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         category,
         quantity,
         receiverGps,
-        receiverSignature: `RECEIVER-QR-${Date.now()}`
+        receiverSignature: receiptTxHash || `RECEIVER-QR-${Date.now()}`,
+        txHash: receiptTxHash
       });
 
-      // Update parent inventory state
-      await onAccept(canonicalDrNumber, 'LGUReceiver', finalMuni);
       await loadLguStock();
 
       // Smooth 5-dot modal completes into "Done!"
@@ -700,7 +709,8 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         setIsProcessing(false);
         setToastMessage({
           type: 'success',
-          text: `Delivery ${canonicalDrNumber} confirmed on blockchain! Handover verified.`
+          text: `Delivery ${canonicalDrNumber} confirmed on Sepolia! Handover verified.`,
+          txHash: receiptTxHash
         });
       }, 1600);
     } catch (err) {
@@ -851,13 +861,25 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 : 'bg-red-600 text-white'
             }`}
           >
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
               {toastMessage.type === 'success' ? (
                 <CheckCircle2 size={14} className="flex-shrink-0" />
               ) : (
                 <AlertCircle size={14} className="flex-shrink-0" />
               )}
               <span className="leading-tight">{toastMessage.text}</span>
+              {toastMessage.txHash && (
+                <a
+                  href={`https://sepolia.etherscan.io/tx/${toastMessage.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-[11px] font-mono font-bold underline transition ml-1"
+                >
+                  <ShieldCheck size={11} />
+                  <span>Sepolia ({toastMessage.txHash.slice(0, 6)}...{toastMessage.txHash.slice(-4)})</span>
+                  <ExternalLink size={10} />
+                </a>
+              )}
             </div>
             <button
               type="button"
@@ -996,10 +1018,24 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               {currentRelease ? (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-100 text-[#2500ba] font-mono text-[10.5px] font-bold">
-                      <Package size={11} />
-                      {currentRelease.drNumber}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-100 text-[#2500ba] font-mono text-[10.5px] font-bold">
+                        <Package size={11} />
+                        {currentRelease.drNumber}
+                      </span>
+                      {currentRelease.blockchainTxHash && (
+                        <a
+                          href={`https://sepolia.etherscan.io/tx/${currentRelease.blockchainTxHash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 text-[10px] font-mono font-bold hover:bg-purple-100 transition"
+                        >
+                          <ShieldCheck size={11} className="text-purple-600" />
+                          <span>Sepolia ({currentRelease.blockchainTxHash.slice(0, 6)}...{currentRelease.blockchainTxHash.slice(-4)})</span>
+                          <ExternalLink size={9} />
+                        </a>
+                      )}
+                    </div>
                     {currentRelease.deliveryStatus === 'Delivered' ? (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-300">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />

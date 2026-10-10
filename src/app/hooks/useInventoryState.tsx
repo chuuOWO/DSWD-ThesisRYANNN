@@ -1688,14 +1688,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
     const lguLookup = findMatchingLgu(lgusList, release?.destinationAddress || release?.lguName || release?.municipality || '', release?.province);
     const latestGps = explicitGps || release?.receiverGps || (lguLookup ? `${lguLookup.latitude.toFixed(5)}, ${lguLookup.longitude.toFixed(5)}` : '10.7202, 122.5621');
-    const handoverContractId = release.handoverContractId ?? `HANDOVER-${canonicalDr.replace('DR-', '')}`;
+    const handoverContractId = release.handoverContractId || `HANDOVER-${canonicalDr}`;
     let proof: { hash: string; walletAddress: string; mode: 'contract' | 'signature' };
 
     try {
       proof = await blockchain.confirmReceipt({
         drNumber: canonicalDr,
         handoverContractId,
-        destination: release.lguName,
+        destination: '',
         gps: latestGps
       });
     } catch (confErr: any) {
@@ -1747,7 +1747,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }
     }).catch(() => {});
 
-    return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
+    return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.`, txHash: proof.hash };
   };
 
   const emergencyCorrectLguStock = async (

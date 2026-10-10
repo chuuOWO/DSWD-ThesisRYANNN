@@ -1311,6 +1311,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         await backendApi.updateOutgoing(payload.drNumber, {
           senderSignature: activeProofHash,
           txHash: activeProofHash,
+          handoverContractId: payload.handoverContractId,
           walletAddress: activeWalletAddr,
           deliveryStatus: 'In Transit'
         }).catch(() => {});
@@ -1813,6 +1814,26 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             </span>
                           )}
                         </div>
+                        {(() => {
+                          const rel = allReleases.find(r => r.dr_number === pkg.drNumber);
+                          const hash = rel?.tx_hash || pkg.blockchain?.txHash;
+                          if (!hash) return null;
+                          return (
+                            <div className="mt-1 flex items-center gap-1">
+                              <a
+                                href={`https://sepolia.etherscan.io/tx/${hash}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 text-[9px] font-mono font-bold hover:bg-purple-100 transition"
+                              >
+                                <ShieldCheck size={10} className="text-purple-600" />
+                                <span>Sepolia ({hash.slice(0, 6)}...{hash.slice(-4)})</span>
+                                <ExternalLink size={8} />
+                              </a>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
