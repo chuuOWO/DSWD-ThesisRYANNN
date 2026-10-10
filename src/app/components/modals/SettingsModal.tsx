@@ -203,9 +203,11 @@ export function SettingsModal({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    // Only initialize activeTab and clear temporary fields when modal transitions from closed to open
+    if (isOpen && !wasOpenRef.current) {
       setActiveTab(initialTab);
       setFirstName(profile.firstName || profile.fullName?.split(' ')[0] || '');
       setLastName(profile.lastName || profile.fullName?.split(' ').slice(1).join(' ') || '');
@@ -218,8 +220,13 @@ export function SettingsModal({
       setNewPassword('');
       setConfirmNewPassword('');
       setPasswordFeedback(null);
+      setCopiedEmail(false);
+    } else if (!isOpen) {
+      setPasswordFeedback(null);
+      setProfileFeedback(null);
     }
-  }, [isOpen, initialTab, profile]);
+    wasOpenRef.current = isOpen;
+  }, [isOpen, initialTab]);
 
   // Load all master data records from Supabase
   const loadMasterData = async () => {

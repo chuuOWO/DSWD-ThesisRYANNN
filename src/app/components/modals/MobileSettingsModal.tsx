@@ -78,10 +78,11 @@ export function MobileSettingsModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const wasOpenRef = useRef(false);
 
   // Sync state when modal opens
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpenRef.current) {
       setFirstName(profile.firstName || profile.fullName?.split(' ')[0] || '');
       setLastName(profile.lastName || profile.fullName?.split(' ').slice(1).join(' ') || '');
       setJobPosition(profile.jobPosition || '');
@@ -99,10 +100,11 @@ export function MobileSettingsModal({
       setPasswordFeedback(null);
       setNewEmailInput('');
       setEmailFeedback(null);
-    } else {
+    } else if (!isOpen) {
       stopCamera();
     }
-  }, [isOpen, profile, initialTab]);
+    wasOpenRef.current = isOpen;
+  }, [isOpen, initialTab]);
 
   useEffect(() => {
     return () => {

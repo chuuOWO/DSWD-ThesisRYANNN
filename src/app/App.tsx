@@ -33,8 +33,38 @@ function ViewLoading() {
   );
 }
 
+const VALID_ADMIN_VIEWS = [
+  'dashboard',
+  'incoming',
+  'outgoing',
+  'inventory',
+  'inventory-monitoring',
+  'lgu-monitoring',
+  'truck-tracking',
+  'qr-generator',
+  'accounts',
+  'master-data'
+];
+const ADMIN_VIEW_STORAGE_KEY = 'dswd_admin_active_view';
+
+const getInitialAdminView = (): string => {
+  try {
+    const hash = window.location.hash.replace('#', '').trim();
+    if (hash && VALID_ADMIN_VIEWS.includes(hash)) {
+      return hash;
+    }
+    const saved = localStorage.getItem(ADMIN_VIEW_STORAGE_KEY);
+    if (saved && VALID_ADMIN_VIEWS.includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // fallback
+  }
+  return 'dashboard';
+};
+
 export default function App() {
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentView, setCurrentView] = useState<string>(getInitialAdminView);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const { session, profile, isLoading, signOut } = useAuth();
@@ -49,7 +79,43 @@ export default function App() {
     ? 'Receiver'
     : 'Unregistered';
 
-  const requestSignOut = () => setIsLogoutConfirmOpen(true);
+  const requestSignOut = () => {
+    try {
+      localStorage.removeItem(ADMIN_VIEW_STORAGE_KEY);
+      if (window.location.hash) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    } catch {
+      // ignore
+    }
+    setIsLogoutConfirmOpen(true);
+  };
+
+  // Synchronize active view with localStorage and URL hash for persistence across page reloads
+  useEffect(() => {
+    if (currentView && VALID_ADMIN_VIEWS.includes(currentView)) {
+      try {
+        localStorage.setItem(ADMIN_VIEW_STORAGE_KEY, currentView);
+        if (window.location.hash.replace('#', '') !== currentView) {
+          window.history.replaceState(null, '', `#${currentView}`);
+        }
+      } catch {
+        // storage unavailable
+      }
+    }
+  }, [currentView]);
+
+  // Handle browser back/forward navigation via hash
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').trim();
+      if (hash && VALID_ADMIN_VIEWS.includes(hash)) {
+        setCurrentView(hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   // Preload primary view modules after authentication
   useEffect(() => {
@@ -204,6 +270,12 @@ export default function App() {
         isOpen={isLogoutConfirmOpen}
         onConfirm={async () => {
           setIsLogoutConfirmOpen(false);
+          try {
+            localStorage.removeItem(ADMIN_VIEW_STORAGE_KEY);
+            if (window.location.hash) {
+              window.history.replaceState(null, '', window.location.pathname);
+            }
+          } catch {}
           await signOut();
         }}
         onCancel={() => setIsLogoutConfirmOpen(false)}
