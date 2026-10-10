@@ -977,6 +977,8 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
         return { label: 'Stock Recounted', bg: 'bg-orange-50 text-orange-800 border-orange-200' };
       case 'USER_LOGIN':
         return { label: 'Session Login', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      case 'USER_LOGOUT':
+        return { label: 'Session Logout', bg: 'bg-slate-100 text-slate-700 border-slate-300' };
       case 'USER_SIGNUP':
         return { label: 'Account Registered', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
       case 'UPDATE_PROFILE':
@@ -1703,6 +1705,8 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
           >
             <option value="all">All Actions</option>
             <option value="onchain">On-Chain Sepolia Verified</option>
+            <option value="USER_LOGIN">Session Logins</option>
+            <option value="USER_LOGOUT">Session Logouts</option>
             <option value="INCOMING_ADDED">Incoming Manifest Created</option>
             <option value="INCOMING_SUBMITTED">Manifest Submitted for Review</option>
             <option value="INCOMING_VERIFIED">Manifest Physically Verified</option>
@@ -2223,6 +2227,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             <option value="all">All Actions</option>
             <option value="onchain">On-Chain Sepolia Verified</option>
             <option value="USER_LOGIN">Session Logins</option>
+            <option value="USER_LOGOUT">Session Logouts</option>
             <option value="USER_SIGNUP">Account Registrations</option>
             <option value="UPDATE_PROFILE">Profile Updates</option>
             <option value="UPDATE_AVATAR">Avatar Changes</option>

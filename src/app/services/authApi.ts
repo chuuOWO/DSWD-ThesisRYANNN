@@ -477,6 +477,31 @@ export const authApi = {
   },
 
   async signOut() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, role, wallet_address')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        await backendApi.logActivity({
+          actorId: user.id,
+          actorName: profile?.full_name || user.user_metadata?.full_name || user.email || 'User',
+          actorEmail: user.email || 'user@dswd.gov.ph',
+          actorRole: profile?.role || user.user_metadata?.role || 'user',
+          actorWallet: profile?.wallet_address || user.user_metadata?.wallet_address || undefined,
+          action: 'USER_LOGOUT',
+          entityType: 'User',
+          entityId: user.id,
+          details: `User ${profile?.full_name || user.user_metadata?.full_name || user.email} signed out of the system.`
+        });
+      }
+    } catch (logErr) {
+      console.warn('Could not log logout activity:', logErr);
+    }
+
     const { error } = await supabase.auth.signOut();
     if (error) throw new Error(error.message);
   },
