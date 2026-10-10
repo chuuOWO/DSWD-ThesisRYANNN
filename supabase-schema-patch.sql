@@ -2005,7 +2005,18 @@ create trigger on_profile_email_updated
   execute function public.sync_profile_email_to_auth_user();
 
 -- ==============================================================================
+-- 17. CLEANUP: DROP REDUNDANT / UNUSED COLUMNS ON truck_live_locations
+-- ==============================================================================
+alter table public.truck_live_locations
+  drop column if exists destination_lgu_id cascade,
+  drop column if exists destination_name,
+  drop column if exists driver_name,
+  drop column if exists driver_phone,
+  drop column if exists shipment_id;
+
+-- ==============================================================================
 -- END OF SCHEMA SCRIPT
 -- ==============================================================================
+
 
 

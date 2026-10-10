@@ -191,7 +191,7 @@ const toTruckRoute = (
     );
   }
 
-  const driverName = matchingProfile?.fullName || location.driver_name || undefined;
+  const driverName = matchingProfile?.fullName || undefined;
   const hasActiveProfile = Boolean(
     matchingProfile &&
     matchingProfile.role === 'receiver' &&

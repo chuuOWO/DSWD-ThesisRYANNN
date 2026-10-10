@@ -1060,7 +1060,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           void backendApi.upsertTruckLiveLocation({
             truck_id: receiverId,
             current_dr_number: activeDr,
-            shipment_id: activeDr,
             latitude: updatedLoc.latitude,
             longitude: updatedLoc.longitude,
             gps_text: formatGps(updatedLoc),

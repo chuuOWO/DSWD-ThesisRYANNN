@@ -273,11 +273,6 @@ export interface OutgoingUpdatePayload {
 export interface TruckLiveLocation {
   truck_id: string;
   current_dr_number?: string | null;
-  shipment_id?: string | null;
-  destination_lgu_id?: string | null;
-  destination_name?: string | null;
-  driver_name?: string | null;
-  driver_phone?: string | null;
   status?: 'In Transit' | 'Loading' | 'Delivered' | 'Idle' | string | null;
   speed?: number | null;
   heading?: number | null;
@@ -1766,11 +1761,6 @@ export const backendApi = {
       const sanitizedPayload: Record<string, unknown> = {
         truck_id: payload.truck_id,
         current_dr_number: payload.current_dr_number ?? null,
-        shipment_id: payload.shipment_id ?? payload.current_dr_number ?? null,
-        destination_lgu_id: payload.destination_lgu_id ?? null,
-        destination_name: payload.destination_name ?? null,
-        driver_name: payload.driver_name ?? null,
-        driver_phone: payload.driver_phone ?? null,
         status: payload.status ?? 'In Transit',
         speed: payload.speed ?? 0,
         heading: payload.heading ?? 0,
