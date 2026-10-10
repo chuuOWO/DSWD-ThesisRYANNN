@@ -126,9 +126,7 @@ export function SettingsModal({
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [adminEmailInput, setAdminEmailInput] = useState(profile.email || '');
-  const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
-  const [emailFeedback, setEmailFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copiedEmail, setCopiedEmail] = useState(false);
 
   // Tab 3: Master Data States (100% Supabase DB-driven via backendApi)
   const [dataSubTab, setDataSubTab] = useState<MasterDataSubTab>('kits');
@@ -220,8 +218,6 @@ export function SettingsModal({
       setNewPassword('');
       setConfirmNewPassword('');
       setPasswordFeedback(null);
-      setAdminEmailInput(profile.email || '');
-      setEmailFeedback(null);
     }
   }, [isOpen, initialTab, profile]);
 
@@ -425,32 +421,6 @@ export function SettingsModal({
       setPasswordFeedback({ type: 'error', text: err?.message || 'Failed to update password.' });
     } finally {
       setIsChangingPassword(false);
-    }
-  };
-
-  const handleUpdateAdminEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmailFeedback(null);
-
-    const clean = adminEmailInput.trim().toLowerCase();
-    if (!clean || !clean.includes('@')) {
-      setEmailFeedback({ type: 'error', text: 'Please enter a valid email address.' });
-      return;
-    }
-    if (clean === profile.email.toLowerCase()) {
-      setEmailFeedback({ type: 'error', text: 'Entered email is already your current email.' });
-      return;
-    }
-
-    setIsUpdatingEmail(true);
-    try {
-      await authApi.adminUpdateOwnEmail(clean);
-      setEmailFeedback({ type: 'success', text: 'Administrator email updated successfully in Authentication.' });
-      await refreshProfile();
-    } catch (err: any) {
-      setEmailFeedback({ type: 'error', text: err?.message || 'Failed to update administrator email.' });
-    } finally {
-      setIsUpdatingEmail(false);
     }
   };
 
@@ -1482,7 +1452,7 @@ export function SettingsModal({
                 </form>
               </div>
 
-              {/* Card 2: Administrator Email Management */}
+              {/* Card 2: Administrator Email Display (Read-Only Official Credential) */}
               <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-xs space-y-4">
                 <div className="flex items-center gap-2.5 pb-2 border-b border-gray-100">
                   <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#2500ba] flex items-center justify-center">
@@ -1490,60 +1460,57 @@ export function SettingsModal({
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-gray-900">Administrator Account Email</h4>
-                    <p className="text-[10.5px] text-gray-500">Official authentication email for administrative dashboard access</p>
+                    <p className="text-[10.5px] text-gray-500">Official authentication identity for administrative dashboard access</p>
                   </div>
                 </div>
 
-                {emailFeedback && (
-                  <div
-                    className={`p-3 rounded-xl border text-xs font-semibold ${
-                      emailFeedback.type === 'success'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        : 'bg-red-50 border-red-200 text-red-800'
-                    }`}
-                  >
-                    {emailFeedback.text}
-                  </div>
-                )}
-
-                <form onSubmit={handleUpdateAdminEmail} className="space-y-3.5 max-w-lg">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">
-                      Official Email Address <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      value={adminEmailInput}
-                      onChange={(e) => setAdminEmailInput(e.target.value)}
-                      placeholder="Enter administrator email address"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
-                    />
-                    <p className="text-[10.5px] text-gray-500 mt-1 leading-normal">
-                      Updating your email synchronizes directly with Supabase Authentication and your platform profile.
-                    </p>
+                <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10.5px] font-black text-gray-400 uppercase tracking-wider">
+                      Official Account Email
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                      <ShieldCheck size={12} />
+                      <span>Verified Official Account</span>
+                    </span>
                   </div>
 
-                  <div className="pt-1">
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white border border-gray-200">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Lock size={14} className="text-gray-400 flex-shrink-0" />
+                      <span className="font-mono text-xs font-bold text-gray-800 truncate">
+                        {profile.email}
+                      </span>
+                    </div>
                     <button
-                      type="submit"
-                      disabled={isUpdatingEmail}
-                      className="px-5 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer flex items-center gap-2 shadow-xs"
+                      type="button"
+                      onClick={() => {
+                        if (profile.email) {
+                          navigator.clipboard.writeText(profile.email);
+                          setCopiedEmail(true);
+                          setTimeout(() => setCopiedEmail(false), 2000);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 text-[11px] font-bold text-gray-700 transition cursor-pointer flex-shrink-0"
                     >
-                      {isUpdatingEmail ? (
+                      {copiedEmail ? (
                         <>
-                          <RefreshCw size={13} className="animate-spin" />
-                          <span>Updating Email...</span>
+                          <Check size={12} className="text-emerald-600" />
+                          <span className="text-emerald-700">Copied</span>
                         </>
                       ) : (
                         <>
-                          <Mail size={13} />
-                          <span>Update Email Address</span>
+                          <Copy size={12} />
+                          <span>Copy Email</span>
                         </>
                       )}
                     </button>
                   </div>
-                </form>
+
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    Administrative access credentials are permanently tied to this designated agency email. To maintain system security and prevent accidental lockout, administrative emails cannot be modified self-service.
+                  </p>
+                </div>
               </div>
             </div>
           )}
