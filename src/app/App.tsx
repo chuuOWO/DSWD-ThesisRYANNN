@@ -99,6 +99,30 @@ export default function App() {
     Boolean(activeProfile.lguName && activeProfile.lguName.trim()) ||
     ['/lgu', '/lgu-receipt', '/lgu-receiver', '/lgu-reciever'].includes(window.location.pathname)
   );
+  const renderView = () => {
+    switch (currentView) {
+      case 'incoming':
+        return <IncomingModule inventoryState={inventoryState} currentRole={currentRole} />;
+      case 'outgoing':
+        return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
+      case 'inventory':
+      case 'inventory-monitoring':
+        return <InventoryMonitoring inventoryState={inventoryState} adminProfile={activeProfile} />;
+      case 'lgu-monitoring':
+        return <LGUMonitoring inventoryState={inventoryState} currentRole={currentRole} />;
+      case 'truck-tracking':
+        return <TruckTracking outgoingReleasesList={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
+      case 'qr-generator':
+        return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
+      case 'accounts':
+        return <AccountManagement currentAdminEmail={activeProfile.email} releases={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
+      case 'master-data':
+        return <MasterDataView inventoryState={inventoryState} />;
+      case 'dashboard':
+      default:
+        return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} adminProfile={activeProfile} />;
+    }
+  };
 
   const renderContent = () => {
     if (isLguReceiver) {
