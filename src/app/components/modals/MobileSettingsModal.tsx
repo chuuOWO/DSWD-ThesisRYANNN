@@ -1,13 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  AlertCircle,
   Camera,
   Check,
   Copy,
   ExternalLink,
+  Eye,
+  EyeOff,
   FlipHorizontal,
+  KeyRound,
+  Lock,
   LogOut,
+  Mail,
   RefreshCw,
   Save,
+  Send,
   ShieldCheck,
   Upload,
   User,
@@ -21,7 +28,7 @@ export interface MobileSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: UserProfile;
-  initialTab?: 'profile' | 'wallet';
+  initialTab?: 'profile' | 'security' | 'wallet';
   onSignOut?: () => void;
   onProfileUpdated?: () => void;
 }
@@ -35,7 +42,7 @@ export function MobileSettingsModal({
   onProfileUpdated
 }: MobileSettingsModalProps) {
   const { refreshProfile, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<'profile' | 'wallet'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'wallet'>(initialTab);
 
   // Tab 1: Profile Form States
   const [firstName, setFirstName] = useState(profile.firstName || profile.fullName?.split(' ')[0] || '');
@@ -49,7 +56,21 @@ export function MobileSettingsModal({
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileFeedback, setProfileFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Tab 2: Smart Account States
+  // Tab 2: Security States
+  const [oldPassword, setOldPassword] = useState('');
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const [newEmailInput, setNewEmailInput] = useState('');
+  const [isRequestingEmail, setIsRequestingEmail] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Tab 3: Smart Account States
   const [activeWallet, setActiveWallet] = useState<string | null>(profile.walletAddress || null);
   const [copiedWallet, setCopiedWallet] = useState(false);
 
@@ -72,6 +93,12 @@ export function MobileSettingsModal({
       setIsCameraActive(false);
       setProfileFeedback(null);
       setCopiedWallet(false);
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordFeedback(null);
+      setNewEmailInput('');
+      setEmailFeedback(null);
     } else {
       stopCamera();
     }
@@ -234,6 +261,68 @@ export function MobileSettingsModal({
     setTimeout(() => setCopiedWallet(false), 2000);
   };
 
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordFeedback(null);
+
+    if (!oldPassword) {
+      setPasswordFeedback({ type: 'error', text: 'Please enter your current password.' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordFeedback({ type: 'error', text: 'New password must be at least 6 characters long.' });
+      return;
+    }
+    if (newPassword === oldPassword) {
+      setPasswordFeedback({ type: 'error', text: 'New password must be different from current password.' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordFeedback({ type: 'error', text: 'New passwords do not match. Please verify your confirmation.' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      await authApi.changePasswordWithVerification(profile.email, oldPassword, newPassword);
+      setPasswordFeedback({ type: 'success', text: 'Password successfully updated.' });
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err: any) {
+      setPasswordFeedback({ type: 'error', text: err?.message || 'Failed to update password.' });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleRequestEmailChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailFeedback(null);
+
+    const clean = newEmailInput.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) {
+      setEmailFeedback({ type: 'error', text: 'Please enter a valid email address.' });
+      return;
+    }
+    if (clean === profile.email.toLowerCase()) {
+      setEmailFeedback({ type: 'error', text: 'Requested email is already your current email.' });
+      return;
+    }
+
+    setIsRequestingEmail(true);
+    try {
+      await authApi.requestEmailChange(profile.id, clean);
+      setEmailFeedback({ type: 'success', text: 'Email change request submitted for Administrator approval.' });
+      setNewEmailInput('');
+      await refreshProfile();
+      if (onProfileUpdated) onProfileUpdated();
+    } catch (err: any) {
+      setEmailFeedback({ type: 'error', text: err?.message || 'Failed to request email change.' });
+    } finally {
+      setIsRequestingEmail(false);
+    }
+  };
 
   const handleSignOutClick = () => {
     onClose();
@@ -275,35 +364,49 @@ export function MobileSettingsModal({
             MOBILE SEGMENTED TAB BAR
             ================================================================= */}
         <div className="px-5 pt-3 pb-1 border-b border-gray-100 bg-gray-50/70 flex-shrink-0">
-          <div className="grid grid-cols-2 gap-1.5 bg-gray-200/80 p-1 rounded-xl">
+          <div className="grid grid-cols-3 gap-1 bg-gray-200/80 p-1 rounded-xl">
             {/* Tab 1: Profile */}
             <button
               type="button"
               onClick={() => setActiveTab('profile')}
-              className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === 'profile'
                   ? 'bg-white text-gray-900 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <User size={14} className={activeTab === 'profile' ? 'text-[#2500ba]' : 'text-gray-500'} />
+              <User size={13} className={activeTab === 'profile' ? 'text-[#2500ba]' : 'text-gray-500'} />
               <span>Profile</span>
             </button>
 
-            {/* Tab 2: Smart Account */}
+            {/* Tab 2: Security */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('security')}
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'security'
+                  ? 'bg-white text-gray-900 shadow-xs'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <Lock size={13} className={activeTab === 'security' ? 'text-[#2500ba]' : 'text-gray-500'} />
+              <span>Security</span>
+            </button>
+
+            {/* Tab 3: Smart Account */}
             <button
               type="button"
               onClick={() => setActiveTab('wallet')}
-              className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer relative ${
+              className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer relative ${
                 activeTab === 'wallet'
                   ? 'bg-white text-gray-900 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <Wallet size={14} className={activeTab === 'wallet' ? 'text-[#2500ba]' : 'text-gray-500'} />
-              <span>Smart Account</span>
+              <Wallet size={13} className={activeTab === 'wallet' ? 'text-[#2500ba]' : 'text-gray-500'} />
+              <span className="truncate">Account</span>
               {!activeWallet && (
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse absolute top-1.5 right-2" />
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse absolute top-1.5 right-1.5" />
               )}
             </button>
           </div>
@@ -525,7 +628,232 @@ export function MobileSettingsModal({
           )}
 
           {/* ===============================================================
-              TAB 2: SMART ACCOUNT (ERC-4337)
+              TAB 2: SECURITY & CREDENTIALS
+              =============================================================== */}
+          {activeTab === 'security' && (
+            <div className="space-y-4">
+              {/* Card 1: Password Management */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-xs">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-7 h-7 rounded-lg bg-indigo-50 text-[#2500ba] flex items-center justify-center">
+                    <KeyRound size={15} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900">Change Account Password</h3>
+                    <p className="text-[10px] text-gray-500">Requires verification of your current password</p>
+                  </div>
+                </div>
+
+                {passwordFeedback && (
+                  <div
+                    className={`mb-3 p-3 rounded-xl border text-xs font-semibold ${
+                      passwordFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                  >
+                    {passwordFeedback.text}
+                  </div>
+                )}
+
+                <form onSubmit={handleChangePassword} className="space-y-3">
+                  {/* Current Password */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      Current Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showOldPassword ? 'text' : 'password'}
+                        required
+                        value={oldPassword}
+                        onChange={(e) => setOldPassword(e.target.value)}
+                        placeholder="Enter current password"
+                        className="w-full px-3 py-2 pr-9 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowOldPassword((p) => !p)}
+                        className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showOldPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showOldPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* New Password */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      New Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Minimum 6 characters"
+                        className="w-full px-3 py-2 pr-9 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((p) => !p)}
+                        className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Confirm New Password */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      Confirm New Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={confirmNewPassword}
+                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full px-3 py-2 pr-9 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmNewPassword((p) => !p)}
+                        className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showConfirmNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer flex items-center justify-center gap-2 mt-2 shadow-xs"
+                  >
+                    {isChangingPassword ? (
+                      <>
+                        <RefreshCw size={13} className="animate-spin" />
+                        <span>Updating Password...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock size={13} />
+                        <span>Update Password</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              {/* Card 2: Email Management & Approval Workflow */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-xs">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-7 h-7 rounded-lg bg-blue-50 text-[#2500ba] flex items-center justify-center">
+                    <Mail size={15} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900">Official Account Email</h3>
+                    <p className="text-[10px] text-gray-500">Managed via DSWD Administrator approval</p>
+                  </div>
+                </div>
+
+                {emailFeedback && (
+                  <div
+                    className={`mb-3 p-3 rounded-xl border text-xs font-semibold ${
+                      emailFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                  >
+                    {emailFeedback.text}
+                  </div>
+                )}
+
+                {/* Current Active Email */}
+                <div className="mb-3">
+                  <label className="block text-[10.5px] font-bold text-gray-600 mb-1">
+                    Current Verified Email
+                  </label>
+                  <div className="flex items-center justify-between p-2.5 rounded-xl border border-gray-200 bg-gray-50 text-xs font-medium text-gray-800">
+                    <span className="truncate">{profile.email}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                      Active
+                    </span>
+                  </div>
+                </div>
+
+                {/* Pending Request Banner or Request Form */}
+                {profile.pendingEmail && profile.emailChangeStatus === 'pending' ? (
+                  <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                        <AlertCircle size={13} className="text-amber-600" />
+                        Pending Approval
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900 text-[9.5px] font-bold animate-pulse">
+                        Awaiting Admin
+                      </span>
+                    </div>
+                    <p className="text-xs text-amber-950 font-medium">
+                      Requested New Email: <strong className="font-mono">{profile.pendingEmail}</strong>
+                    </p>
+                    <p className="text-[10.5px] text-amber-800 leading-relaxed">
+                      Your email change request has been submitted to the DSWD Administrator. You can continue logging in with your current email until the administrator approves your request.
+                    </p>
+                  </div>
+                ) : (
+                  <form onSubmit={handleRequestEmailChange} className="space-y-3 pt-1 border-t border-gray-100">
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Request New Email Address
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={newEmailInput}
+                        onChange={(e) => setNewEmailInput(e.target.value)}
+                        placeholder="e.g. yourname.dswd@gmail.com"
+                        className="w-full px-3 py-2 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <p className="text-[10px] text-gray-500 mt-1 leading-normal">
+                        To maintain security, email changes require authorization by the DSWD Administrator before taking effect in your account.
+                      </p>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isRequestingEmail}
+                      className="w-full py-2.5 px-4 rounded-xl border border-[#2500ba] text-[#2500ba] hover:bg-[#2500ba]/5 text-xs font-bold disabled:opacity-50 transition cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      {isRequestingEmail ? (
+                        <>
+                          <RefreshCw size={13} className="animate-spin" />
+                          <span>Submitting Request...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send size={13} />
+                          <span>Submit Email Change Request</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ===============================================================
+              TAB 3: SMART ACCOUNT (ERC-4337)
               =============================================================== */}
           {activeTab === 'wallet' && (
             <div className="space-y-3.5">

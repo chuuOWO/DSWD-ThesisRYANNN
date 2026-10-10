@@ -19,8 +19,10 @@ import {
   Filter,
   History,
   Key,
+  KeyRound,
   Layers,
   Lock,
+  Mail,
   MapPin,
   Phone,
   RefreshCw,
@@ -393,6 +395,16 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<UserProfile | null>(null);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
+  // Admin Temporary Password Reset Modal state
+  const [targetResetProfile, setTargetResetProfile] = useState<UserProfile | null>(null);
+  const [tempPasswordInput, setTempPasswordInput] = useState('DswdTemp#2026');
+  const [showTempPassword, setShowTempPassword] = useState(false);
+  const [isSubmittingPasswordReset, setIsSubmittingPasswordReset] = useState(false);
+  const [resetPasswordFeedback, setResetPasswordFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Email Change Request Approval state
+  const [isProcessingEmailAction, setIsProcessingEmailAction] = useState(false);
+
   // 5-dot Comfy Loading Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
@@ -716,6 +728,122 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleConfirmAdminPasswordReset = async () => {
+    if (!targetResetProfile) return;
+    if (tempPasswordInput.length < 6) {
+      setResetPasswordFeedback({ type: 'error', text: 'Temporary password must be at least 6 characters.' });
+      return;
+    }
+
+    setIsSubmittingPasswordReset(true);
+    setResetPasswordFeedback(null);
+    try {
+      await authApi.adminResetPassword(
+        targetResetProfile.id,
+        tempPasswordInput,
+        targetResetProfile.email,
+        targetResetProfile.fullName
+      );
+      setResetPasswordFeedback({
+        type: 'success',
+        text: `Temporary password set successfully! Users can now sign in using: ${tempPasswordInput}`
+      });
+      setTimeout(() => {
+        setTargetResetProfile(null);
+        setResetPasswordFeedback(null);
+      }, 2500);
+    } catch (err: any) {
+      setResetPasswordFeedback({ type: 'error', text: err?.message || 'Failed to reset password.' });
+    } finally {
+      setIsSubmittingPasswordReset(false);
+    }
+  };
+
+  const handleApproveEmailChange = async (targetProfile: UserProfile) => {
+    if (!targetProfile.pendingEmail) return;
+    setIsProcessingEmailAction(true);
+    setModalTitle('Approving Email Change');
+    setModalSubtitle(`Updating email to ${targetProfile.pendingEmail}...`);
+    setIsModalOpen(true);
+    try {
+      await authApi.adminApproveEmailChange(targetProfile.id, targetProfile.fullName, targetProfile.pendingEmail);
+      setProfiles((prev) =>
+        prev.map((p) => {
+          if (p.id === targetProfile.id) {
+            return {
+              ...p,
+              email: targetProfile.pendingEmail!,
+              pendingEmail: null,
+              emailChangeStatus: 'approved'
+            };
+          }
+          return p;
+        })
+      );
+      if (selectedProfile && selectedProfile.id === targetProfile.id) {
+        setSelectedProfile({
+          ...selectedProfile,
+          email: targetProfile.pendingEmail,
+          pendingEmail: null,
+          emailChangeStatus: 'approved'
+        });
+      }
+      setToastMessage({
+        type: 'success',
+        text: `Email change approved! Updated official email to ${targetProfile.pendingEmail}.`
+      });
+    } catch (err: any) {
+      setToastMessage({
+        type: 'error',
+        text: err?.message || 'Failed to approve email change.'
+      });
+    } finally {
+      setIsProcessingEmailAction(false);
+      setIsModalOpen(false);
+    }
+  };
+
+  const handleDeclineEmailChange = async (targetProfile: UserProfile) => {
+    setIsProcessingEmailAction(true);
+    setModalTitle('Declining Email Change');
+    setModalSubtitle(`Declining email change request for ${targetProfile.fullName}...`);
+    setIsModalOpen(true);
+    try {
+      await authApi.adminDeclineEmailChange(targetProfile.id, targetProfile.fullName);
+      setProfiles((prev) =>
+        prev.map((p) => {
+          if (p.id === targetProfile.id) {
+            return {
+              ...p,
+              pendingEmail: null,
+              emailChangeStatus: 'rejected'
+            };
+          }
+          return p;
+        })
+      );
+      if (selectedProfile && selectedProfile.id === targetProfile.id) {
+        setSelectedProfile({
+          ...selectedProfile,
+          pendingEmail: null,
+          emailChangeStatus: 'rejected'
+        });
+      }
+      setToastMessage({
+        type: 'success',
+        text: 'Email change request declined.'
+      });
+    } catch (err: any) {
+      setToastMessage({
+        type: 'error',
+        text: err?.message || 'Failed to decline email change request.'
+      });
+    } finally {
+      setIsProcessingEmailAction(false);
+      setIsModalOpen(false);
+    }
+  };
+
   const stats = useMemo(() => {
     const verifiedProfiles = profiles.filter((p) => p.status === 'verified');
     const total = profiles.length;
@@ -728,7 +856,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
     const fieldReceivers = verifiedProfiles.filter(
       (p) => p.role === 'receiver' && !extractCleanMunicipality(p.lguName)
     ).length;
-    return { total, pending, verified, admins, lguReceivers, fieldReceivers };
+    const pendingEmailChanges = profiles.filter(
+      (p) => Boolean(p.pendingEmail && p.emailChangeStatus === 'pending')
+    ).length;
+    return { total, pending, verified, admins, lguReceivers, fieldReceivers, pendingEmailChanges };
   }, [profiles]);
 
   const filteredProfiles = useMemo(() => {
@@ -981,6 +1112,18 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
         return { label: 'Session Logout', bg: 'bg-slate-100 text-slate-700 border-slate-300' };
       case 'USER_SIGNUP':
         return { label: 'Account Registered', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
+      case 'USER_PASSWORD_CHANGED':
+        return { label: 'Password Changed', bg: 'bg-blue-50 text-blue-800 border-blue-200' };
+      case 'USER_PASSWORD_RESET_BY_ADMIN':
+        return { label: 'Password Reset (Admin)', bg: 'bg-amber-50 text-amber-800 border-amber-200' };
+      case 'USER_EMAIL_CHANGE_REQUESTED':
+        return { label: 'Email Change Requested', bg: 'bg-violet-50 text-violet-800 border-violet-200' };
+      case 'USER_EMAIL_CHANGE_APPROVED':
+        return { label: 'Email Change Approved', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+      case 'USER_EMAIL_CHANGE_REJECTED':
+        return { label: 'Email Change Declined', bg: 'bg-rose-50 text-rose-800 border-rose-200' };
+      case 'ADMIN_EMAIL_UPDATED':
+        return { label: 'Admin Email Updated', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
       case 'UPDATE_PROFILE':
         return { label: 'Profile Updated', bg: 'bg-violet-50 text-violet-800 border-violet-200' };
       case 'UPDATE_AVATAR':
@@ -1329,6 +1472,28 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
         </div>
       </div>
 
+      {/* Visual Attention Banner: Pending Email Change Requests */}
+      {stats.pendingEmailChanges > 0 && (
+        <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 flex items-center justify-between gap-4 shadow-sm animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center flex-shrink-0 animate-pulse">
+              <Mail className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-black text-amber-950 uppercase tracking-wider">
+                {stats.pendingEmailChanges} Personnel Requested Official Email Change Review
+              </p>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Personnel submitted official email changes requiring DSWD Administrator authorization. Click their record with the pulsing badge below to inspect and approve.
+              </p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-full bg-amber-200 text-amber-950 text-xs font-extrabold flex-shrink-0 animate-pulse">
+            Action Required
+          </span>
+        </div>
+      )}
+
       {/* Clean Uncluttered User Accounts Table (5 Rows Viewable Per Frame) */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-2xs overflow-hidden">
         <div className="px-6 py-3.5 border-b border-gray-200 bg-gray-50/75 flex items-center justify-between">
@@ -1406,6 +1571,12 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                                 {isCurrentAdmin && (
                                   <span className="px-1.5 py-0.2 rounded bg-gray-200 text-gray-700 text-[9px] font-black uppercase">
                                     You
+                                  </span>
+                                )}
+                                {profile.pendingEmail && profile.emailChangeStatus === 'pending' && (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-100 border border-amber-300 text-amber-900 text-[9.5px] font-extrabold animate-pulse inline-flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-600" />
+                                    Email Change Requested
                                   </span>
                                 )}
                               </p>
@@ -2457,6 +2628,59 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
               </button>
             </div>
 
+            {/* Attention Grabber: Pending Email Change Request Card */}
+            {selectedProfile.pendingEmail && selectedProfile.emailChangeStatus === 'pending' && (
+              <div className="p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 shadow-sm space-y-3 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
+                    <span className="text-xs font-black text-amber-900 uppercase tracking-wider">
+                      Official Email Change Requested
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900 text-[10px] font-bold">
+                    Action Required
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 rounded-xl bg-white border border-amber-200 text-xs">
+                  <div>
+                    <span className="text-[10px] font-bold text-gray-400 uppercase block">Current Active Email</span>
+                    <span className="font-mono text-gray-700 truncate block font-medium">{selectedProfile.email}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-amber-700 uppercase block">Requested New Email</span>
+                    <span className="font-mono font-bold text-amber-950 truncate block">{selectedProfile.pendingEmail}</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Approving will update the personnel account email in Supabase Authentication and profiles. The user must sign in using the new email moving forward.
+                </p>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={isProcessingEmailAction}
+                    onClick={() => handleApproveEmailChange(selectedProfile)}
+                    className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Approve & Update Email</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isProcessingEmailAction}
+                    onClick={() => handleDeclineEmailChange(selectedProfile)}
+                    className="py-2 px-3 rounded-xl bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Decline Request</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* User ID Section (Masked behind Eye Button) */}
             <div className="p-3.5 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
@@ -2778,6 +3002,18 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                     </button>
                     <button
                       type="button"
+                      onClick={() => {
+                        setTargetResetProfile(selectedProfile);
+                        setTempPasswordInput('DswdTemp#2026');
+                        setResetPasswordFeedback(null);
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                      Reset Password
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleRequestDelete(selectedProfile)}
                       className="px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition active:scale-95 cursor-pointer flex items-center gap-1.5"
                     >
@@ -2794,6 +3030,124 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Temporary Password Reset Modal */}
+      {targetResetProfile && (
+        <div className="fixed inset-0 z-[100000] bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-gray-200">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-gray-900 leading-tight">Admin Password Reset</h3>
+                  <p className="text-[10px] text-gray-500">Directly assigns a temporary login password</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTargetResetProfile(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Target Officer Details */}
+            <div className="p-3 rounded-2xl bg-gray-50 border border-gray-200 text-xs space-y-1">
+              <p className="font-bold text-gray-800">{targetResetProfile.fullName || 'DSWD Officer'}</p>
+              <p className="font-mono text-[11px] text-gray-600">{targetResetProfile.email}</p>
+              <p className="text-[10px] text-gray-500">
+                Role: <span className="font-bold text-[#10069f]">{targetResetProfile.role === 'dswd_admin' ? 'DSWD Admin' : targetResetProfile.lguName ? `LGU Receiver (${targetResetProfile.lguName})` : 'Field Driver'}</span>
+              </p>
+            </div>
+
+            {resetPasswordFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs font-semibold ${
+                  resetPasswordFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                }`}
+              >
+                {resetPasswordFeedback.text}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-gray-700">
+                    New Temporary Password <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+                      setTempPasswordInput(`DswdPass#${randomSuffix}`);
+                    }}
+                    className="text-[10.5px] font-bold text-[#10069f] hover:underline cursor-pointer"
+                  >
+                    Generate Random
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showTempPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={tempPasswordInput}
+                    onChange={(e) => setTempPasswordInput(e.target.value)}
+                    placeholder="Enter temporary password"
+                    className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-gray-300 text-xs text-gray-800 font-mono placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTempPassword((prev) => !prev)}
+                    className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                    title={showTempPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showTempPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                This operation directly commits a new encrypted bcrypt hash into Supabase Authentication (<code className="text-amber-950 font-bold">auth.users</code>). Communicate this temporary password directly to the officer via radio or dispatch.
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setTargetResetProfile(null)}
+                className="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingPasswordReset}
+                onClick={handleConfirmAdminPasswordReset}
+                className="px-5 py-2.5 rounded-xl bg-[#2500ba] text-white hover:bg-blue-800 text-xs font-bold shadow-md transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+              >
+                {isSubmittingPasswordReset ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Updating Password...</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Set Temporary Password</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>

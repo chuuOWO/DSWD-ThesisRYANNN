@@ -10,6 +10,8 @@ export interface UserProfile {
   id: string;
   officialId?: string | null;
   email: string;
+  pendingEmail?: string | null;
+  emailChangeStatus?: 'pending' | 'approved' | 'rejected' | null;
   fullName: string;
   firstName?: string | null;
   lastName?: string | null;
@@ -68,6 +70,8 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
     id: String(row.id),
     officialId: row.official_id ? String(row.official_id) : null,
     email: String(row.email ?? ''),
+    pendingEmail: row.pending_email ? String(row.pending_email) : null,
+    emailChangeStatus: row.email_change_status ? (String(row.email_change_status) as 'pending' | 'approved' | 'rejected') : null,
     fullName: String(row.full_name || computedFullName || ''),
     firstName: fName,
     lastName: lName,
@@ -648,6 +652,155 @@ export const authApi = {
     }).catch(() => {});
 
     return { ok: true };
+  },
+
+  async verifyOldPassword(email: string, oldPassword: string): Promise<boolean> {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password: oldPassword
+    });
+    return !error;
+  },
+
+  async changePasswordWithVerification(email: string, oldPassword: string, newPassword: string) {
+    if (newPassword.length < 6) {
+      throw new Error('New password must be at least 6 characters.');
+    }
+    const isValidOld = await this.verifyOldPassword(email, oldPassword);
+    if (!isValidOld) {
+      throw new Error('Current password is incorrect. Please verify your old password.');
+    }
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw new Error(error.message);
+
+    backendApi.logActivity({
+      action: 'USER_PASSWORD_CHANGED',
+      entityType: 'User',
+      details: 'User updated personal account password successfully.',
+      metadata: { email: email.trim().toLowerCase() }
+    }).catch(() => {});
+
+    return data;
+  },
+
+  async requestEmailChange(userId: string, newEmail: string) {
+    const cleanEmail = newEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Please enter a valid email address.');
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        pending_email: cleanEmail,
+        email_change_status: 'pending'
+      })
+      .eq('id', userId);
+
+    if (error) throw new Error(`Failed to submit email change request: ${error.message}`);
+
+    backendApi.logActivity({
+      actorId: userId,
+      action: 'USER_EMAIL_CHANGE_REQUESTED',
+      entityType: 'User',
+      entityId: userId,
+      details: `Requested account email change to ${cleanEmail} (awaiting DSWD Admin approval).`,
+      metadata: { pendingEmail: cleanEmail }
+    }).catch(() => {});
+
+    return { ok: true };
+  },
+
+  async adminResetPassword(targetUserId: string, newPassword: string, targetEmail: string, targetName?: string) {
+    if (newPassword.length < 6) {
+      throw new Error('Temporary password must be at least 6 characters.');
+    }
+
+    const { error } = await supabase.rpc('admin_reset_user_password', {
+      target_user_id: targetUserId,
+      new_password: newPassword
+    });
+
+    if (error) {
+      throw new Error(formatUserErrorMessage(error, 'Failed to reset password. Please ensure database permissions are granted.'));
+    }
+
+    backendApi.logActivity({
+      action: 'USER_PASSWORD_RESET_BY_ADMIN',
+      entityType: 'User',
+      entityId: targetUserId,
+      details: `Admin assigned a temporary credentials reset for user ${targetName || targetEmail}.`,
+      metadata: { targetUserId, targetEmail }
+    }).catch(() => {});
+
+    return { ok: true };
+  },
+
+  async adminApproveEmailChange(targetUserId: string, targetName?: string, pendingEmail?: string) {
+    const { error } = await supabase.rpc('admin_approve_email_change', {
+      target_user_id: targetUserId
+    });
+
+    if (error) {
+      throw new Error(formatUserErrorMessage(error, 'Failed to approve email change. Please check database permissions.'));
+    }
+
+    backendApi.logActivity({
+      action: 'USER_EMAIL_CHANGE_APPROVED',
+      entityType: 'User',
+      entityId: targetUserId,
+      details: `Admin approved email change for ${targetName || 'user'} to ${pendingEmail || 'new email'}.`,
+      metadata: { targetUserId, pendingEmail }
+    }).catch(() => {});
+
+    return { ok: true };
+  },
+
+  async adminDeclineEmailChange(targetUserId: string, targetName?: string) {
+    const { error } = await supabase.rpc('admin_decline_email_change', {
+      target_user_id: targetUserId
+    });
+
+    if (error) {
+      throw new Error(formatUserErrorMessage(error, 'Failed to decline email change request.'));
+    }
+
+    backendApi.logActivity({
+      action: 'USER_EMAIL_CHANGE_REJECTED',
+      entityType: 'User',
+      entityId: targetUserId,
+      details: `Admin declined email change request for ${targetName || 'user'}.`,
+      metadata: { targetUserId }
+    }).catch(() => {});
+
+    return { ok: true };
+  },
+
+  async adminUpdateOwnEmail(newEmail: string) {
+    const cleanEmail = newEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Please enter a valid email address.');
+    }
+
+    const { data, error } = await supabase.auth.updateUser({ email: cleanEmail });
+    if (error) throw new Error(error.message);
+
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData?.user?.id) {
+      await supabase
+        .from('profiles')
+        .update({ email: cleanEmail, pending_email: null, email_change_status: null })
+        .eq('id', userData.user.id);
+    }
+
+    backendApi.logActivity({
+      action: 'ADMIN_EMAIL_UPDATED',
+      entityType: 'User',
+      details: `Administrator updated account email to ${cleanEmail}.`,
+      metadata: { newEmail: cleanEmail }
+    }).catch(() => {});
+
+    return data;
   },
 
   subscribeProfiles(onChange: () => void) {

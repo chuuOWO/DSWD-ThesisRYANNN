@@ -25,7 +25,12 @@ import {
   Filter,
   ShieldAlert,
   Archive,
-  RotateCcw
+  RotateCcw,
+  Lock,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Mail
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
@@ -44,14 +49,14 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: UserProfile;
-  initialTab?: 'profile' | 'wallet' | 'data' | 'admin';
+  initialTab?: 'profile' | 'security' | 'wallet' | 'data' | 'admin';
   onSignOut?: () => void;
   adminActionsEnabled?: boolean;
   onToggleAdminActions?: (enabled: boolean) => void;
   onMasterDataChanged?: () => void;
 }
 
-type SettingsTab = 'profile' | 'wallet' | 'data' | 'admin';
+type SettingsTab = 'profile' | 'security' | 'wallet' | 'data' | 'admin';
 type MasterDataSubTab = 'kits' | 'sources' | 'warehouses' | 'provinces' | 'lgus';
 
 export function SettingsModal({
@@ -110,6 +115,20 @@ export function SettingsModal({
   // Tab 2: Smart Account States
   const [activeWallet, setActiveWallet] = useState<string | null>(profile.walletAddress || null);
   const [copiedWallet, setCopiedWallet] = useState(false);
+
+  // Security Tab States
+  const [oldPassword, setOldPassword] = useState('');
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const [adminEmailInput, setAdminEmailInput] = useState(profile.email || '');
+  const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Tab 3: Master Data States (100% Supabase DB-driven via backendApi)
   const [dataSubTab, setDataSubTab] = useState<MasterDataSubTab>('kits');
@@ -197,6 +216,12 @@ export function SettingsModal({
       setAvatarUrl(profile.avatarUrl || null);
       setActiveWallet(profile.walletAddress || null);
       setProfileFeedback(null);
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordFeedback(null);
+      setAdminEmailInput(profile.email || '');
+      setEmailFeedback(null);
     }
   }, [isOpen, initialTab, profile]);
 
@@ -366,6 +391,67 @@ export function SettingsModal({
     navigator.clipboard.writeText(activeWallet);
     setCopiedWallet(true);
     setTimeout(() => setCopiedWallet(false), 2000);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordFeedback(null);
+
+    if (!oldPassword) {
+      setPasswordFeedback({ type: 'error', text: 'Please enter your current password.' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordFeedback({ type: 'error', text: 'New password must be at least 6 characters long.' });
+      return;
+    }
+    if (newPassword === oldPassword) {
+      setPasswordFeedback({ type: 'error', text: 'New password must be different from current password.' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordFeedback({ type: 'error', text: 'New passwords do not match. Please verify your confirmation.' });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      await authApi.changePasswordWithVerification(profile.email, oldPassword, newPassword);
+      setPasswordFeedback({ type: 'success', text: 'Administrator password updated successfully.' });
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } catch (err: any) {
+      setPasswordFeedback({ type: 'error', text: err?.message || 'Failed to update password.' });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleUpdateAdminEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailFeedback(null);
+
+    const clean = adminEmailInput.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) {
+      setEmailFeedback({ type: 'error', text: 'Please enter a valid email address.' });
+      return;
+    }
+    if (clean === profile.email.toLowerCase()) {
+      setEmailFeedback({ type: 'error', text: 'Entered email is already your current email.' });
+      return;
+    }
+
+    setIsUpdatingEmail(true);
+    try {
+      await authApi.adminUpdateOwnEmail(clean);
+      setEmailFeedback({ type: 'success', text: 'Administrator email updated successfully in Authentication.' });
+      await refreshProfile();
+    } catch (err: any) {
+      setEmailFeedback({ type: 'error', text: err?.message || 'Failed to update administrator email.' });
+    } finally {
+      setIsUpdatingEmail(false);
+    }
   };
 
   // =================================================================
@@ -934,6 +1020,25 @@ export function SettingsModal({
                 </div>
               </button>
 
+              {/* Security Tab */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('security')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${
+                  activeTab === 'security'
+                    ? 'bg-[#2500ba] text-white shadow-sm'
+                    : 'text-gray-700 hover:bg-gray-200/70 hover:text-gray-900'
+                }`}
+              >
+                <Lock className={`w-4 h-4 flex-shrink-0 ${activeTab === 'security' ? 'text-white' : 'text-gray-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="leading-tight">Security</div>
+                  <div className={`text-[10px] font-normal truncate ${activeTab === 'security' ? 'text-blue-100' : 'text-gray-400'}`}>
+                    Password & email control
+                  </div>
+                </div>
+              </button>
+
               {/* Smart Account Tab */}
               <button
                 type="button"
@@ -1032,12 +1137,14 @@ export function SettingsModal({
             <div>
               <h3 className="text-base font-bold text-gray-900 leading-tight">
                 {activeTab === 'profile' && 'Profile Settings'}
+                {activeTab === 'security' && 'Security & Credential Management'}
                 {activeTab === 'wallet' && 'Gasless Smart Account (ERC-4337)'}
                 {activeTab === 'data' && 'Master Data Configuration'}
                 {activeTab === 'admin' && 'Administrative Actions'}
               </h3>
               <p className="text-[11px] text-gray-500">
                 {activeTab === 'profile' && 'Manage your officer credentials, avatar photo, and contact information.'}
+                {activeTab === 'security' && 'Update administrator login credentials and manage verified account email.'}
                 {activeTab === 'wallet' && 'View or provision your gasless smart account sponsored by Alchemy Paymaster.'}
                 {activeTab === 'data' && 'View and configure relief items, distribution supply sources, and warehouses.'}
                 {activeTab === 'admin' && 'Configure emergency stock recounts, inventory overrides, and LGU audit controls.'}
@@ -1247,7 +1354,202 @@ export function SettingsModal({
           )}
 
           {/* =================================================================
-              TAB 2: GASLESS SMART ACCOUNT (ERC-4337)
+              TAB: SECURITY & CREDENTIAL MANAGEMENT
+              ================================================================= */}
+          {activeTab === 'security' && (
+            <div className="space-y-5">
+              {/* Card 1: Password Management */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-xs space-y-4">
+                <div className="flex items-center gap-2.5 pb-2 border-b border-gray-100">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 text-[#2500ba] flex items-center justify-center">
+                    <KeyRound size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-900">Change Administrator Password</h4>
+                    <p className="text-[10.5px] text-gray-500">Requires verification of your current administrative password</p>
+                  </div>
+                </div>
+
+                {passwordFeedback && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs font-semibold ${
+                      passwordFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                  >
+                    {passwordFeedback.text}
+                  </div>
+                )}
+
+                <form onSubmit={handleChangePassword} className="space-y-3.5 max-w-lg">
+                  {/* Current Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Current Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showOldPassword ? 'text' : 'password'}
+                        required
+                        value={oldPassword}
+                        onChange={(e) => setOldPassword(e.target.value)}
+                        placeholder="Enter current password"
+                        className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowOldPassword((p) => !p)}
+                        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showOldPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showOldPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* New Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      New Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Minimum 6 characters"
+                        className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((p) => !p)}
+                        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Confirm New Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Confirm New Password <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmNewPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={confirmNewPassword}
+                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmNewPassword((p) => !p)}
+                        className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showConfirmNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="submit"
+                      disabled={isChangingPassword}
+                      className="px-5 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer flex items-center gap-2 shadow-xs"
+                    >
+                      {isChangingPassword ? (
+                        <>
+                          <RefreshCw size={13} className="animate-spin" />
+                          <span>Updating Password...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock size={13} />
+                          <span>Update Password</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Card 2: Administrator Email Management */}
+              <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-xs space-y-4">
+                <div className="flex items-center gap-2.5 pb-2 border-b border-gray-100">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#2500ba] flex items-center justify-center">
+                    <Mail size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-900">Administrator Account Email</h4>
+                    <p className="text-[10.5px] text-gray-500">Official authentication email for administrative dashboard access</p>
+                  </div>
+                </div>
+
+                {emailFeedback && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs font-semibold ${
+                      emailFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                  >
+                    {emailFeedback.text}
+                  </div>
+                )}
+
+                <form onSubmit={handleUpdateAdminEmail} className="space-y-3.5 max-w-lg">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Official Email Address <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={adminEmailInput}
+                      onChange={(e) => setAdminEmailInput(e.target.value)}
+                      placeholder="Enter administrator email address"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-[#2500ba] focus:ring-1 focus:ring-blue-100 transition bg-white"
+                    />
+                    <p className="text-[10.5px] text-gray-500 mt-1 leading-normal">
+                      Updating your email synchronizes directly with Supabase Authentication and your platform profile.
+                    </p>
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="submit"
+                      disabled={isUpdatingEmail}
+                      className="px-5 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer flex items-center gap-2 shadow-xs"
+                    >
+                      {isUpdatingEmail ? (
+                        <>
+                          <RefreshCw size={13} className="animate-spin" />
+                          <span>Updating Email...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mail size={13} />
+                          <span>Update Email Address</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* =================================================================
+              TAB 3: GASLESS SMART ACCOUNT (ERC-4337)
               ================================================================= */}
           {activeTab === 'wallet' && (
             <div className="space-y-4">

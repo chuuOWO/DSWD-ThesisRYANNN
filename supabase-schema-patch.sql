@@ -1822,6 +1822,125 @@ create policy "Allow all users to insert activity logs"
   with check (true);
 
 -- ==============================================================================
+-- 15. CREDENTIAL GOVERNANCE & SECURITY MANAGEMENT
+-- ==============================================================================
+
+-- 15.1 Add email change request columns to public.profiles
+alter table public.profiles add column if not exists pending_email text;
+alter table public.profiles add column if not exists email_change_status text default null;
+
+-- Ensure pgcrypto is available for bcrypt password hashing
+create extension if not exists pgcrypto;
+
+-- 15.2 Admin Password Reset RPC (Directly updates auth.users password hash)
+create or replace function public.admin_reset_user_password(
+  target_user_id uuid,
+  new_password text
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, auth, extensions
+as $$
+begin
+  -- Validate that caller is an authorized DSWD administrator
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) then
+    raise exception 'Unauthorized: Only DSWD administrators can reset user passwords.';
+  end if;
+
+  if length(new_password) < 6 then
+    raise exception 'Password must be at least 6 characters.';
+  end if;
+
+  -- Update encrypted password in Supabase Authentication user table
+  update auth.users
+  set encrypted_password = crypt(new_password, gen_salt('bf')),
+      updated_at = now()
+  where id = target_user_id;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.admin_reset_user_password(uuid, text) to authenticated;
+
+-- 15.3 Admin Approve Email Change RPC (Directly updates auth.users AND public.profiles)
+create or replace function public.admin_approve_email_change(target_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, auth, extensions
+as $$
+declare
+  target_new_email text;
+begin
+  -- Validate administrator authorization
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) then
+    raise exception 'Unauthorized: Only DSWD administrators can approve email changes.';
+  end if;
+
+  select pending_email into target_new_email
+  from public.profiles
+  where id = target_user_id;
+
+  if target_new_email is null or trim(target_new_email) = '' then
+    raise exception 'No pending email change request found for this user.';
+  end if;
+
+  -- Update Supabase Authentication user table email
+  update auth.users
+  set email = lower(trim(target_new_email)),
+      raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('email', lower(trim(target_new_email))),
+      updated_at = now()
+  where id = target_user_id;
+
+  -- Update application profiles table email
+  update public.profiles
+  set email = lower(trim(target_new_email)),
+      pending_email = null,
+      email_change_status = 'approved'
+  where id = target_user_id;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.admin_approve_email_change(uuid) to authenticated;
+
+-- 15.4 Admin Decline Email Change RPC
+create or replace function public.admin_decline_email_change(target_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  -- Validate administrator authorization
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and lower(trim(coalesce(role, ''))) in ('dswd_admin', 'admin')
+  ) then
+    raise exception 'Unauthorized: Only DSWD administrators can decline email changes.';
+  end if;
+
+  update public.profiles
+  set pending_email = null,
+      email_change_status = 'rejected'
+  where id = target_user_id;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.admin_decline_email_change(uuid) to authenticated;
+
+-- ==============================================================================
 -- END OF SCHEMA SCRIPT
 -- ==============================================================================
 
