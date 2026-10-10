@@ -100,116 +100,82 @@ export default function App() {
     ['/lgu', '/lgu-receipt', '/lgu-receiver', '/lgu-reciever'].includes(window.location.pathname)
   );
 
-  if (isLguReceiver) {
-    return (
-      <Suspense fallback={<ViewLoading />}>
-        <LGUReceiverPage
-          profile={activeProfile}
-          releases={inventoryState.outgoingReleasesList}
-          lgusList={inventoryState.lgusList}
-          onAccept={inventoryState.receiverAcceptWithGps}
-          onSignOut={requestSignOut}
-        />
-        <ConfirmLogoutModal
-          isOpen={isLogoutConfirmOpen}
-          onConfirm={async () => {
-            setIsLogoutConfirmOpen(false);
-            await signOut();
-          }}
-          onCancel={() => setIsLogoutConfirmOpen(false)}
-        />
-      </Suspense>
-    );
-  }
-
-  // If receiver has no assigned LGU, route to ReceiverPage (Receiver view)
-  if (activeProfile.role === 'receiver' || ['/receiver', '/trucker'].includes(window.location.pathname)) {
-    return (
-      <Suspense fallback={<ViewLoading />}>
-        <ReceiverPage profile={activeProfile} lgusList={inventoryState.lgusList} onSignOut={requestSignOut} />
-        <ConfirmLogoutModal
-          isOpen={isLogoutConfirmOpen}
-          onConfirm={async () => {
-            setIsLogoutConfirmOpen(false);
-            await signOut();
-          }}
-          onCancel={() => setIsLogoutConfirmOpen(false)}
-        />
-      </Suspense>
-    );
-  }
-
-  const renderView = () => {
-    switch (currentView) {
-      case 'incoming':
-        return <IncomingModule inventoryState={inventoryState} currentRole={currentRole} />;
-      case 'outgoing':
-        return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
-      case 'inventory':
-      case 'inventory-monitoring':
-        return <InventoryMonitoring inventoryState={inventoryState} adminProfile={activeProfile} />;
-      case 'lgu-monitoring':
-        return <LGUMonitoring inventoryState={inventoryState} currentRole={currentRole} />;
-      case 'truck-tracking':
-        return <TruckTracking outgoingReleasesList={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
-      case 'qr-generator':
-        return <OutgoingModule inventoryState={inventoryState} currentRole={currentRole} />;
-      case 'accounts':
-        return <AccountManagement currentAdminEmail={activeProfile.email} releases={inventoryState.outgoingReleasesList} lgusList={inventoryState.lgusList} />;
-      case 'master-data':
-        return <MasterDataView inventoryState={inventoryState} />;
-      case 'dashboard':
-      default:
-        return <DashboardView inventoryState={inventoryState} onNavigate={setCurrentView} adminProfile={activeProfile} />;
+  const renderContent = () => {
+    if (isLguReceiver) {
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <LGUReceiverPage
+            profile={activeProfile}
+            releases={inventoryState.outgoingReleasesList}
+            lgusList={inventoryState.lgusList}
+            onAccept={inventoryState.receiverAcceptWithGps}
+            onSignOut={requestSignOut}
+          />
+        </Suspense>
+      );
     }
+
+    // If receiver has no assigned LGU, route to ReceiverPage (Receiver view)
+    if (activeProfile.role === 'receiver' || ['/receiver', '/trucker'].includes(window.location.pathname)) {
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <ReceiverPage profile={activeProfile} lgusList={inventoryState.lgusList} onSignOut={requestSignOut} />
+        </Suspense>
+      );
+    }
+
+    return (
+      <div className="size-full flex flex-col bg-gray-50">
+        <Header
+          profile={activeProfile}
+          email={activeProfile.email}
+          roleLabel="DSWD Admin"
+          onSignOut={requestSignOut}
+          currentRole={currentRole}
+          walletAddress={walletAddress}
+          walletMessage={null}
+          onConnectWallet={handleConnectWallet}
+        />
+
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar 
+            currentView={currentView} 
+            onNavigate={setCurrentView} 
+            onSignOut={requestSignOut}
+            onOpenSettings={() => setIsProfileModalOpen(true)}
+          />
+
+          <main className="flex-1 overflow-auto p-8">
+            <ErrorBoundary key={currentView}>
+              <Suspense fallback={<ViewLoading />}>
+                {renderView()}
+              </Suspense>
+            </ErrorBoundary>
+          </main>
+        </div>
+
+        <SettingsModal
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          profile={activeProfile}
+          onSignOut={requestSignOut}
+          adminActionsEnabled={inventoryState.adminActionsEnabled}
+          onToggleAdminActions={inventoryState.setAdminActionsEnabled}
+          onMasterDataChanged={() => {
+            inventoryState.refreshKitTypes();
+            inventoryState.refreshSupplySources();
+            inventoryState.refreshWarehouses();
+            inventoryState.refreshProvinces();
+            inventoryState.refreshLgus();
+          }}
+        />
+      </div>
+    );
   };
 
   return (
-    <div className="size-full flex flex-col bg-gray-50">
-      <Header
-        profile={activeProfile}
-        email={activeProfile.email}
-        roleLabel="DSWD Admin"
-        onSignOut={requestSignOut}
-        currentRole={currentRole}
-        walletAddress={walletAddress}
-        walletMessage={null}
-        onConnectWallet={handleConnectWallet}
-      />
-
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar 
-          currentView={currentView} 
-          onNavigate={setCurrentView} 
-          onSignOut={requestSignOut}
-          onOpenSettings={() => setIsProfileModalOpen(true)}
-        />
-
-        <main className="flex-1 overflow-auto p-8">
-          <ErrorBoundary key={currentView}>
-            <Suspense fallback={<ViewLoading />}>
-              {renderView()}
-            </Suspense>
-          </ErrorBoundary>
-        </main>
-      </div>
-
-      <SettingsModal
-        isOpen={isProfileModalOpen}
-        onClose={() => setIsProfileModalOpen(false)}
-        profile={activeProfile}
-        onSignOut={requestSignOut}
-        adminActionsEnabled={inventoryState.adminActionsEnabled}
-        onToggleAdminActions={inventoryState.setAdminActionsEnabled}
-        onMasterDataChanged={() => {
-          inventoryState.refreshKitTypes();
-          inventoryState.refreshSupplySources();
-          inventoryState.refreshWarehouses();
-          inventoryState.refreshProvinces();
-          inventoryState.refreshLgus();
-        }}
-      />
-
+    <>
+      {renderContent()}
       <ConfirmLogoutModal
         isOpen={isLogoutConfirmOpen}
         onConfirm={async () => {
@@ -218,6 +184,6 @@ export default function App() {
         }}
         onCancel={() => setIsLogoutConfirmOpen(false)}
       />
-    </div>
+    </>
   );
 }

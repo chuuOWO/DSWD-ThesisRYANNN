@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
-  ChevronLeft,
   ChevronUp,
   ClipboardList,
   Home,
@@ -23,8 +22,7 @@ import {
   Menu,
   ChevronRight,
   X,
-  ExternalLink,
-  LogOut
+  ExternalLink
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';

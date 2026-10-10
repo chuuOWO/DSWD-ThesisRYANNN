@@ -30,7 +30,6 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { blockchain } from '../../services/blockchain';
-import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { EmergencyStockCorrectionModal } from './EmergencyStockCorrectionModal';
 import {
   backendApi,
@@ -110,8 +109,6 @@ export function SettingsModal({
 
   // Tab 2: Smart Account States
   const [activeWallet, setActiveWallet] = useState<string | null>(profile.walletAddress || null);
-  const [isLinkingWallet, setIsLinkingWallet] = useState(false);
-  const [walletFeedback, setWalletFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedWallet, setCopiedWallet] = useState(false);
 
   // Tab 3: Master Data States (100% Supabase DB-driven via backendApi)
@@ -200,7 +197,6 @@ export function SettingsModal({
       setAvatarUrl(profile.avatarUrl || null);
       setActiveWallet(profile.walletAddress || null);
       setProfileFeedback(null);
-      setWalletFeedback(null);
     }
   }, [isOpen, initialTab, profile]);
 
@@ -364,23 +360,6 @@ export function SettingsModal({
     }
   };
 
-  // Smart Account Handler
-  const handleProvisionSmartAccount = async () => {
-    setIsLinkingWallet(true);
-    setWalletFeedback(null);
-    try {
-      const walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
-      if (!walletAddress) throw new Error('Could not provision smart account address.');
-      await authApi.updateWalletAddress(profile.id, walletAddress);
-      await refreshProfile();
-      setActiveWallet(walletAddress);
-      setWalletFeedback({ type: 'success', text: `Gasless smart account active: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` });
-    } catch (err) {
-      setWalletFeedback({ type: 'error', text: err instanceof Error ? err.message : 'Failed to provision smart account.' });
-    } finally {
-      setIsLinkingWallet(false);
-    }
-  };
 
   const copyAddressToClipboard = () => {
     if (!activeWallet) return;
@@ -1272,16 +1251,6 @@ export function SettingsModal({
               ================================================================= */}
           {activeTab === 'wallet' && (
             <div className="space-y-4">
-              {walletFeedback && (
-                <div className={`p-3 rounded-xl border text-xs font-semibold ${
-                  walletFeedback.type === 'success'
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    : 'bg-red-50 border-red-200 text-red-800'
-                }`}>
-                  {walletFeedback.text}
-                </div>
-              )}
-
               {/* Web3 Card */}
               <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-slate-900 to-blue-950 p-5 text-white shadow-lg space-y-3">
                 <div className="flex items-center justify-between">
@@ -1329,25 +1298,6 @@ export function SettingsModal({
                     <span className="text-slate-400">Zero real money (Free testnet ETH)</span>
                   </div>
                 </div>
-              </div>
-
-              {/* Account Provisioning Actions */}
-              <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
-                <p className="text-xs font-bold text-gray-800">Sepolia Wallet Connection</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={handleProvisionSmartAccount}
-                    disabled={isLinkingWallet}
-                    className="px-4 py-2.5 rounded-xl bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow transition disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Wallet className="w-3.5 h-3.5" />
-                    <span>{activeWallet ? 'Re-sync Wallet Address' : 'Connect / Link Wallet'}</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-gray-500">
-                  All transactions run on the official Ethereum Sepolia testnet. Zero real money is involved.
-                </p>
               </div>
             </div>
           )}

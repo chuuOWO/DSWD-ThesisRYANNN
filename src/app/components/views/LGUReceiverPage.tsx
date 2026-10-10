@@ -3,7 +3,6 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
-  ChevronLeft,
   ChevronRight,
   ClipboardList,
   Layers,
@@ -13,13 +12,9 @@ import {
   Settings,
   Truck,
   X,
-  LogOut,
   ExternalLink,
   ShieldCheck,
-  Menu,
-  Home,
-  MapPin,
-  Clock
+  Menu
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -283,16 +278,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
     });
   }, [releases, targetMuni, locallyAcceptedDrs]);
 
-  // Selected upcoming release index
-  const [selectedIndex, setSelectedIndex] = useState(0);
-
-  useEffect(() => {
-    if (selectedIndex >= upcomingReleases.length) {
-      setSelectedIndex(Math.max(0, upcomingReleases.length - 1));
-    }
-  }, [upcomingReleases.length, selectedIndex]);
-
-  const currentRelease = upcomingReleases[selectedIndex] || upcomingReleases[0] || null;
+  const currentRelease = upcomingReleases[0] || null;
 
   // Status check: Has the assigned receiver scanned the package for pickup yet?
   const isPickedUp = useMemo(() => {
@@ -335,23 +321,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
     return () => unsub();
   }, []);
 
-  // Compute live truck position for the selected upcoming delivery (only when picked up)
-  const truckLocation = useMemo<[number, number] | null>(() => {
-    if (!currentRelease || !isPickedUp) return null;
-    const truckId = currentRelease.assignedTruckId;
-    if (truckId && liveTruckLocations[truckId]) {
-      const t = liveTruckLocations[truckId];
-      if (typeof t.latitude === 'number' && typeof t.longitude === 'number') {
-        return [t.latitude, t.longitude];
-      }
-    }
-    // Check if any active truck matches
-    const firstActive = Object.values(liveTruckLocations)[0];
-    if (firstActive && typeof firstActive.latitude === 'number' && typeof firstActive.longitude === 'number') {
-      return [firstActive.latitude, firstActive.longitude];
-    }
-    return null;
-  }, [currentRelease, isPickedUp, liveTruckLocations]);
 
   // 4. Fixed Official Municipality Destination Coordinates (Fixed at LGU)
   const lguInfo = useMemo(() => {
@@ -435,44 +404,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
     return null;
   }, [currentRelease, incomingAdminPins]);
 
-  // Real OSRM Road Route Geometry: Assigned Receiver -> LGU Destination Pin
-  const [roadRoute, setRoadRoute] = useState<[number, number][]>([]);
-
-  useEffect(() => {
-    if (!isPickedUp || !truckLocation || !lguDestinationCoords) {
-      setRoadRoute([]);
-      return;
-    }
-
-    let isMounted = true;
-    const fetchOsrmRoute = async () => {
-      try {
-        const url = `https://router.project-osrm.org/route/v1/driving/${truckLocation[1]},${truckLocation[0]};${lguDestinationCoords[1]},${lguDestinationCoords[0]}?overview=full&geometries=geojson`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('OSRM network response was not ok');
-        const data = await res.json();
-        if (data.code === 'Ok' && data.routes?.[0]?.geometry?.coordinates?.length) {
-          const coords: [number, number][] = data.routes[0].geometry.coordinates.map((pt: [number, number]) => [pt[1], pt[0]]);
-          if (isMounted) {
-            setRoadRoute(coords);
-          }
-          return;
-        }
-      } catch (err) {
-        console.warn('OSRM road route fetch fallback:', err);
-      }
-      if (isMounted) {
-        setRoadRoute([truckLocation, lguDestinationCoords]);
-      }
-    };
-
-    fetchOsrmRoute();
-    return () => {
-      isMounted = false;
-    };
-  }, [isPickedUp, truckLocation?.[0], truckLocation?.[1], lguDestinationCoords?.[0], lguDestinationCoords?.[1]]);
-
-  const routePath = roadRoute;
 
   // 4. Navigation Drawers & LGU Inventory State (Read-only for LGU recipient)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -975,30 +906,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
             </button>
           </div>
 
-          {/* Floating Package Switcher (if multiple incoming shipments) */}
-          {upcomingReleases.length > 1 && (
-            <div className="absolute top-3 left-3 z-10 bg-white/95 backdrop-blur-md rounded-xl border border-gray-200 shadow-md px-2.5 py-1 flex items-center gap-2 text-xs font-bold text-gray-800">
-              <button
-                type="button"
-                disabled={selectedIndex === 0}
-                onClick={() => setSelectedIndex((prev) => Math.max(0, prev - 1))}
-                className="p-1 hover:bg-gray-100 rounded disabled:opacity-30"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <span>
-                Delivery {selectedIndex + 1} of {upcomingReleases.length}
-              </span>
-              <button
-                type="button"
-                disabled={selectedIndex === upcomingReleases.length - 1}
-                onClick={() => setSelectedIndex((prev) => Math.min(upcomingReleases.length - 1, prev + 1))}
-                className="p-1 hover:bg-gray-100 rounded disabled:opacity-30"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          )}
+
 
         </div>
 
@@ -1251,18 +1159,10 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 </div>
               ) : (
                 <div className="space-y-2.5 max-h-72 overflow-y-auto">
-                  {upcomingReleases.map((r, idx) => (
+                  {upcomingReleases.map((r) => (
                     <div
                       key={r.drNumber}
-                      onClick={() => {
-                        setSelectedIndex(idx);
-                        setIsUpcomingDeliveriesOpen(false);
-                      }}
-                      className={`p-3 rounded-xl border text-xs cursor-pointer transition ${
-                        selectedIndex === idx
-                          ? 'border-[#2500ba] bg-blue-50/50 shadow-xs'
-                          : 'border-gray-200 hover:border-gray-300 bg-white'
-                      }`}
+                      className="p-3 rounded-xl border border-gray-200 bg-white text-xs"
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-mono font-bold text-[#2500ba] text-[11px]">

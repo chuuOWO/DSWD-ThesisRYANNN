@@ -9,7 +9,6 @@ import {
   Phone,
   RefreshCw,
   Upload,
-  Wallet,
   X
 } from 'lucide-react';
 import { authApi, UserRole } from '../../services/authApi';
@@ -523,20 +522,6 @@ export function AuthPage() {
                     )}
                   </div>
 
-                  {/* Invisible Gasless Smart Account */}
-                  <div className="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/60 text-xs text-indigo-900 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Wallet className="w-4 h-4 text-[#10069f] flex-shrink-0" />
-                      <div>
-                        <p className="font-bold text-[#10069f] text-[11px]">Gasless Smart Account</p>
-                        <p className="text-[10px] text-indigo-700">Auto-provisioned with ERC-4337 Paymaster sponsorship</p>
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded-full flex-shrink-0">
-                      Zero Gas
-                    </span>
-                  </div>
-
                   {/* Submit Register Button */}
                   <div className="pt-2">
                     <button
@@ -1006,19 +991,6 @@ export function AuthPage() {
                   )}
                 </div>
 
-                {/* Invisible Gasless Smart Account */}
-                <div className="w-full py-2.5 px-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/60 text-xs text-indigo-900 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Wallet className="w-4 h-4 text-[#10069f] flex-shrink-0" />
-                    <div>
-                      <p className="font-bold text-[#10069f] text-[11px]">Gasless Smart Account</p>
-                      <p className="text-[10px] text-indigo-700">Auto-provisioned with ERC-4337 Paymaster sponsorship</p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-bold bg-white text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded-full flex-shrink-0">
-                    Zero Gas
-                  </span>
-                </div>
 
                 {/* Submit Register Button */}
                 <div className="pt-2">

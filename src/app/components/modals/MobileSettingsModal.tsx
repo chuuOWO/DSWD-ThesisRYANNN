@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  AlertTriangle,
   Camera,
   Check,
   Copy,
@@ -10,7 +9,6 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
-  Trash2,
   Upload,
   User,
   Wallet,
@@ -18,8 +16,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { authApi, type UserProfile } from '../../services/authApi';
-import { backendApi } from '../../services/backendApi';
-import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 
 export interface MobileSettingsModalProps {
   isOpen: boolean;
@@ -55,8 +51,6 @@ export function MobileSettingsModal({
 
   // Tab 2: Smart Account States
   const [activeWallet, setActiveWallet] = useState<string | null>(profile.walletAddress || null);
-  const [isLinkingWallet, setIsLinkingWallet] = useState(false);
-  const [walletFeedback, setWalletFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copiedWallet, setCopiedWallet] = useState(false);
 
   // Refs for camera and file upload
@@ -77,7 +71,6 @@ export function MobileSettingsModal({
       setIsPhotoMenuOpen(false);
       setIsCameraActive(false);
       setProfileFeedback(null);
-      setWalletFeedback(null);
       setCopiedWallet(false);
     } else {
       stopCamera();
@@ -241,70 +234,6 @@ export function MobileSettingsModal({
     setTimeout(() => setCopiedWallet(false), 2000);
   };
 
-  const handleProvisionSmartAccount = async () => {
-    setIsLinkingWallet(true);
-    setWalletFeedback(null);
-
-    try {
-      if (profile.role === 'receiver') {
-        const releases = await backendApi.getReceiverReleases();
-        const receiverKeys = [
-          profile.truckId?.trim().toLowerCase(),
-          profile.fullName?.trim().replace(/\s+/g, '-').toLowerCase(),
-          profile.email?.split('@')[0].toLowerCase(),
-          profile.id.toLowerCase()
-        ].filter(Boolean) as string[];
-
-        const activeCarrying = releases.filter((r) => {
-          const assigned = (r.assigned_truck_id || '').trim().toLowerCase();
-          const isActive = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(r.delivery_status ?? '');
-          return receiverKeys.includes(assigned) && isActive;
-        });
-
-        if (activeCarrying.length > 0) {
-          throw new Error(
-            `Wallet change locked: You have ${activeCarrying.length} active shipment(s) in custody (${activeCarrying.map((c) => `#${c.dr_number}`).join(', ')}). Complete deliveries before updating your wallet address.`
-          );
-        }
-      }
-
-      let walletAddress: string | null = null;
-      if (typeof window !== 'undefined' && (window as any).ethereum) {
-        try {
-          const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
-          if (accounts?.[0]) walletAddress = accounts[0];
-        } catch {
-          // User rejected MetaMask, proceed with smart account provisioning
-        }
-      }
-
-      if (!walletAddress) {
-        walletAddress = await provisionSmartAccountAddress(profile.id, profile.email);
-      }
-
-      if (!walletAddress) throw new Error('Could not resolve wallet address.');
-
-      const isLinked = await authApi.isWalletLinked(walletAddress, profile.id);
-      if (isLinked) {
-        throw new Error('This wallet is already bound to another account.');
-      }
-
-      await authApi.updateWalletAddress(profile.id, walletAddress);
-      setActiveWallet(walletAddress);
-      await refreshProfile();
-      setWalletFeedback({
-        type: 'success',
-        text: `Sepolia testnet wallet active: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
-      });
-    } catch (err) {
-      setWalletFeedback({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Failed to update wallet address.'
-      });
-    } finally {
-      setIsLinkingWallet(false);
-    }
-  };
 
   const handleSignOutClick = () => {
     onClose();
@@ -600,18 +529,6 @@ export function MobileSettingsModal({
               =============================================================== */}
           {activeTab === 'wallet' && (
             <div className="space-y-3.5">
-              {walletFeedback && (
-                <div
-                  className={`p-3 rounded-xl border text-xs font-semibold ${
-                    walletFeedback.type === 'success'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-red-50 border-red-200 text-red-800'
-                  }`}
-                >
-                  {walletFeedback.text}
-                </div>
-              )}
-
               {/* Web3 Card */}
               <div className="rounded-2xl border border-slate-700 bg-gradient-to-br from-slate-900 to-blue-950 p-4 text-white shadow-lg space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -673,23 +590,6 @@ export function MobileSettingsModal({
                     </a>
                   )}
                 </div>
-              </div>
-
-              {/* Account Provisioning Actions */}
-              <div className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/70 space-y-2.5">
-                <p className="text-xs font-bold text-gray-800">Sepolia Wallet Connection</p>
-                <p className="text-[11px] text-gray-500 leading-snug">
-                  Smart Accounts sign delivery handovers on the Ethereum Sepolia blockchain with zero gas fees.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleProvisionSmartAccount}
-                  disabled={isLinkingWallet}
-                  className="w-full py-2.5 px-4 rounded-xl bg-[#2500ba] hover:bg-blue-800 text-white text-xs font-bold shadow transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Wallet className="w-3.5 h-3.5" />
-                  <span>{activeWallet ? 'Re-sync Smart Account' : 'Provision Smart Account'}</span>
-                </button>
               </div>
             </div>
           )}
