@@ -63,7 +63,7 @@ const contractAddress =
   import.meta.env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
   import.meta.env.VITE_BATCH_TOKEN_CONTRACT_ADDRESS ||
   import.meta.env.VITE_HANDOVER_CONTRACT_ADDRESS ||
-  '0xd2e957dda5a5099980a66ecc736b541590892588';
+  '0x9d6FBCE1BDfc9c6fAD604c1640aB13252d3296A8';
 const batchTokenContractAddress = contractAddress;
 const handoverContractAddress = contractAddress;
 const targetChainId = Number(import.meta.env.VITE_BLOCKCHAIN_CHAIN_ID ?? 11155111);
@@ -146,9 +146,13 @@ const batchTokenAbi = [
 
 const handoverAbi = [
   'function signRelease(string drNumber,string handoverContractId,string category,uint256 quantity,string[] batchTokenIds,uint256[] batchQuantities,string fromLocation,string destination,string senderGps) returns (uint256)',
+  'function signReleaseWithDriver(string drNumber,string handoverContractId,string category,uint256 quantity,string[] batchTokenIds,uint256[] batchQuantities,string fromLocation,string destination,string senderGps,address designatedDriver) returns (uint256)',
+  'function transferDriverCustody(string drNumber,address newDriver,string transferGps,string note) returns (uint256)',
   'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)',
+  'function confirmReceiptForLgu(string drNumber,string handoverContractId,string destination,string receiverGps,address targetLguRecipient) returns (uint256)',
   'function handoverIdByDrNumber(string drNumber) view returns (uint256)',
   'function handoverIdByContractId(string handoverContractId) view returns (uint256)',
+  'function getHandoverHops(uint256 handoverId) view returns (tuple(address fromParty,address toParty,string gps,uint256 timestamp,string note)[])',
   'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
   'function balanceOf(address account, uint256 id) view returns (uint256)',
   'function batchIdByTokenId(string tokenId) view returns (uint256)'
@@ -484,24 +488,6 @@ export const blockchain = {
       const walletAddress = await signer.getAddress();
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
 
-      onStage?.('mining');
-      const tx = await contract.signRelease(
-        input.drNumber,
-        input.handoverContractId,
-        input.category,
-        BigInt(input.quantity),
-        input.batchTokenIds,
-        input.batchQuantities.map((q) => BigInt(q)),
-        input.from,
-        input.to,
-        input.gps
-      );
-
-      onStage?.('mining', tx.hash);
-      const receipt = await tx.wait(1);
-
-      // ERC-1155 Token Handover to Receiver: Transfer the batch tokens to the driver's Sepolia wallet!
-      let tokenTransferHash = receipt?.hash || tx.hash;
       let targetRecipientWallet = input.signerWallet;
       if (!targetRecipientWallet || !ethers.isAddress(targetRecipientWallet)) {
         try {
@@ -526,51 +512,40 @@ export const blockchain = {
         } catch {}
       }
 
-      if (targetRecipientWallet && ethers.isAddress(targetRecipientWallet) && targetRecipientWallet.toLowerCase() !== walletAddress.toLowerCase()) {
-        try {
-          let batchPairs: { tokenId: string; qty: bigint }[] = [];
-          for (let i = 0; i < (input.batchTokenIds || []).length; i++) {
-            const bTokenId = input.batchTokenIds[i];
-            const qty = BigInt(input.batchQuantities?.[i] || input.quantity);
-            const bId = await contract.batchIdByTokenId(bTokenId);
-            if (bId > 0n) {
-              batchPairs.push({ tokenId: bTokenId, qty });
-            }
-          }
-
-          if (batchPairs.length === 0) {
-            const freshReleases = await supabase.from('outgoing_requests').select('allocated_batches, amount_approved, amount_requested').ilike('dr_number', input.drNumber.trim()).maybeSingle();
-            const batches = (freshReleases.data?.allocated_batches as any[]) || [];
-            for (const b of batches) {
-              if (b.batchTokenId) {
-                const bId = await contract.batchIdByTokenId(b.batchTokenId);
-                const qty = BigInt(b.quantity || freshReleases.data?.amount_approved || freshReleases.data?.amount_requested || 1);
-                if (bId > 0n) {
-                  batchPairs.push({ tokenId: b.batchTokenId, qty });
-                }
-              }
-            }
-          }
-
-          for (const pair of batchPairs) {
-            const bId = await contract.batchIdByTokenId(pair.tokenId);
-            if (bId > 0n) {
-              const currentBal = await contract.balanceOf(walletAddress, bId);
-              if (currentBal >= pair.qty) {
-                const transferTx = await contract.safeTransferFrom(walletAddress, targetRecipientWallet, bId, pair.qty, '0x');
-                await transferTx.wait(1);
-                tokenTransferHash = transferTx.hash;
-                console.log(`[Blockchain] Transferred ${pair.qty} of batch ${pair.tokenId} to receiver ${targetRecipientWallet}. Tx: ${transferTx.hash}`);
-              }
-            }
-          }
-        } catch (transferErr) {
-          console.warn('[Blockchain] Token transfer to receiver wallet warning:', transferErr);
-        }
+      onStage?.('mining');
+      let tx;
+      if (targetRecipientWallet && ethers.isAddress(targetRecipientWallet)) {
+        tx = await contract.signReleaseWithDriver(
+          input.drNumber,
+          input.handoverContractId,
+          input.category,
+          BigInt(input.quantity),
+          input.batchTokenIds,
+          input.batchQuantities.map((q) => BigInt(q)),
+          input.from,
+          input.to,
+          input.gps,
+          targetRecipientWallet
+        );
+      } else {
+        tx = await contract.signRelease(
+          input.drNumber,
+          input.handoverContractId,
+          input.category,
+          BigInt(input.quantity),
+          input.batchTokenIds,
+          input.batchQuantities.map((q) => BigInt(q)),
+          input.from,
+          input.to,
+          input.gps
+        );
       }
 
+      onStage?.('mining', tx.hash);
+      const receipt = await tx.wait(1);
+
       return {
-        hash: tokenTransferHash,
+        hash: receipt?.hash || tx.hash,
         walletAddress: targetRecipientWallet || input.signerWallet || walletAddress,
         mode: 'contract'
       };
@@ -588,6 +563,25 @@ export const blockchain = {
     return this.signRelease(input, onStage);
   },
 
+  async transferDriverCustody(input: { drNumber: string; newDriverWallet: string; gps: string; note?: string }, onStage?: TxStageCallback): Promise<BlockchainProof> {
+    const signer = await getSigner();
+    const contract = new Contract(handoverContractAddress, handoverAbi, signer);
+    onStage?.('mining');
+    const tx = await contract.transferDriverCustody(
+      input.drNumber,
+      input.newDriverWallet,
+      input.gps,
+      input.note || 'Transshipment Relay'
+    );
+    onStage?.('mining', tx.hash);
+    const receipt = await tx.wait(1);
+    return {
+      hash: receipt?.hash || tx.hash,
+      walletAddress: input.newDriverWallet,
+      mode: 'contract'
+    };
+  },
+
   async confirmReceipt(input: ConfirmReceiptInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
     const lockKey = `confirmReceipt:${input.drNumber}`;
     const existing = activeTxPromises.get(lockKey);
@@ -602,19 +596,6 @@ export const blockchain = {
       const walletAddress = await signer.getAddress();
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
 
-      onStage?.('mining');
-      const tx = await contract.confirmReceipt(
-        input.drNumber,
-        input.handoverContractId,
-        input.destination,
-        input.gps
-      );
-
-      onStage?.('mining', tx.hash);
-      const receipt = await tx.wait(1);
-
-      // ERC-1155 Token Handover to LGU: Transfer batch tokens to the LGU's Sepolia wallet!
-      let tokenTransferHash = receipt?.hash || tx.hash;
       let targetLguWallet = input.signerWallet;
       if (!targetLguWallet || !ethers.isAddress(targetLguWallet)) {
         try {
@@ -633,32 +614,30 @@ export const blockchain = {
         } catch {}
       }
 
-      if (targetLguWallet && ethers.isAddress(targetLguWallet) && targetLguWallet.toLowerCase() !== walletAddress.toLowerCase()) {
-        try {
-          const freshReleases = await supabase.from('outgoing_requests').select('allocated_batches, amount_approved, amount_requested').ilike('dr_number', input.drNumber.trim()).maybeSingle();
-          const batches = (freshReleases.data?.allocated_batches as any[]) || [];
-          for (const b of batches) {
-            if (b.batchTokenId) {
-              const bId = await contract.batchIdByTokenId(b.batchTokenId);
-              const qty = BigInt(b.quantity || freshReleases.data?.amount_approved || freshReleases.data?.amount_requested || 1);
-              if (bId > 0n) {
-                const currentBal = await contract.balanceOf(walletAddress, bId);
-                if (currentBal >= qty) {
-                  const transferTx = await contract.safeTransferFrom(walletAddress, targetLguWallet, bId, qty, '0x');
-                  await transferTx.wait(1);
-                  tokenTransferHash = transferTx.hash;
-                  console.log(`[Blockchain] Transferred ${qty} of batch ${b.batchTokenId} to LGU ${targetLguWallet}. Tx: ${transferTx.hash}`);
-                }
-              }
-            }
-          }
-        } catch (lguTransferErr) {
-          console.warn('[Blockchain] Token transfer to LGU wallet warning:', lguTransferErr);
-        }
+      onStage?.('mining');
+      let tx;
+      if (targetLguWallet && ethers.isAddress(targetLguWallet)) {
+        tx = await contract.confirmReceiptForLgu(
+          input.drNumber,
+          input.handoverContractId,
+          input.destination || '',
+          input.gps,
+          targetLguWallet
+        );
+      } else {
+        tx = await contract.confirmReceipt(
+          input.drNumber,
+          input.handoverContractId,
+          input.destination || '',
+          input.gps
+        );
       }
 
+      onStage?.('mining', tx.hash);
+      const receipt = await tx.wait(1);
+
       return {
-        hash: tokenTransferHash,
+        hash: receipt?.hash || tx.hash,
         walletAddress: targetLguWallet || input.signerWallet || walletAddress,
         mode: 'contract'
       };
