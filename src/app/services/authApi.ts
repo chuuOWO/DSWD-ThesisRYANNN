@@ -95,6 +95,8 @@ export const authApi = {
 
   async getProfile(userId?: string | null, email?: string | null): Promise<UserProfile | null> {
     try {
+      const cleanEmail = email?.trim().toLowerCase();
+
       // 1. Direct query by userId if provided
       if (userId) {
         const { data } = await supabase
@@ -122,7 +124,6 @@ export const authApi = {
       }
 
       // 2. Query by email if provided
-      const cleanEmail = email?.trim().toLowerCase();
       if (cleanEmail) {
         const { data } = await supabase
           .from('profiles')
