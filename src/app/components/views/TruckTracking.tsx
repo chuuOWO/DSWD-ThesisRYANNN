@@ -442,11 +442,6 @@ function RoadSnappedRoute({ route, onRouteDataChange }: { route: TruckRoute; onR
         distanceKm: summary.totalDistance / 1000,
         durationMinutes: Math.round(summary.totalTime / 60)
       });
-
-      if (osrmRoute?.coordinates && osrmRoute.coordinates.length > 0) {
-        const bounds = L.latLngBounds(osrmRoute.coordinates);
-        map.fitBounds(bounds, { padding: [55, 55], maxZoom: 15, animate: true });
-      }
     });
 
     control.on('routingerror', () => onRouteDataChange(null));
@@ -572,7 +567,6 @@ function RouteMap({
   return (
     <div className="relative w-full h-full min-h-[640px] flex-1 flex flex-col">
       <MapContainer
-        key={selectedRoute ? selectedRoute.id : 'all-trucks'}
         center={center}
         zoom={13}
         scrollWheelZoom
@@ -1200,8 +1194,8 @@ export function TruckTracking({
           </div>
 
           {/* Right Column: Full Interactive Road-Snapped Map */}
-          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm flex flex-col h-full min-h-[640px]">
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+          <div className="rounded-xl bg-white overflow-hidden flex flex-col h-full min-h-[640px]">
+            <div className="p-4 flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-blue-600" />
                 <span className="text-sm font-bold text-gray-800">Map</span>

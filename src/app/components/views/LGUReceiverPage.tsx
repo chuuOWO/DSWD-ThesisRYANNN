@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import 'leaflet-routing-machine';
 
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import { authApi, type UserProfile } from '../../services/authApi';
@@ -64,6 +65,150 @@ const isValidCoordinate = (coord?: [number, number] | null): coord is [number, n
     !isNaN(coord[1])
   );
 };
+
+const getDistanceMeters = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) return 0;
+  const earthRadiusMeters = 6371000;
+  const toRadians = (deg: number) => deg * (Math.PI / 180);
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+function RoadLockedDeliveryRoute({
+  currentPosition,
+  destinationPosition
+}: {
+  currentPosition: [number, number];
+  destinationPosition: [number, number];
+}) {
+  const map = useMap();
+  const [roadCoordinates, setRoadCoordinates] = useState<[number, number][] | null>(null);
+  const [connectorPoint, setConnectorPoint] = useState<[number, number] | null>(null);
+
+  useEffect(() => {
+    if (!map || !isValidCoordinate(currentPosition) || !isValidCoordinate(destinationPosition)) {
+      setRoadCoordinates(null);
+      setConnectorPoint(null);
+      return;
+    }
+
+    let isMounted = true;
+    let control: any = null;
+
+    try {
+      control = L.Routing.control({
+        waypoints: [
+          L.latLng(currentPosition[0], currentPosition[1]),
+          L.latLng(destinationPosition[0], destinationPosition[1])
+        ],
+        router: L.Routing.osrmv1({
+          serviceUrl: 'https://router.project-osrm.org/route/v1',
+          profile: 'driving'
+        }),
+        lineOptions: {
+          styles: [{ color: '#2500ba', opacity: 0, weight: 0 }],
+          extendToWaypoints: false,
+          missingRouteTolerance: 0
+        },
+        addWaypoints: false,
+        routeWhileDragging: false,
+        draggableWaypoints: false,
+        fitSelectedRoutes: false,
+        show: false,
+        createMarker: () => null
+      } as L.Routing.RoutingControlOptions).addTo(map);
+
+      control.on('routesfound', (event: any) => {
+        if (!isMounted) return;
+        const osrmRoute = event.routes?.[0];
+        const rawCoords: L.LatLng[] = osrmRoute?.coordinates ?? [];
+        if (rawCoords.length > 0) {
+          const coords: [number, number][] = rawCoords.map((c) => [c.lat, c.lng]);
+          setRoadCoordinates(coords);
+
+          const firstRoadPoint = coords[0];
+          const distMeters = getDistanceMeters(
+            currentPosition[0],
+            currentPosition[1],
+            firstRoadPoint[0],
+            firstRoadPoint[1]
+          );
+
+          if (distMeters > 15) {
+            setConnectorPoint(firstRoadPoint);
+          } else {
+            setConnectorPoint(null);
+          }
+        }
+      });
+
+      control.on('routingerror', () => {
+        if (!isMounted) return;
+        setRoadCoordinates([currentPosition, destinationPosition]);
+        setConnectorPoint(null);
+      });
+    } catch {
+      if (isMounted) {
+        setRoadCoordinates([currentPosition, destinationPosition]);
+        setConnectorPoint(null);
+      }
+    }
+
+    return () => {
+      isMounted = false;
+      if (control) {
+        try {
+          map.removeControl(control);
+        } catch {}
+      }
+    };
+  }, [map, currentPosition[0], currentPosition[1], destinationPosition[0], destinationPosition[1]]);
+
+  return (
+    <>
+      {connectorPoint && isValidCoordinate(currentPosition) && isValidCoordinate(connectorPoint) && (
+        <Polyline
+          positions={[currentPosition, connectorPoint]}
+          pathOptions={{
+            color: '#2500ba',
+            weight: 3.5,
+            opacity: 0.9,
+            dashArray: '6, 6'
+          }}
+        />
+      )}
+
+      {roadCoordinates && roadCoordinates.length > 0 && (
+        <>
+          <Polyline
+            positions={roadCoordinates}
+            pathOptions={{
+              color: '#ffffff',
+              weight: 8,
+              opacity: 0.9,
+              lineJoin: 'round',
+              lineCap: 'round'
+            }}
+          />
+          <Polyline
+            positions={roadCoordinates}
+            pathOptions={{
+              color: '#2500ba',
+              weight: 4.5,
+              opacity: 1,
+              lineJoin: 'round',
+              lineCap: 'round'
+            }}
+          />
+        </>
+      )}
+    </>
+  );
+}
 
 // One-shot silent background GPS lookup for backend audit trail
 const getQuickGpsCoords = (): Promise<string | undefined> =>
@@ -869,25 +1014,10 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     </Popup>
                   </Marker>
                   {dropOffCoords && (
-                    <>
-                      <Polyline
-                        positions={[coords, dropOffCoords]}
-                        pathOptions={{
-                          color: '#2500ba',
-                          weight: 7,
-                          opacity: 0.18
-                        }}
-                      />
-                      <Polyline
-                        positions={[coords, dropOffCoords]}
-                        pathOptions={{
-                          color: '#2500ba',
-                          weight: 3,
-                          opacity: 0.9,
-                          dashArray: '6, 8'
-                        }}
-                      />
-                    </>
+                    <RoadLockedDeliveryRoute
+                      currentPosition={coords}
+                      destinationPosition={dropOffCoords}
+                    />
                   )}
                 </React.Fragment>
               ))}

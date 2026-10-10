@@ -1787,24 +1787,10 @@ export const backendApi = {
   async markTruckLiveLocationDone(truckId: string, drNumber?: string) {
     try {
       if (drNumber) {
-        const { data: release } = await supabase
-          .from('outgoing_requests')
-          .select('municipality, lgu_name, category, amount_approved, amount_requested, province')
-          .eq('dr_number', drNumber)
-          .maybeSingle();
-
         await supabase
           .from('outgoing_requests')
           .update({ delivery_status: 'Delivered' })
           .eq('dr_number', drNumber);
-
-        if (release) {
-          const targetMuni = release.municipality || release.lgu_name;
-          const targetQty = release.amount_approved || release.amount_requested || 0;
-          if (targetMuni && targetQty > 0 && release.category) {
-            await backendApi.addLguStock(targetMuni, release.category, targetQty, release.province);
-          }
-        }
       } else {
         await supabase
           .from('outgoing_requests')

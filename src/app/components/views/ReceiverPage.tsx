@@ -2095,7 +2095,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                 </div>
               </div>
 
-              <div className="mt-4">
+              <div className="mt-4 pb-3">
                 <button
                   type="button"
                   onClick={async () => {
@@ -2355,17 +2355,25 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
 function Modal({ title, icon, children, onClose }: { title: string; icon?: ReactNode; children: ReactNode; onClose: () => void }) {
   return (
-    <div className="absolute left-5 right-5 top-1/2 z-30 -translate-y-1/2 rounded-xl bg-white p-5 shadow-2xl border border-gray-100">
-      <button onClick={onClose} aria-label="Close" className="absolute right-3 top-3 text-[#2500ba]">
-        <X size={16} />
-      </button>
-      {icon && (
-        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#dedafb] text-[#2500ba]">
-          {icon}
+    <div className="absolute inset-0 z-30 flex items-center justify-center p-3 sm:p-4 pointer-events-auto">
+      <div className="relative w-full max-h-[94%] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-3 top-3 z-10 p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+        >
+          <X size={18} />
+        </button>
+        <div className="overflow-y-auto p-4 sm:p-5 flex-1">
+          {icon && (
+            <div className="mx-auto mb-2.5 flex h-12 w-12 items-center justify-center rounded-full bg-[#dedafb] text-[#2500ba]">
+              {icon}
+            </div>
+          )}
+          <h2 className="text-center text-sm font-bold text-[#2500ba]">{title}</h2>
+          {children}
         </div>
-      )}
-      <h2 className="text-center text-xs font-bold text-[#2500ba]">{title}</h2>
-      {children}
+      </div>
     </div>
   );
 }
