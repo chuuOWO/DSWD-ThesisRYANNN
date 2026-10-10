@@ -31,6 +31,7 @@ import 'leaflet-routing-machine';
 import type { UserProfile } from '../../services/authApi';
 import { backendApi, type ReceiverReleaseRecord, type LguRecord } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
+import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { findMatchingLgu } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
@@ -202,18 +203,19 @@ const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPa
         // Check for 'dr' or 'drNumber' param
         const drParam = params.get('dr') || params.get('drNumber');
         if (drParam) {
-          const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === drParam.toUpperCase());
+          const canonicalDr = drParam.toUpperCase().startsWith('DR-') ? drParam.toUpperCase() : `DR-${drParam.toUpperCase()}`;
+          const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === canonicalDr);
           const rawQty = params.get('qty');
           const parsedQty = rawQty && Number(rawQty) > 0 ? Number(rawQty) : (matchingRel?.amount_approved ?? matchingRel?.amount_requested);
           if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {
-            throw new Error(`Missing or invalid quantity for shipment ${drParam}. Scan a complete QR payload.`);
+            throw new Error(`Missing or invalid quantity for shipment ${canonicalDr}. Scan a complete QR payload.`);
           }
           return {
-            drNumber: drParam,
-            handoverContractId: `HANDOVER-${drParam.replace('DR-', '')}`,
+            drNumber: canonicalDr,
+            handoverContractId: matchingRel?.handover_contract_id || `HANDOVER-${canonicalDr}`,
             category: params.get('cat') || matchingRel?.category || 'Food Pack',
             quantity: parsedQty,
-            batchTokenIds: [`BATCH-${drParam}`],
+            batchTokenIds: [`BATCH-${canonicalDr}`],
             batchQuantities: [parsedQty],
             from: params.get('from') || matchingRel?.warehouse_source || 'DSWD Logistics Hub',
             to: params.get('to') || matchingRel?.destination_address || matchingRel?.lgu_name || matchingRel?.municipality || 'Assigned LGU'
@@ -1280,12 +1282,23 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     setSignError(null);
 
     let activeProofHash: string | undefined = undefined;
-    let activeWalletAddr = profile?.walletAddress || '0xReceiverWallet';
+    let activeWalletAddr = profile?.walletAddress || '';
+    if (!activeWalletAddr || activeWalletAddr === '0xReceiverWallet') {
+      try {
+        activeWalletAddr = await provisionSmartAccountAddress(profile?.id || receiverId, profile?.email || `${receiverId}@dswd.gov.ph`);
+      } catch {
+        activeWalletAddr = '0xReceiverWallet';
+      }
+    }
+
+    const resolvedContractId = custody.matchingRelease?.handover_contract_id ||
+      payload.handoverContractId ||
+      (payload.drNumber.toUpperCase().startsWith('DR-') ? `HANDOVER-${payload.drNumber.toUpperCase()}` : `HANDOVER-DR-${payload.drNumber}`);
 
     try {
       const proof = await blockchain.signReleaseProof({
         drNumber: payload.drNumber,
-        handoverContractId: payload.handoverContractId || `HANDOVER-${payload.drNumber.replace('DR-', '')}`,
+        handoverContractId: resolvedContractId,
         category: payload.category,
         quantity: payload.quantity,
         batchTokenIds: payload.batchTokenIds || [],
@@ -1293,7 +1306,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         from: payload.from || 'DSWD Logistics Hub',
         to: payload.to || 'Assigned LGU',
         gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
-        signerWallet: profile?.walletAddress || undefined
+        signerWallet: activeWalletAddr && activeWalletAddr !== '0xReceiverWallet' ? activeWalletAddr : undefined
       }, (stage, txHash) => {
         setSignStage(stage);
         if (txHash) {
@@ -1311,11 +1324,36 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         await backendApi.updateOutgoing(payload.drNumber, {
           senderSignature: activeProofHash,
           txHash: activeProofHash,
-          handoverContractId: payload.handoverContractId,
+          handoverContractId: resolvedContractId,
           walletAddress: activeWalletAddr,
           deliveryStatus: 'In Transit'
         }).catch(() => {});
       }
+
+      // Log custody acceptance to activity_logs for audit trails and user trails
+      await backendApi.logActivity({
+        actorId: profile?.id,
+        actorName: profile?.fullName || receiverId,
+        actorEmail: profile?.email,
+        actorRole: profile?.role || 'receiver',
+        actorWallet: activeWalletAddr,
+        action: 'CUSTODY_ACCEPTED',
+        entityType: 'outgoing_request',
+        entityId: payload.drNumber,
+        details: `Receiver custody confirmed for ${payload.drNumber}. Transferred to vehicle ${receiverId} at GPS ${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}.`,
+        metadata: {
+          drNumber: payload.drNumber,
+          truckId: receiverId,
+          gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
+          quantity: payload.quantity,
+          category: payload.category,
+          destination: payload.to,
+          contractId: resolvedContractId
+        },
+        txHash: activeProofHash
+      }).catch((logErr) => {
+        console.warn('Failed to log custody acceptance activity:', logErr);
+      });
 
       const updatedPackages = [
         ...activePackages.filter((p) => p.drNumber !== payload.drNumber),
@@ -1347,7 +1385,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       }
 
       setInventory({
-        batchTokenId: payload.batchTokenIds[0] ?? payload.handoverContractId,
+        batchTokenId: payload.batchTokenIds[0] ?? resolvedContractId,
         category: payload.category,
         quantity: payload.quantity,
         status: 'In transit',
@@ -1378,8 +1416,29 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           await backendApi.updateOutgoing(payload.drNumber, {
             senderSignature: `on-chain-handover-${handoverId}`,
             txHash: `on-chain-handover-${handoverId}`,
+            handoverContractId: resolvedContractId,
             walletAddress: activeWalletAddr,
             deliveryStatus: 'In Transit'
+          }).catch(() => {});
+
+          await backendApi.logActivity({
+            actorId: profile?.id,
+            actorName: profile?.fullName || receiverId,
+            actorEmail: profile?.email,
+            actorRole: profile?.role || 'receiver',
+            actorWallet: activeWalletAddr,
+            action: 'CUSTODY_ACCEPTED',
+            entityType: 'outgoing_request',
+            entityId: payload.drNumber,
+            details: `Receiver custody confirmed on-chain (handover ${handoverId}) for ${payload.drNumber}. Transferred to vehicle ${receiverId}.`,
+            metadata: {
+              drNumber: payload.drNumber,
+              truckId: receiverId,
+              handoverId: Number(handoverId),
+              quantity: payload.quantity,
+              category: payload.category
+            },
+            txHash: `on-chain-handover-${handoverId}`
           }).catch(() => {});
 
           const updatedPackages = [

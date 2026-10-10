@@ -148,7 +148,10 @@ const handoverAbi = [
   'function signRelease(string drNumber,string handoverContractId,string category,uint256 quantity,string[] batchTokenIds,uint256[] batchQuantities,string fromLocation,string destination,string senderGps) returns (uint256)',
   'function confirmReceipt(string drNumber,string handoverContractId,string destination,string receiverGps) returns (uint256)',
   'function handoverIdByDrNumber(string drNumber) view returns (uint256)',
-  'function handoverIdByContractId(string handoverContractId) view returns (uint256)'
+  'function handoverIdByContractId(string handoverContractId) view returns (uint256)',
+  'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
+  'function balanceOf(address account, uint256 id) view returns (uint256)',
+  'function batchIdByTokenId(string tokenId) view returns (uint256)'
 ];
 
 const getReadOnlyProvider = () => {
@@ -497,9 +500,78 @@ export const blockchain = {
       onStage?.('mining', tx.hash);
       const receipt = await tx.wait(1);
 
+      // ERC-1155 Token Handover to Receiver: Transfer the batch tokens to the driver's Sepolia wallet!
+      let tokenTransferHash = receipt?.hash || tx.hash;
+      let targetRecipientWallet = input.signerWallet;
+      if (!targetRecipientWallet || !ethers.isAddress(targetRecipientWallet)) {
+        try {
+          const { data: outReq } = await supabase
+            .from('outgoing_requests')
+            .select('assigned_truck_id, wallet_address')
+            .ilike('dr_number', input.drNumber.trim())
+            .maybeSingle();
+
+          if (outReq?.wallet_address && ethers.isAddress(outReq.wallet_address) && outReq.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
+            targetRecipientWallet = outReq.wallet_address;
+          } else if (outReq?.assigned_truck_id) {
+            const { data: truckProf } = await supabase
+              .from('profiles')
+              .select('wallet_address')
+              .eq('truck_id', outReq.assigned_truck_id)
+              .maybeSingle();
+            if (truckProf?.wallet_address && ethers.isAddress(truckProf.wallet_address)) {
+              targetRecipientWallet = truckProf.wallet_address;
+            }
+          }
+        } catch {}
+      }
+
+      if (targetRecipientWallet && ethers.isAddress(targetRecipientWallet) && targetRecipientWallet.toLowerCase() !== walletAddress.toLowerCase()) {
+        try {
+          let batchPairs: { tokenId: string; qty: bigint }[] = [];
+          for (let i = 0; i < (input.batchTokenIds || []).length; i++) {
+            const bTokenId = input.batchTokenIds[i];
+            const qty = BigInt(input.batchQuantities?.[i] || input.quantity);
+            const bId = await contract.batchIdByTokenId(bTokenId);
+            if (bId > 0n) {
+              batchPairs.push({ tokenId: bTokenId, qty });
+            }
+          }
+
+          if (batchPairs.length === 0) {
+            const freshReleases = await supabase.from('outgoing_requests').select('allocated_batches, amount_approved, amount_requested').ilike('dr_number', input.drNumber.trim()).maybeSingle();
+            const batches = (freshReleases.data?.allocated_batches as any[]) || [];
+            for (const b of batches) {
+              if (b.batchTokenId) {
+                const bId = await contract.batchIdByTokenId(b.batchTokenId);
+                const qty = BigInt(b.quantity || freshReleases.data?.amount_approved || freshReleases.data?.amount_requested || 1);
+                if (bId > 0n) {
+                  batchPairs.push({ tokenId: b.batchTokenId, qty });
+                }
+              }
+            }
+          }
+
+          for (const pair of batchPairs) {
+            const bId = await contract.batchIdByTokenId(pair.tokenId);
+            if (bId > 0n) {
+              const currentBal = await contract.balanceOf(walletAddress, bId);
+              if (currentBal >= pair.qty) {
+                const transferTx = await contract.safeTransferFrom(walletAddress, targetRecipientWallet, bId, pair.qty, '0x');
+                await transferTx.wait(1);
+                tokenTransferHash = transferTx.hash;
+                console.log(`[Blockchain] Transferred ${pair.qty} of batch ${pair.tokenId} to receiver ${targetRecipientWallet}. Tx: ${transferTx.hash}`);
+              }
+            }
+          }
+        } catch (transferErr) {
+          console.warn('[Blockchain] Token transfer to receiver wallet warning:', transferErr);
+        }
+      }
+
       return {
-        hash: receipt?.hash || tx.hash,
-        walletAddress,
+        hash: tokenTransferHash,
+        walletAddress: targetRecipientWallet || input.signerWallet || walletAddress,
         mode: 'contract'
       };
     })();
@@ -541,9 +613,53 @@ export const blockchain = {
       onStage?.('mining', tx.hash);
       const receipt = await tx.wait(1);
 
+      // ERC-1155 Token Handover to LGU: Transfer batch tokens to the LGU's Sepolia wallet!
+      let tokenTransferHash = receipt?.hash || tx.hash;
+      let targetLguWallet = input.signerWallet;
+      if (!targetLguWallet || !ethers.isAddress(targetLguWallet)) {
+        try {
+          const freshReleases = await supabase.from('outgoing_requests').select('lgu_name, municipality, destination_address, wallet_address').ilike('dr_number', input.drNumber.trim()).maybeSingle();
+          const dest = freshReleases.data?.lgu_name || freshReleases.data?.municipality || input.destination;
+          if (dest) {
+            const { data: lguProf } = await supabase
+              .from('profiles')
+              .select('wallet_address')
+              .ilike('lgu_name', dest.trim())
+              .maybeSingle();
+            if (lguProf?.wallet_address && ethers.isAddress(lguProf.wallet_address)) {
+              targetLguWallet = lguProf.wallet_address;
+            }
+          }
+        } catch {}
+      }
+
+      if (targetLguWallet && ethers.isAddress(targetLguWallet) && targetLguWallet.toLowerCase() !== walletAddress.toLowerCase()) {
+        try {
+          const freshReleases = await supabase.from('outgoing_requests').select('allocated_batches, amount_approved, amount_requested').ilike('dr_number', input.drNumber.trim()).maybeSingle();
+          const batches = (freshReleases.data?.allocated_batches as any[]) || [];
+          for (const b of batches) {
+            if (b.batchTokenId) {
+              const bId = await contract.batchIdByTokenId(b.batchTokenId);
+              const qty = BigInt(b.quantity || freshReleases.data?.amount_approved || freshReleases.data?.amount_requested || 1);
+              if (bId > 0n) {
+                const currentBal = await contract.balanceOf(walletAddress, bId);
+                if (currentBal >= qty) {
+                  const transferTx = await contract.safeTransferFrom(walletAddress, targetLguWallet, bId, qty, '0x');
+                  await transferTx.wait(1);
+                  tokenTransferHash = transferTx.hash;
+                  console.log(`[Blockchain] Transferred ${qty} of batch ${b.batchTokenId} to LGU ${targetLguWallet}. Tx: ${transferTx.hash}`);
+                }
+              }
+            }
+          }
+        } catch (lguTransferErr) {
+          console.warn('[Blockchain] Token transfer to LGU wallet warning:', lguTransferErr);
+        }
+      }
+
       return {
-        hash: receipt?.hash || tx.hash,
-        walletAddress,
+        hash: tokenTransferHash,
+        walletAddress: targetLguWallet || input.signerWallet || walletAddress,
         mode: 'contract'
       };
     })();

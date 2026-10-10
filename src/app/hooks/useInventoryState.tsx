@@ -415,9 +415,63 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
     receiverGps: row.receiver_gps ?? undefined,
     destinationAddress: row.destination_address ?? undefined,
     assignedTruckId: row.assigned_truck_id ?? undefined,
-    assigned_truck_id: row.assigned_truck_id ?? undefined,
     blockchainTxHash: row.tx_hash ?? undefined,
-    auditTrail: []
+    auditTrail: (() => {
+      const trail: AuditEvent[] = [];
+      const dr = row.dr_number ?? row.id ?? 'DR';
+      const createdTime = row.created_at || row.date_allocated || nowStamp();
+
+      // 1. Release Draft Created
+      trail.push({
+        id: `AUD-CREATED-${dr}`,
+        timestamp: createdTime,
+        actor: 'DSWD Admin',
+        role: 'Admin',
+        action: 'Release Draft Created',
+        details: `Allocation request drafted for ${Number(row.amount_approved ?? row.amount_requested ?? 0)} ${row.category || 'units'} to ${row.destination_address || row.lgu_name || 'LGU'}.`
+      });
+
+      // 2. Release Minted & Authorized
+      if (row.tx_hash || row.admin_signature) {
+        trail.push({
+          id: `AUD-AUTH-${dr}`,
+          timestamp: row.date_allocated || createdTime,
+          actor: 'DSWD Admin',
+          role: 'Admin',
+          action: 'Release Minted & Authorized',
+          details: 'Release authorized on-chain. Batches allocated and immutable dispatch order generated.',
+          txHash: row.tx_hash || row.admin_signature || undefined
+        });
+      }
+
+      // 3. Custody Accepted & In Transit
+      if (row.sender_signature || ['In Transit', 'Delivered', 'Accepted', 'Distributed'].includes(row.delivery_status || '')) {
+        trail.push({
+          id: `AUD-CUSTODY-${dr}`,
+          timestamp: row.date_allocated || createdTime,
+          actor: row.assigned_truck_id ? `Receiver (${row.assigned_truck_id})` : 'Designated Receiver',
+          role: 'Receiver',
+          action: 'Custody Accepted & In Transit',
+          details: `Receiver scanned QR payload and assumed physical custody for transit${row.sender_gps ? ` at GPS ${row.sender_gps}` : ''}. Tokens transferred to driver wallet.`,
+          txHash: row.sender_signature || undefined
+        });
+      }
+
+      // 4. Receiver Accepted / LGU Received
+      if (row.receiver_signature || ['Accepted', 'Distributed'].includes(row.delivery_status || '')) {
+        trail.push({
+          id: `AUD-LGU-${dr}`,
+          timestamp: createdTime,
+          actor: row.lgu_name ? `LGU (${row.lgu_name})` : 'LGU Receiver',
+          role: 'LGUReceiver',
+          action: 'Receiver Accepted',
+          details: `LGU officer verified package delivery and accepted custody${row.receiver_gps ? ` at GPS ${row.receiver_gps}` : ''}. Tokens transferred to LGU custody.`,
+          txHash: row.receiver_signature || undefined
+        });
+      }
+
+      return trail.reverse();
+    })()
   };
 };
 
