@@ -1,6 +1,4 @@
-'use client';
-
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
@@ -31,7 +29,7 @@ import { authApi, type UserProfile } from '../../services/authApi';
 import { backendApi, type TruckLiveLocation, type LguRecord } from '../../services/backendApi';
 import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
-import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
+import { MobileSettingsModal } from '../modals/MobileSettingsModal';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import { formatUserErrorMessage } from '../../lib/errorUtils';
 
@@ -146,51 +144,49 @@ const truckMarkerIcon = L.divIcon({
 });
 
 function MapController({
-  destinationPos,
-  truckPos,
-  isPickedUp,
+  adminPins,
+  trucks,
+  fallbackCenter,
   recenterKey
 }: {
-  destinationPos: [number, number] | null;
-  truckPos?: [number, number] | null;
-  isPickedUp: boolean;
+  adminPins: [number, number][];
+  trucks: [number, number][];
+  fallbackCenter?: [number, number] | null;
   recenterKey: number;
 }) {
   const map = useMap();
   const isInitial = useRef(true);
 
-  // Initial bounds: fit between destination and moving truck if picked up, else destination only
+  const fitAll = () => {
+    const allPoints = [...adminPins, ...trucks];
+    if (allPoints.length > 0) {
+      try {
+        if (allPoints.length === 1) {
+          map.setView(allPoints[0], 13, { animate: true });
+        } else {
+          const bounds = L.latLngBounds(allPoints);
+          map.fitBounds(bounds, { padding: [55, 55], maxZoom: 14, animate: true });
+        }
+        return;
+      } catch {}
+    }
+    if (fallbackCenter && isValidCoordinate(fallbackCenter)) {
+      map.setView(fallbackCenter, 12, { animate: true });
+    }
+  };
+
   useEffect(() => {
     if (!map) return;
     if (isInitial.current) {
       isInitial.current = false;
-      if (isPickedUp && truckPos && isValidCoordinate(truckPos) && destinationPos && isValidCoordinate(destinationPos)) {
-        try {
-          const bounds = L.latLngBounds([destinationPos, truckPos]);
-          map.fitBounds(bounds, { padding: [55, 55], maxZoom: 13, animate: true });
-        } catch {}
-      } else if (destinationPos && isValidCoordinate(destinationPos)) {
-        map.setView(destinationPos, 13, { animate: true });
-      }
+      fitAll();
     }
-  }, [destinationPos, truckPos, isPickedUp, map]);
+  }, [adminPins, trucks, fallbackCenter, map]);
 
-  // Recenter trigger: focus on route or destination
   useEffect(() => {
     if (!map || recenterKey === 0) return;
-    if (isPickedUp && truckPos && isValidCoordinate(truckPos) && destinationPos && isValidCoordinate(destinationPos)) {
-      try {
-        const bounds = L.latLngBounds([destinationPos, truckPos]);
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 13, animate: true });
-      } catch {
-        if (destinationPos && isValidCoordinate(destinationPos)) {
-          map.setView(destinationPos, 13, { animate: true });
-        }
-      }
-    } else if (destinationPos && isValidCoordinate(destinationPos)) {
-      map.setView(destinationPos, 13, { animate: true, duration: 0.8 });
-    }
-  }, [recenterKey, destinationPos, truckPos, isPickedUp, map]);
+    fitAll();
+  }, [recenterKey]);
 
   return null;
 }
@@ -369,8 +365,60 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   }, [canonicalUserLgu, currentRelease, dbLgus, effectiveLguName]);
 
   const lguFacilityName = useMemo(() => {
-    return lguInfo?.lguName || (effectiveLguName ? `${effectiveLguName} Municipal Hall / Evacuation Center` : 'LGU Terminal');
+    return lguInfo?.lguName || (effectiveLguName ? `${effectiveLguName} Relief Destination` : 'LGU Destination');
   }, [lguInfo, effectiveLguName]);
+
+  const lguFallbackCoords = useMemo<[number, number] | null>(() => {
+    if (lguInfo && typeof lguInfo.latitude === 'number' && typeof lguInfo.longitude === 'number') {
+      return [lguInfo.latitude, lguInfo.longitude];
+    }
+    return [11.0, 122.5];
+  }, [lguInfo]);
+
+  // Admin-placed drop-off pins for incoming releases destined for this LGU (strictly release.receiverGps)
+  const incomingAdminPins = useMemo(() => {
+    return upcomingReleases
+      .map((r) => {
+        if (!r.receiverGps) return null;
+        const parts = r.receiverGps.split(',').map((s) => parseFloat(s.trim()));
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          return {
+            release: r,
+            coords: [parts[0], parts[1]] as [number, number]
+          };
+        }
+        return null;
+      })
+      .filter((item): item is { release: OutgoingRelease; coords: [number, number] } => item !== null);
+  }, [upcomingReleases]);
+
+  // Active trucks assigned to deliveries for this LGU (In Transit or Delivered with live GPS)
+  const incomingTrucks = useMemo(() => {
+    return upcomingReleases
+      .filter((r) => ['In Transit', 'Delivered'].includes(r.deliveryStatus) && Boolean(r.assignedTruckId))
+      .map((r) => {
+        const truckId = r.assignedTruckId!;
+        const livePos = liveTruckLocations[truckId];
+        let coords: [number, number] | null = null;
+        if (livePos && typeof livePos.latitude === 'number' && typeof livePos.longitude === 'number') {
+          coords = [livePos.latitude, livePos.longitude];
+        }
+        let dropOffCoords: [number, number] | null = null;
+        if (r.receiverGps) {
+          const parts = r.receiverGps.split(',').map((s) => parseFloat(s.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            dropOffCoords = [parts[0], parts[1]];
+          }
+        }
+        return {
+          release: r,
+          truckId,
+          coords,
+          dropOffCoords
+        };
+      })
+      .filter((item): item is { release: OutgoingRelease; truckId: string; coords: [number, number]; dropOffCoords: [number, number] | null } => item.coords !== null);
+  }, [upcomingReleases, liveTruckLocations]);
 
   const lguDestinationCoords = useMemo<[number, number] | null>(() => {
     // 1. If release has explicit receiverGps saved, use it
@@ -380,12 +428,12 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         return [parts[0], parts[1]];
       }
     }
-    // 2. Look up municipality from database LGUs
-    if (lguInfo && typeof lguInfo.latitude === 'number' && typeof lguInfo.longitude === 'number') {
-      return [lguInfo.latitude, lguInfo.longitude];
+    // 2. Look up from incomingAdminPins
+    if (incomingAdminPins[0]?.coords) {
+      return incomingAdminPins[0].coords;
     }
     return null;
-  }, [currentRelease, lguInfo]);
+  }, [currentRelease, incomingAdminPins]);
 
   // Real OSRM Road Route Geometry: Assigned Receiver -> LGU Destination Pin
   const [roadRoute, setRoadRoute] = useState<[number, number][]>([]);
@@ -731,31 +779,10 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setIsProfileModalOpen(true)}
-              className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition cursor-pointer"
-              title="Settings"
-            >
-              <Settings size={15} />
-            </button>
-            {onSignOut && (
-              <button
-                type="button"
-                onClick={onSignOut}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/25 hover:bg-red-500/40 border border-red-400/40 text-white text-[11px] font-bold transition cursor-pointer active:scale-95"
-                title="Sign Out"
-              >
-                <LogOut size={13} />
-                <span>Sign Out</span>
-              </button>
-            )}
-          </div>
         </header>
 
         {profile && (
-          <ProfileSettingsModal
+          <MobileSettingsModal
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             profile={profile}
@@ -855,70 +882,84 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               />
 
               <MapController
-                destinationPos={lguDestinationCoords}
-                truckPos={truckLocation}
-                isPickedUp={isPickedUp}
+                adminPins={incomingAdminPins.map((p) => p.coords)}
+                trucks={incomingTrucks.map((t) => t.coords)}
+                fallbackCenter={lguFallbackCoords}
                 recenterKey={recenterTrigger}
               />
 
-              {/* 1. Official LGU Destination Pin (Fixed at Sigma / Municipality) */}
-              {lguDestinationCoords && isValidCoordinate(lguDestinationCoords) && (
+              {/* Admin Drop-Off Pins (strictly receiverGps placed by admin) */}
+              {incomingAdminPins.map(({ release, coords }) => (
                 <Marker
-                  position={lguDestinationCoords}
+                  key={`admin-pin-${release.drNumber}`}
+                  position={coords}
                   icon={destinationPinIcon}
                 >
                   <Popup>
                     <div className="text-xs space-y-1">
-                      <p className="font-bold text-[#2500ba]">{effectiveLguName || 'LGU'} Terminal</p>
-                      <p className="text-[11px] text-gray-700 mt-0.5">{lguFacilityName}</p>
-                      <p className="text-[10px] font-mono text-gray-400 mt-1">
-                        {lguDestinationCoords[0].toFixed(5)}, {lguDestinationCoords[1].toFixed(5)}
+                      <p className="font-bold text-[#2500ba]">Admin Drop-off Location</p>
+                      <p className="font-semibold text-gray-800">{release.drNumber}</p>
+                      <p className="text-[11px] text-gray-700">
+                        {(release.amountApproved || release.amountRequested || 0).toLocaleString()} {release.fnfiCategory}
                       </p>
-                      <p className="text-[9.5px] font-semibold text-emerald-600 mt-0.5">
-                        Verified LGU Terminal
+                      <p className="text-[10.5px] text-gray-500">
+                        {release.destinationAddress || release.municipality || effectiveLguName}
+                      </p>
+                      <p className="text-[9.5px] font-mono text-gray-400">
+                        {coords[0].toFixed(5)}, {coords[1].toFixed(5)}
+                      </p>
+                      <p className="text-[9.5px] font-bold text-indigo-700">
+                        Status: {release.deliveryStatus}
                       </p>
                     </div>
                   </Popup>
                 </Marker>
-              )}
+              ))}
 
-              {/* 2. Live En Route Truck Marker (Only when picked up & In Transit) */}
-              {isPickedUp && truckLocation && isValidCoordinate(truckLocation) && (
-                <Marker
-                  position={truckLocation}
-                  icon={truckMarkerIcon}
-                >
-                  <Popup>
-                    <div className="text-xs">
-                      <p className="font-bold text-sky-800">{currentRelease?.drNumber || 'Relief Truck'}</p>
-                      <p className="text-[11px] text-gray-700">En Route to {effectiveLguName || 'Destination'}</p>
-                      <p className="text-[10px] font-mono text-gray-500">Live GPS position</p>
-                    </div>
-                  </Popup>
-                </Marker>
-              )}
-
-              {/* 3. Active Delivery Route Polyline (Only when picked up & In Transit) */}
-              {isPickedUp && routePath.length >= 2 && (
-                <>
-                  <Polyline
-                    positions={routePath}
-                    pathOptions={{
-                      color: '#2500ba',
-                      weight: 8,
-                      opacity: 0.15
-                    }}
-                  />
-                  <Polyline
-                    positions={routePath}
-                    pathOptions={{
-                      color: '#2500ba',
-                      weight: 3.5,
-                      opacity: 0.95
-                    }}
-                  />
-                </>
-              )}
+              {/* Active En Route Trucks Delivering to this LGU */}
+              {incomingTrucks.map(({ release, truckId, coords, dropOffCoords }) => (
+                <React.Fragment key={`truck-${release.drNumber}-${truckId}`}>
+                  <Marker
+                    position={coords}
+                    icon={truckMarkerIcon}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1">
+                        <p className="font-bold text-sky-800">Relief Truck: {truckId}</p>
+                        <p className="font-semibold text-gray-800">{release.drNumber}</p>
+                        <p className="text-[11px] text-gray-700">
+                          {(release.amountApproved || release.amountRequested || 0).toLocaleString()} {release.fnfiCategory}
+                        </p>
+                        <p className="text-[10px] font-mono text-gray-500">Live GPS position</p>
+                        <p className="text-[9.5px] font-bold text-emerald-600">
+                          En Route to {effectiveLguName || 'Destination'}
+                        </p>
+                      </div>
+                    </Popup>
+                  </Marker>
+                  {dropOffCoords && (
+                    <>
+                      <Polyline
+                        positions={[coords, dropOffCoords]}
+                        pathOptions={{
+                          color: '#2500ba',
+                          weight: 7,
+                          opacity: 0.18
+                        }}
+                      />
+                      <Polyline
+                        positions={[coords, dropOffCoords]}
+                        pathOptions={{
+                          color: '#2500ba',
+                          weight: 3,
+                          opacity: 0.9,
+                          dashArray: '6, 8'
+                        }}
+                      />
+                    </>
+                  )}
+                </React.Fragment>
+              ))}
             </MapContainer>
           </div>
 
@@ -959,105 +1000,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
             </div>
           )}
 
-          {/* Bottom Card: Incoming Shipment & Action Button */}
-          <div className="absolute bottom-0 left-0 right-0 z-10 p-3 bg-gradient-to-t from-black/20 via-transparent to-transparent">
-            <div className="bg-white rounded-2xl p-4 shadow-xl border border-gray-200 space-y-3">
-              {currentRelease ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-100 text-[#2500ba] font-mono text-[10.5px] font-bold">
-                        <Package size={11} />
-                        {currentRelease.drNumber}
-                      </span>
-                      {currentRelease.blockchainTxHash && (
-                        <a
-                          href={`https://sepolia.etherscan.io/tx/${currentRelease.blockchainTxHash}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 text-[10px] font-mono font-bold hover:bg-purple-100 transition"
-                        >
-                          <ShieldCheck size={11} className="text-purple-600" />
-                          <span>Sepolia ({currentRelease.blockchainTxHash.slice(0, 6)}...{currentRelease.blockchainTxHash.slice(-4)})</span>
-                          <ExternalLink size={9} />
-                        </a>
-                      )}
-                    </div>
-                    {currentRelease.deliveryStatus === 'Delivered' ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-300">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                        Arrived at Terminal
-                      </span>
-                    ) : isPickedUp ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
-                        In Transit
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-300">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                        Still in Warehouse
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="font-extrabold text-sm text-gray-900 leading-tight">
-                    {(currentRelease.amountApproved || currentRelease.amountRequested || 0).toLocaleString()} {currentRelease.fnfiCategory}
-                  </p>
-
-                  <p className="text-[10.5px] text-gray-500 truncate">
-                    {isPickedUp ? (
-                      <>Dispatched from {originWarehouseName} &rarr; Destination: <span className="font-bold text-gray-800">{effectiveLguName || 'Your Terminal'}{lguFacilityName ? ` (${lguFacilityName})` : ''}</span></>
-                    ) : (
-                      <>At {originWarehouseName} (Awaiting receiver pickup scan) &rarr; Destination: <span className="font-bold text-gray-800">{effectiveLguName || 'Your Terminal'}</span></>
-                    )}
-                  </p>
-                </div>
-              ) : (
-                <div className="text-center py-1">
-                  <p className="font-extrabold text-xs text-gray-800">
-                    {effectiveLguName ? `No active incoming shipments for ${effectiveLguName}` : 'No municipality selected'}
-                  </p>
-                  <p className="text-[10.5px] text-gray-500 mt-0.5">
-                    {effectiveLguName
-                      ? 'Ready to receive packages when trucks arrive at your terminal.'
-                      : 'Please select your municipality above to view deliveries.'}
-                  </p>
-                </div>
-              )}
-
-              {/* Main Scan Action Button */}
-              <button
-                type="button"
-                onClick={startCamera}
-                className="w-full rounded-xl bg-[#2500ba] py-3 text-xs font-bold text-white shadow-md hover:bg-[#1e0094] active:scale-[0.99] transition flex items-center justify-center gap-2"
-              >
-                <ScanLine size={16} />
-                Scan Delivery QR Code to Receive
-              </button>
-
-              {/* Auxiliary Buttons */}
-              <div className="grid grid-cols-2 gap-2 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => setIsInventoryOpen(true)}
-                  className="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10.5px] font-bold transition flex items-center justify-center gap-1"
-                >
-                  <Layers size={13} className="text-[#2500ba]" />
-                  Current Stock
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsUpcomingDeliveriesOpen(true)}
-                  className="py-1.5 px-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10.5px] font-bold transition flex items-center justify-center gap-1"
-                >
-                  <Truck size={13} className="text-[#2500ba]" />
-                  Upcoming ({upcomingReleases.length})
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Bottom Navigation matching Field Receiver */}
@@ -1217,20 +1159,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     </span>
                   </button>
                 </div>
-              </div>
-
-              {/* Sidebar Footer */}
-              <div className="border-t pt-3">
-                {onSignOut && (
-                  <button
-                    type="button"
-                    onClick={onSignOut}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold transition active:scale-98"
-                  >
-                    <LogOut size={14} />
-                    <span>Sign Out</span>
-                  </button>
-                )}
               </div>
             </div>
           </div>

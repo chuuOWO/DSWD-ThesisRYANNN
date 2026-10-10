@@ -36,7 +36,7 @@ import { blockchain } from '../../services/blockchain';
 import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { findMatchingLgu } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
-import { ProfileSettingsModal } from '../modals/ProfileSettingsModal';
+import { MobileSettingsModal } from '../modals/MobileSettingsModal';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import { formatUserErrorMessage } from '../../lib/errorUtils';
@@ -1628,31 +1628,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setIsProfileModalOpen(true)}
-              className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white transition cursor-pointer"
-              title="Settings"
-            >
-              <Settings size={15} />
-            </button>
-            {onSignOut && (
-              <button
-                type="button"
-                onClick={onSignOut}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-red-500/25 hover:bg-red-500/40 border border-red-400/40 text-white text-[11px] font-bold transition cursor-pointer active:scale-95"
-                title="Sign Out"
-              >
-                <LogOut size={13} />
-                <span>Sign Out</span>
-              </button>
-            )}
-          </div>
         </header>
 
         {profile && (
-          <ProfileSettingsModal
+          <MobileSettingsModal
             isOpen={isProfileModalOpen}
             onClose={() => setIsProfileModalOpen(false)}
             profile={profile}
@@ -2280,23 +2259,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     type="button"
                     onClick={() => {
                       setIsSidebarOpen(false);
-                      nav('pickup');
-                    }}
-                    className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Package size={17} className="text-[#2500ba]" />
-                      <span>Active Cargo & Route</span>
-                    </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 text-[#2500ba] font-bold">
-                      {activePackages.length}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSidebarOpen(false);
                       setIsDeliveryHistoryOpen(true);
                     }}
                     className="w-full flex items-center justify-between px-3.5 py-3 rounded-xl hover:bg-gray-100 text-gray-800 text-xs font-bold transition text-left"
@@ -2320,25 +2282,11 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   >
                     <div className="flex items-center gap-2.5">
                       <Settings size={17} className="text-gray-600" />
-                      <span>Profile & Smart Account</span>
+                      <span>Profile & Settings</span>
                     </div>
                     <ChevronRight size={14} className="text-gray-400" />
                   </button>
                 </div>
-              </div>
-
-              {/* Sidebar Footer */}
-              <div className="border-t pt-3">
-                {onSignOut && (
-                  <button
-                    type="button"
-                    onClick={onSignOut}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs font-bold transition active:scale-98"
-                  >
-                    <LogOut size={14} />
-                    <span>Sign Out</span>
-                  </button>
-                )}
               </div>
             </div>
           </div>
