@@ -39,7 +39,7 @@ interface LGUReceiverPageProps {
   profile: UserProfile;
   releases: OutgoingRelease[];
   lgusList?: LguRecord[];
-  onAccept: (drNumber: string, actorRole?: any, actorLguMunicipality?: string) => Promise<{ ok: boolean; message: string }>;
+  onAccept: (drNumber: string, actorRole?: any, actorLguMunicipality?: string, receiverGps?: string) => Promise<{ ok: boolean; message: string }>;
   onSignOut: () => void;
 }
 

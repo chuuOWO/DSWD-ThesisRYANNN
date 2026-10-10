@@ -70,6 +70,8 @@ type QrPayload = {
   from: string;
   to: string;
   destinationCoords?: [number, number];
+  blockchain?: { txHash?: string };
+  txHash?: string;
 };
 
 const initialInventory: Inventory = {
