@@ -410,7 +410,7 @@ contract DSWDReliefTracker is ERC1155, IERC1155Receiver, Ownable, ReentrancyGuar
         string memory handoverContractId,
         string memory destination,
         string memory receiverGps
-    ) external nonReentrant returns (uint256) {
+    ) external returns (uint256) {
         return confirmReceiptForLgu(
             drNumber,
             handoverContractId,

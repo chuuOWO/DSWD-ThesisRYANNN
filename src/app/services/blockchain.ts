@@ -599,39 +599,45 @@ export const blockchain = {
       let targetLguWallet = input.signerWallet;
       if (!targetLguWallet || !ethers.isAddress(targetLguWallet)) {
         try {
-          const freshReleases = await supabase.from('outgoing_requests').select('lgu_name, municipality, destination_address, wallet_address').ilike('dr_number', input.drNumber.trim()).maybeSingle();
-          const dest = freshReleases.data?.lgu_name || freshReleases.data?.municipality || input.destination;
-          if (dest) {
+          const freshReleases = await supabase
+            .from('outgoing_requests')
+            .select('lgu_name, municipality, destination_address, wallet_address')
+            .ilike('dr_number', input.drNumber.trim())
+            .maybeSingle();
+
+          const candidates = [
+            freshReleases.data?.municipality,
+            freshReleases.data?.lgu_name,
+            input.destination
+          ].filter(Boolean) as string[];
+
+          for (const cand of candidates) {
+            const cleanCand = cand.replace(/lgu/gi, '').trim();
             const { data: lguProf } = await supabase
               .from('profiles')
               .select('wallet_address')
-              .ilike('lgu_name', dest.trim())
+              .or(`lgu_name.ilike.%${cleanCand}%,lgu_name.ilike.%${cand.trim()}%`)
               .maybeSingle();
             if (lguProf?.wallet_address && ethers.isAddress(lguProf.wallet_address)) {
               targetLguWallet = lguProf.wallet_address;
+              break;
             }
           }
         } catch {}
       }
 
+      // Fallback: if not found, use connected signer address
+      targetLguWallet = targetLguWallet && ethers.isAddress(targetLguWallet) ? targetLguWallet : walletAddress;
+
       onStage?.('mining');
-      let tx;
-      if (targetLguWallet && ethers.isAddress(targetLguWallet)) {
-        tx = await contract.confirmReceiptForLgu(
-          input.drNumber,
-          input.handoverContractId,
-          input.destination || '',
-          input.gps,
-          targetLguWallet
-        );
-      } else {
-        tx = await contract.confirmReceipt(
-          input.drNumber,
-          input.handoverContractId,
-          input.destination || '',
-          input.gps
-        );
-      }
+      // Always call the 5-argument confirmReceiptForLgu to bypass the 4-argument reentrancy guard collision
+      const tx = await contract.confirmReceiptForLgu(
+        input.drNumber,
+        input.handoverContractId,
+        input.destination || '',
+        input.gps,
+        targetLguWallet
+      );
 
       onStage?.('mining', tx.hash);
       const receipt = await tx.wait(1);

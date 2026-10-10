@@ -1750,7 +1750,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         drNumber: canonicalDr,
         handoverContractId,
         destination: '',
-        gps: latestGps
+        gps: latestGps,
+        signerWallet: currentActor.wallet || undefined
       });
     } catch (confErr: any) {
       console.warn('LGU confirmReceipt error:', confErr);
