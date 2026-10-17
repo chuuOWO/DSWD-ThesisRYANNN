@@ -164,6 +164,20 @@ export interface InventoryBatchRecord {
   mintedAt?: string;
 }
 
+export interface ExpiryDateBatch {
+  batchTokenId: string;
+  batchNumber: string;
+  expirationDate: string;
+  daysToExpiry: number;
+  quantityAvailable: number;
+  kitTypeId?: string;
+  kitName?: string;
+  warehouseId?: string;
+  warehouseName?: string;
+  lguId?: string;
+  lguName?: string;
+}
+
 export interface OutgoingBatchAllocationRecord {
   id: string;
   outgoingRequestId: string;
@@ -3159,6 +3173,167 @@ export const backendApi = {
     } catch (err) {
       console.warn('allocateBatchesToRequest warning:', err);
       return { ok: true };
+    }
+  },
+
+  async getStockByExpirationDate(params: {
+    categoryName: string;
+    sourceType: 'Warehouse' | 'LGU';
+    sourceName: string;
+  }): Promise<ExpiryDateBatch[]> {
+    try {
+      const kitTypeId = await this.resolveKitTypeId(params.categoryName);
+      let warehouseId: string | null = null;
+      let lguId: string | null = null;
+
+      if (params.sourceType === 'Warehouse') {
+        warehouseId = await this.resolveWarehouseId(params.sourceName);
+      } else {
+        lguId = await this.resolveLguId(params.sourceName);
+      }
+
+      let query = supabase
+        .from('inventory_batches')
+        .select('batch_token_id, incoming_manifest_id, kit_type_id, remaining_quantity, expiration_date, warehouse_id, lgu_id')
+        .gt('remaining_quantity', 0)
+        .order('expiration_date', { ascending: true, nullsFirst: false });
+
+      if (kitTypeId) query = query.eq('kit_type_id', kitTypeId);
+      if (warehouseId) query = query.eq('warehouse_id', warehouseId);
+      if (lguId) query = query.eq('lgu_id', lguId);
+
+      const { data, error } = await query;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (data && data.length > 0) {
+        return data.map((b: any) => {
+          let days = 999;
+          if (b.expiration_date) {
+            const exp = new Date(b.expiration_date);
+            exp.setHours(0, 0, 0, 0);
+            days = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          }
+          return {
+            batchTokenId: b.batch_token_id,
+            batchNumber: b.batch_token_id.replace(/^BATCH-/, ''),
+            expirationDate: b.expiration_date || 'No Expiry Set',
+            daysToExpiry: days,
+            quantityAvailable: Number(b.remaining_quantity || 0),
+            kitTypeId: b.kit_type_id,
+            kitName: params.categoryName,
+            warehouseId: b.warehouse_id,
+            warehouseName: params.sourceType === 'Warehouse' ? params.sourceName : undefined,
+            lguId: b.lgu_id,
+            lguName: params.sourceType === 'LGU' ? params.sourceName : undefined
+          };
+        });
+      }
+
+      // Fallback: Check verified incoming manifests if no rows in inventory_batches
+      let mQuery = supabase
+        .from('incoming_manifests')
+        .select('*')
+        .in('status', ['Verified', 'Minted'])
+        .gt('quantity', 0)
+        .ilike('category', `%${params.categoryName}%`)
+        .order('expiration_date', { ascending: true });
+
+      if (warehouseId) mQuery = mQuery.eq('destination_warehouse_id', warehouseId);
+      if (lguId) mQuery = mQuery.eq('destination_lgu_id', lguId);
+
+      const { data: manifests } = await mQuery;
+      if (!manifests || manifests.length === 0) return [];
+
+      return manifests.map((m: any) => {
+        let days = 999;
+        if (m.expiration_date) {
+          const exp = new Date(m.expiration_date);
+          exp.setHours(0, 0, 0, 0);
+          days = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        }
+        return {
+          batchTokenId: `BATCH-${m.manifest_number || m.id}`,
+          batchNumber: m.manifest_number || m.id,
+          expirationDate: m.expiration_date || 'No Expiry Set',
+          daysToExpiry: days,
+          quantityAvailable: Number(m.quantity || 0),
+          kitTypeId: m.kit_type_id || kitTypeId,
+          kitName: m.category || params.categoryName,
+          warehouseId: m.destination_warehouse_id,
+          lguId: m.destination_lgu_id
+        };
+      });
+    } catch (err) {
+      console.warn('getStockByExpirationDate error:', err);
+      return [];
+    }
+  },
+
+  async applyDateBatchDeductions(
+    drNumber: string,
+    allocations: { batchTokenId: string; expirationDate?: string; quantity: number }[],
+    sourceType: 'Warehouse' | 'LGU',
+    sourceName: string,
+    categoryName: string
+  ): Promise<{ ok: boolean }> {
+    try {
+      let canonicalDr = drNumber.trim();
+      if (isUuid(canonicalDr)) {
+        const { data: dRow } = await supabase.from('outgoing_requests').select('dr_number').eq('id', canonicalDr).maybeSingle();
+        if (dRow?.dr_number) canonicalDr = dRow.dr_number;
+      }
+
+      const totalQuantity = allocations.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0);
+      if (totalQuantity <= 0) return { ok: true };
+
+      // 1. Deduct each specific batch in inventory_batches and insert into outgoing_batch_allocations
+      for (const alloc of allocations) {
+        if (!alloc.quantity || alloc.quantity <= 0) continue;
+
+        const { data: batch } = await supabase
+          .from('inventory_batches')
+          .select('remaining_quantity')
+          .eq('batch_token_id', alloc.batchTokenId)
+          .maybeSingle();
+
+        if (batch) {
+          const newQty = Math.max(0, Number(batch.remaining_quantity || 0) - alloc.quantity);
+          await supabase
+            .from('inventory_batches')
+            .update({ remaining_quantity: newQty })
+            .eq('batch_token_id', alloc.batchTokenId);
+        }
+
+        await supabase
+          .from('outgoing_batch_allocations')
+          .insert({
+            outgoing_request_id: canonicalDr,
+            batch_token_id: alloc.batchTokenId,
+            allocated_quantity: alloc.quantity,
+            allocated_at: new Date().toISOString()
+          });
+      }
+
+      // 2. Deduct facility aggregate stock
+      if (sourceType === 'Warehouse') {
+        await this.deductWarehouseStock(sourceName, categoryName, totalQuantity);
+      } else {
+        await this.deductLguStock(sourceName, categoryName, totalQuantity);
+      }
+
+      // 3. Update outgoing_requests snapshot
+      await supabase
+        .from('outgoing_requests')
+        .update({
+          allocated_batches: allocations
+        })
+        .ilike('dr_number', canonicalDr);
+
+      return { ok: true };
+    } catch (err) {
+      console.warn('applyDateBatchDeductions error:', err);
+      return { ok: false };
     }
   },
 

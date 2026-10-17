@@ -1381,7 +1381,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }).catch(() => {});
   };
 
-  const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => {
+  const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'> & { allocatedBatches?: BatchAllocation[] }) => {
     const maxKnownIndex = outgoingReleasesList.reduce((max, release) => {
       const match = release.drNumber.match(/DR-\d{4}-(\d+)/i);
       if (!match) return max;
@@ -1401,13 +1401,15 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     );
     const resolvedLguId = newRelease.lguId || (matchedLgu ? matchedLgu.id : undefined);
 
+    const initialBatches: BatchAllocation[] = (newRelease as any).allocatedBatches || [];
+
     const releaseWithDR: OutgoingRelease = {
       ...newRelease,
       lguId: resolvedLguId,
       deliveryStatus: status,
       drNumber: newDR,
       amountApproved: status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved,
-      allocatedBatches: [],
+      allocatedBatches: initialBatches,
       auditTrail: [audit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
@@ -1418,6 +1420,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       drNumber: newDR,
       amountApproved: newRelease.amountApproved,
       deliveryStatus: status,
+      allocatedBatches: initialBatches,
       receiverGps: newRelease.receiverGps,
       destinationAddress: newRelease.destinationAddress,
       assignedTruckId: newRelease.assignedTruckId,
@@ -1432,6 +1435,16 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Create outgoing request')(error);
       setIntegrationMode('mock');
     });
+
+    if (initialBatches.length > 0) {
+      backendApi.applyDateBatchDeductions(
+        newDR,
+        initialBatches,
+        newRelease.sourceType || 'Warehouse',
+        newRelease.warehouseSource,
+        newRelease.fnfiCategory
+      ).catch(err => console.warn('applyDateBatchDeductions on release creation error:', err));
+    }
 
     backendApi.logActivity({
       action: 'RELEASE_CREATED',
@@ -1518,7 +1531,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return { ok: false, message: toFriendlyTxError(error, 'Authorization and batch minting failed. Administrator privileges required.') };
     }
 
-    const allocations: BatchAllocation[] = [{ batchTokenId, quantity: amountApproved }];
+    const allocations: BatchAllocation[] = (release.allocatedBatches && release.allocatedBatches.length > 0)
+      ? release.allocatedBatches
+      : [{ batchTokenId, quantity: amountApproved }];
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? {

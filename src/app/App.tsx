@@ -225,6 +225,10 @@ export default function App() {
           walletAddress={walletAddress}
           walletMessage={null}
           onConnectWallet={handleConnectWallet}
+          incomingGoodsList={inventoryState.incomingGoodsList}
+          outgoingReleasesList={inventoryState.outgoingReleasesList}
+          inventory={inventoryState.inventory}
+          onNavigate={setCurrentView}
         />
 
         <div className="flex flex-1 overflow-hidden">

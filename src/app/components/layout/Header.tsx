@@ -1,5 +1,6 @@
-import type { UserRole } from '../../hooks/useInventoryState';
+import type { IncomingGoods, OutgoingRelease, UserRole } from '../../hooks/useInventoryState';
 import type { UserProfile } from '../../services/authApi';
+import { NotificationDropdown } from './NotificationDropdown';
 
 interface HeaderProps {
   profile?: UserProfile | null;
@@ -11,16 +12,11 @@ interface HeaderProps {
   walletMessage?: string | null;
   onConnectWallet: () => void;
   onOpenProfileSettings?: () => void;
+  incomingGoodsList?: IncomingGoods[];
+  outgoingReleasesList?: OutgoingRelease[];
+  inventory?: { category: string; totalStock?: number; available?: number }[];
+  onNavigate?: (view: string) => void;
 }
-
-const roleDescriptions: Record<UserRole, string> = {
-  Admin: 'Can verify/post batch tokens and approve allocations',
-  Receiver: 'Can sign release and move shipment in transit',
-  LGUReceiver: 'Can submit LGU stock reports and confirm receipt',
-  Unregistered: 'Provision a gasless Smart Account'
-};
-
-const shortenWallet = (address: string) => `${address.slice(0, 6)}...${address.slice(-4)}`;
 
 export function Header({
   profile,
@@ -31,7 +27,11 @@ export function Header({
   walletAddress,
   walletMessage,
   onConnectWallet,
-  onOpenProfileSettings
+  onOpenProfileSettings,
+  incomingGoodsList = [],
+  outgoingReleasesList = [],
+  inventory = [],
+  onNavigate
 }: HeaderProps) {
   return (
     <div className="bg-blue-700 h-16 px-6 flex items-center justify-between shadow-sm select-none">
@@ -50,6 +50,19 @@ export function Header({
           </p>
         </div>
       </div>
+
+      <div className="flex items-center gap-3">
+        {onNavigate && (
+          <NotificationDropdown
+            incomingGoodsList={incomingGoodsList}
+            outgoingReleasesList={outgoingReleasesList}
+            inventory={inventory}
+            onNavigate={onNavigate}
+          />
+        )}
+      </div>
     </div>
   );
 }
+export default Header;
+

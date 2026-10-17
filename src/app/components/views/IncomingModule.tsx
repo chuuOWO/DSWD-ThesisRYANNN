@@ -4,6 +4,12 @@ import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddInco
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
 import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
+import {
+  EXPIRY_THRESHOLDS,
+  getDaysRemaining,
+  getExpiryTier,
+  getExpiryBadgeConfig
+} from '../../lib/expiryConstants';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
@@ -236,34 +242,47 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     .filter(item => item.destinationType === 'Warehouse' && item.status === 'Verified')
     .reduce((sum, item) => sum + item.quantity, 0);
 
-  // FEFO shelf-life tracking for incoming batches sorted by earliest expiration
+  // FEFO shelf-life tracking for verified incoming batches sorted by earliest expiration
   const fefoWatchlist = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Only verified incoming batches represent usable inventory in the warehouse
+    const verifiedItems = incomingGoodsList.filter(
+      item => item.status === 'Verified' && Boolean(item.expirationDate)
+    );
 
-    const itemsWithDays = incomingGoodsList
-      .filter(item => Boolean(item.expirationDate))
+    const itemsWithDays = verifiedItems
       .map(item => {
-        const expDate = new Date(item.expirationDate);
-        expDate.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        const daysRemaining = getDaysRemaining(item.expirationDate);
+        const tier = getExpiryTier(item.expirationDate);
         return {
           ...item,
-          daysRemaining: diffDays
+          daysRemaining,
+          tier
         };
       })
       .sort((a, b) => a.daysRemaining - b.daysRemaining);
 
-    const criticalCount = itemsWithDays.filter(i => i.daysRemaining <= 30).length;
-    const moderateCount = itemsWithDays.filter(i => i.daysRemaining > 30 && i.daysRemaining <= 90).length;
-    const safeCount = itemsWithDays.filter(i => i.daysRemaining > 90).length;
+    const criticalItems = itemsWithDays.filter(i => i.tier === 'critical');
+    const moderateItems = itemsWithDays.filter(i => i.tier === 'moderate');
+    const safeItems = itemsWithDays.filter(i => i.tier === 'safe');
+
+    const criticalCount = criticalItems.length;
+    const criticalQty = criticalItems.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+
+    const moderateCount = moderateItems.length;
+    const moderateQty = moderateItems.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+
+    const safeCount = safeItems.length;
+    const safeQty = safeItems.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
 
     return {
       all: itemsWithDays,
       earliest: itemsWithDays.slice(0, 5),
       criticalCount,
+      criticalQty,
       moderateCount,
-      safeCount
+      moderateQty,
+      safeCount,
+      safeQty
     };
   }, [incomingGoodsList]);
 
@@ -600,16 +619,19 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             {/* Shelf-Life Urgency Distribution Pills */}
             <div className="grid grid-cols-3 gap-2 mb-4">
               <div className="p-2.5 rounded-lg bg-red-50 border border-red-100 text-center">
-                <span className="block text-xs font-medium text-red-700">Critical (&le; 30d)</span>
+                <span className="block text-xs font-medium text-red-700">Critical (&le; {EXPIRY_THRESHOLDS.CRITICAL_MAX_DAYS}d)</span>
                 <span className="block text-lg font-bold text-red-800">{fefoWatchlist.criticalCount}</span>
+                <span className="block text-[10px] text-red-600 font-medium">{fefoWatchlist.criticalQty.toLocaleString()} units</span>
               </div>
               <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-100 text-center">
-                <span className="block text-xs font-medium text-amber-700">Moderate (31-90d)</span>
+                <span className="block text-xs font-medium text-amber-700">Moderate ({EXPIRY_THRESHOLDS.MODERATE_MIN_DAYS}-{EXPIRY_THRESHOLDS.MODERATE_MAX_DAYS}d)</span>
                 <span className="block text-lg font-bold text-amber-800">{fefoWatchlist.moderateCount}</span>
+                <span className="block text-[10px] text-amber-600 font-medium">{fefoWatchlist.moderateQty.toLocaleString()} units</span>
               </div>
               <div className="p-2.5 rounded-lg bg-green-50 border border-green-100 text-center">
-                <span className="block text-xs font-medium text-green-700">Safe (&gt; 90d)</span>
+                <span className="block text-xs font-medium text-green-700">Safe (&gt; {EXPIRY_THRESHOLDS.MODERATE_MAX_DAYS}d)</span>
                 <span className="block text-lg font-bold text-green-800">{fefoWatchlist.safeCount}</span>
+                <span className="block text-[10px] text-green-600 font-medium">{fefoWatchlist.safeQty.toLocaleString()} units</span>
               </div>
             </div>
 
@@ -618,19 +640,17 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               <div className="space-y-2.5">
                 <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Earliest Expiring Batches (Priority Outflow)</p>
                 {fefoWatchlist.earliest.map((item) => {
-                  const isExpired = item.daysRemaining <= 0;
-                  const isCritical = item.daysRemaining > 0 && item.daysRemaining <= 30;
-                  const isModerate = item.daysRemaining > 30 && item.daysRemaining <= 90;
+                  const badge = getExpiryBadgeConfig(item.tier);
 
                   return (
                     <div
                       key={item.id}
                       className={`flex items-center justify-between p-2.5 rounded-lg border transition text-xs ${
-                        isExpired
+                        item.tier === 'expired'
                           ? 'bg-red-50 border-red-200'
-                          : isCritical
+                          : item.tier === 'critical'
                           ? 'bg-red-50/60 border-red-200'
-                          : isModerate
+                          : item.tier === 'moderate'
                           ? 'bg-amber-50/60 border-amber-200'
                           : 'bg-gray-50 border-gray-100 hover:bg-gray-100/70'
                       }`}
@@ -651,19 +671,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
                       <div className="flex flex-col items-end flex-shrink-0">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            isExpired
-                              ? 'bg-red-100 text-red-800'
-                              : isCritical
-                              ? 'bg-red-100 text-red-800'
-                              : isModerate
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-green-100 text-green-800'
-                          }`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${badge.badgeClass}`}
                         >
-                          {isExpired
-                            ? 'Expired'
-                            : `${item.daysRemaining} days left`}
+                          <span className={`w-1 h-1 rounded-full ${badge.dotClass}`} />
+                          {badge.label}
                         </span>
                         <span className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
                           <Calendar className="w-2.5 h-2.5" />

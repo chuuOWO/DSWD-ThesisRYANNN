@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2 } from 'lucide-react';
+import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2, Clock, Sparkles, CheckCircle2, Layers } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
 import {
   backendApi,
@@ -10,7 +10,8 @@ import {
   type SupplySourceRecord,
   type KitTypeRecord,
   type TruckRecord,
-  type EscortProfile
+  type EscortProfile,
+  type ExpiryDateBatch
 } from '../../services/backendApi';
 import { LocationPickerMap } from '../design/LocationPickerMap';
 import { sanitizeNumbersOnly, sanitizeAlphanumeric, sanitizeSlipReference } from '../../lib/inputValidation';
@@ -45,6 +46,12 @@ export interface ReleaseForm {
   sourceLguId?: string;
   destinationWarehouseId?: string;
   destinationLguId?: string;
+  allocatedBatches?: {
+    batchTokenId: string;
+    batchNumber?: string;
+    expirationDate?: string;
+    quantity: number;
+  }[];
 }
 
 interface AddReleaseModalProps {
@@ -75,7 +82,7 @@ const defaultFormData: ReleaseForm = {
   amountApproved: 0,
   sourceType: 'Warehouse',
   warehouseSource: 'Oton Main Warehouse',
-  deliveryMode: 'Truck',
+  deliveryMode: 'Delivery',
   deliveryStatus: 'Allocating',
   destinationAddress: '',
   receiverGps: '',
@@ -360,6 +367,100 @@ export function AddReleaseModal({
 
   const availableQty = getAvailableStock();
 
+  // FEFO Expiry Date Stock Picker State
+  const [availableDateBatches, setAvailableDateBatches] = useState<ExpiryDateBatch[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [dateAllocations, setDateAllocations] = useState<Record<string, number>>({});
+  const [isLoadingBatches, setIsLoadingBatches] = useState<boolean>(false);
+
+  // Load available batches ordered by expiration date (FEFO) whenever Category or Source changes
+  useEffect(() => {
+    if (!formData.fnfiCategory) {
+      setAvailableDateBatches([]);
+      setSelectedBatchId(null);
+      setDateAllocations({});
+      return;
+    }
+
+    const sourceName = formData.sourceType === 'Warehouse' ? formData.warehouseSource : sourceMunicipality;
+    if (!sourceName) {
+      setAvailableDateBatches([]);
+      setSelectedBatchId(null);
+      setDateAllocations({});
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingBatches(true);
+
+    backendApi.getStockByExpirationDate({
+      categoryName: formData.fnfiCategory,
+      sourceType: formData.sourceType,
+      sourceName
+    }).then(batches => {
+      if (!isMounted) return;
+      setAvailableDateBatches(batches);
+      if (batches.length > 0) {
+        setSelectedBatchId(batches[0].batchTokenId);
+      } else {
+        setSelectedBatchId(null);
+      }
+      setDateAllocations({});
+    }).catch(err => {
+      console.warn('Failed to load expiration date batches:', err);
+    }).finally(() => {
+      if (isMounted) setIsLoadingBatches(false);
+    });
+
+    return () => { isMounted = false; };
+  }, [formData.fnfiCategory, formData.sourceType, formData.warehouseSource, sourceMunicipality]);
+
+  const selectedBatch = useMemo(() => {
+    if (!selectedBatchId) return availableDateBatches[0] || null;
+    return availableDateBatches.find(b => b.batchTokenId === selectedBatchId) || availableDateBatches[0] || null;
+  }, [selectedBatchId, availableDateBatches]);
+
+  const totalAllocatedFromDates = useMemo(() => {
+    return Object.values(dateAllocations).reduce((sum, q) => sum + (Number(q) || 0), 0);
+  }, [dateAllocations]);
+
+  const handleDateAllocationChange = (batchTokenId: string, val: number) => {
+    const batch = availableDateBatches.find(b => b.batchTokenId === batchTokenId);
+    if (!batch) return;
+    const safeVal = Math.max(0, Math.min(batch.quantityAvailable, val || 0));
+    setDateAllocations(prev => {
+      const next = { ...prev, [batchTokenId]: safeVal };
+      if (safeVal === 0) delete next[batchTokenId];
+      return next;
+    });
+  };
+
+  const handleMaxForDate = (batch: ExpiryDateBatch) => {
+    const currentAllocatedWithoutThis = Object.entries(dateAllocations)
+      .filter(([id]) => id !== batch.batchTokenId)
+      .reduce((sum, [, q]) => sum + q, 0);
+    const needed = Math.max(0, (formData.amountRequested || 0) - currentAllocatedWithoutThis);
+    const take = needed > 0 ? Math.min(batch.quantityAvailable, needed) : batch.quantityAvailable;
+    handleDateAllocationChange(batch.batchTokenId, take);
+  };
+
+  const handleAutoPickFefo = () => {
+    let remainingNeeded = formData.amountRequested || 0;
+    if (remainingNeeded <= 0 && availableDateBatches.length > 0) {
+      remainingNeeded = Math.min(availableDateBatches[0].quantityAvailable, 100);
+      setFormData(prev => ({ ...prev, amountRequested: remainingNeeded }));
+    }
+
+    const newAllocations: Record<string, number> = {};
+    for (const batch of availableDateBatches) {
+      if (remainingNeeded <= 0) break;
+      const take = Math.min(batch.quantityAvailable, remainingNeeded);
+      newAllocations[batch.batchTokenId] = take;
+      remainingNeeded -= take;
+    }
+    setDateAllocations(newAllocations);
+  };
+
   const handleChange = (field: keyof ReleaseForm, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field]) {
@@ -401,7 +502,7 @@ export function AddReleaseModal({
     }
 
     if (!formData.amountRequested || formData.amountRequested <= 0) {
-      newErrors.amountRequested = 'Amount requested must be greater than 0';
+      newErrors.amountRequested = 'Quantity requested must be greater than 0';
     } else if (formData.amountRequested > availableQty) {
       const sourceLabel = formData.sourceType === 'Warehouse' ? formData.warehouseSource : (sourceMunicipality || 'Source LGU');
       newErrors.amountRequested = `Insufficient stock in ${sourceLabel} (${availableQty.toLocaleString()} available).`;
@@ -416,12 +517,8 @@ export function AddReleaseModal({
       newErrors.municipality = 'Destination municipality is required';
     }
 
-    // For LGU-to-LGU transfers, destination must be specific
-    if (formData.sourceType === 'LGU') {
-      if (!formData.destinationAddress || formData.destinationAddress.trim().length < 5) {
-        newErrors.destinationAddress = 'Specific drop-off site / evacuation center address is required for inter-LGU transfer';
-      }
-    }
+    // For LGU-to-LGU transfers, destination barangay/address is optional
+    // Relaxed for regional prepositioning mutual aid
 
     // 6. Report Reason (Required at bottom)
     if (!formData.reportReason || !formData.reportReason.trim()) {
@@ -462,6 +559,18 @@ export function AddReleaseModal({
       const destLgu = availableLgus.find(l => l.municipality.toLowerCase() === formData.municipality.toLowerCase());
       const destLguId = destLgu?.id;
 
+      const allocatedBatchesPayload = Object.entries(dateAllocations)
+        .filter(([, qty]) => qty > 0)
+        .map(([batchTokenId, qty]) => {
+          const b = availableDateBatches.find(item => item.batchTokenId === batchTokenId);
+          return {
+            batchTokenId,
+            batchNumber: b?.batchNumber || batchTokenId,
+            expirationDate: b?.expirationDate || '',
+            quantity: qty
+          };
+        });
+
       const submissionData: ReleaseForm = {
         ...formData,
         incidentCode: formattedIncident,
@@ -476,7 +585,8 @@ export function AddReleaseModal({
         sourceWarehouseId: srcWhId,
         sourceLguId: srcLguId,
         lguId: destLguId,
-        destinationLguId: destLguId
+        destinationLguId: destLguId,
+        allocatedBatches: allocatedBatchesPayload.length > 0 ? allocatedBatchesPayload : undefined
       };
 
       onSubmit(submissionData);
@@ -865,36 +975,11 @@ export function AddReleaseModal({
               )}
             </div>
 
-            {/* Real-time Available Stock Preview for Selected Source */}
-            {formData.fnfiCategory && (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Package className="w-5 h-5 text-gray-600" />
-                    <div>
-                      <p className="text-sm font-bold text-gray-900">Available Source Stock</p>
-                      <p className="text-xs text-gray-600">
-                        {formData.fnfiCategory} in {formData.sourceType === 'Warehouse' ? formData.warehouseSource : `${sourceMunicipality || 'Selected LGU'} (${sourceProvince})`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className={`text-2xl font-bold ${availableQty > 100 ? 'text-green-600' : availableQty > 0 ? 'text-orange-600' : 'text-red-500'}`}>
-                      {availableQty > 0 ? availableQty.toLocaleString() : '0'}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {availableQty > 0 ? 'units available' : 'out of stock'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Amount Requested & Transportation Mode */}
+            {/* Quantity Requested & Transportation Mode */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                  Amount Requested <span className="text-red-500">*</span>
+                  Quantity Requested <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -905,7 +990,7 @@ export function AddReleaseModal({
                     const cleaned = sanitizeNumbersOnly(e.target.value);
                     handleChange('amountRequested', cleaned ? parseInt(cleaned, 10) : 0);
                   }}
-                  placeholder="Enter amount (units)"
+                  placeholder="Enter quantity (units)"
                   className={`w-full px-4 py-2.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     errors.amountRequested ? 'border-red-500' : 'border-gray-300'
                   }`}
@@ -920,19 +1005,237 @@ export function AddReleaseModal({
 
               <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                  Transportation Method
+                  Transportation Mode <span className="text-red-500">*</span>
                 </label>
-                <div className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <TruckIcon className="w-4 h-4 text-[#2500ba]" />
-                    <span>DSWD Assigned Receiver</span>
-                  </div>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-100 text-[#2500ba]">
-                    Truck Only
-                  </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, deliveryMode: 'Delivery' }))}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      formData.deliveryMode !== 'Pick up'
+                        ? 'bg-[#2500ba] text-white shadow-xs'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <TruckIcon className="w-3.5 h-3.5" />
+                    <span>Delivery (DSWD)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, deliveryMode: 'Pick up' }))}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      formData.deliveryMode === 'Pick up'
+                        ? 'bg-[#2500ba] text-white shadow-xs'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Package className="w-3.5 h-3.5" />
+                    <span>Pick up (LGU)</span>
+                  </button>
                 </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  {formData.deliveryMode === 'Pick up'
+                    ? 'Consignee / LGU dispatches their own vehicle for pickup at facility.'
+                    : 'DSWD logistics fleet transports relief consignment to destination.'}
+                </p>
               </div>
             </div>
+
+            {/* FEFO Expiration Date Stock Picker */}
+            {formData.fnfiCategory && (
+              <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-blue-700" />
+                    <div>
+                      <span className="text-xs font-bold text-blue-950 uppercase tracking-wide">
+                        FEFO Stock by Expiration Date
+                      </span>
+                      <p className="text-[11px] text-blue-800">
+                        Pick a date to view available quantity and allocate relief stock
+                      </p>
+                    </div>
+                  </div>
+
+                  {availableDateBatches.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAutoPickFefo}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs self-start sm:self-auto"
+                      title="Automatically allocate starting from the earliest-expiring stock"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Auto-Pick Earliest (FEFO)</span>
+                    </button>
+                  )}
+                </div>
+
+                {isLoadingBatches ? (
+                  <div className="py-6 text-center text-xs text-blue-700 font-medium animate-pulse">
+                    Loading stock lots and expiration dates for {formData.fnfiCategory}...
+                  </div>
+                ) : availableDateBatches.length === 0 ? (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+                    No active stock lots found for {formData.fnfiCategory} at {formData.sourceType === 'Warehouse' ? formData.warehouseSource : (sourceMunicipality || 'selected source')}.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Expiration Date Selector Tabs */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1.5 uppercase">
+                        Available Expiration Dates (Earliest First):
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {availableDateBatches.map(batch => {
+                          const isSelected = selectedBatch?.batchTokenId === batch.batchTokenId;
+                          const allocatedFromThis = dateAllocations[batch.batchTokenId] || 0;
+                          const isCritical = batch.daysToExpiry <= 100;
+                          const isModerate = batch.daysToExpiry > 100 && batch.daysToExpiry <= 150;
+
+                          return (
+                            <button
+                              key={batch.batchTokenId}
+                              type="button"
+                              onClick={() => setSelectedBatchId(batch.batchTokenId)}
+                              className={`px-3 py-2 rounded-xl text-left border transition cursor-pointer flex flex-col gap-0.5 ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white border-blue-700 shadow-sm ring-2 ring-blue-400/50'
+                                  : 'bg-white text-gray-800 border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <Calendar className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-gray-500'}`} />
+                                <span className="font-bold text-xs">{batch.expirationDate}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px]">
+                                <span className={`px-1.5 py-0.2 rounded font-bold ${
+                                  isSelected
+                                    ? 'bg-white/20 text-white'
+                                    : isCritical
+                                    ? 'bg-red-100 text-red-700 border border-red-200'
+                                    : isModerate
+                                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                                    : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                }`}>
+                                  {batch.daysToExpiry <= 0 ? 'Expired' : `${batch.daysToExpiry}d left`}
+                                </span>
+                                <span className={isSelected ? 'text-blue-100 font-mono font-medium' : 'text-gray-600 font-mono font-medium'}>
+                                  {batch.quantityAvailable.toLocaleString()} units
+                                </span>
+                              </div>
+                              {allocatedFromThis > 0 && (
+                                <span className={`mt-0.5 text-[10px] font-bold ${isSelected ? 'text-amber-200' : 'text-blue-600'}`}>
+                                  Allocating: {allocatedFromThis.toLocaleString()}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Selected Date Detail Banner & Allocation Control */}
+                    {selectedBatch && (
+                      <div className="rounded-xl border border-blue-300 bg-white p-3.5 shadow-2xs space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-100 pb-2.5">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-extrabold text-blue-950">
+                                Expiration Date: {selectedBatch.expirationDate}
+                              </span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                selectedBatch.daysToExpiry <= 100
+                                  ? 'bg-red-100 text-red-800 border border-red-200'
+                                  : selectedBatch.daysToExpiry <= 150
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              }`}>
+                                {selectedBatch.daysToExpiry <= 100
+                                  ? 'Critical (<= 100 days) - Prioritize'
+                                  : selectedBatch.daysToExpiry <= 150
+                                  ? 'Moderate (101-150 days)'
+                                  : 'Safe (> 150 days)'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-gray-500 font-mono mt-0.5">
+                              Lot ID: {selectedBatch.batchTokenId}
+                            </p>
+                          </div>
+
+                          <div className="text-left sm:text-right bg-blue-50/80 px-3 py-1.5 rounded-lg border border-blue-200/60">
+                            <p className="text-[10px] uppercase font-bold text-blue-800">
+                              Stock Available for this Date
+                            </p>
+                            <p className="text-lg font-black text-blue-950 font-mono">
+                              {selectedBatch.quantityAvailable.toLocaleString()} <span className="text-xs font-normal text-gray-600">units</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Deduct Input for this Specific Date */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                          <label className="text-xs font-bold text-gray-700">
+                            Quantity to Allocate from this Date:
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              value={dateAllocations[selectedBatch.batchTokenId] || ''}
+                              onChange={(e) => {
+                                const cleaned = sanitizeNumbersOnly(e.target.value);
+                                handleDateAllocationChange(selectedBatch.batchTokenId, cleaned ? parseInt(cleaned, 10) : 0);
+                              }}
+                              placeholder="0"
+                              className="w-32 px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-bold font-mono text-right focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleMaxForDate(selectedBatch)}
+                              className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-lg transition cursor-pointer"
+                              title="Allocate all remaining available units from this date"
+                            >
+                              Max
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Live Allocation Summary Tracker */}
+                    <div className="rounded-lg bg-white border border-gray-200 p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-blue-600" />
+                        <span className="font-semibold text-gray-700">
+                          Total Allocated from Dates:
+                        </span>
+                        <strong className="font-mono text-blue-900 font-bold">
+                          {totalAllocatedFromDates.toLocaleString()} / {(formData.amountRequested || 0).toLocaleString()} units
+                        </strong>
+                      </div>
+
+                      <div>
+                        {totalAllocatedFromDates === (formData.amountRequested || 0) && (formData.amountRequested || 0) > 0 ? (
+                          <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Allocation Balanced</span>
+                          </span>
+                        ) : totalAllocatedFromDates < (formData.amountRequested || 0) ? (
+                          <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px]">
+                            Need {((formData.amountRequested || 0) - totalAllocatedFromDates).toLocaleString()} more units
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200 text-[11px]">
+                            Exceeds requested by {(totalAllocatedFromDates - (formData.amountRequested || 0)).toLocaleString()} units
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* SECTION 4: DESTINATION DELIVERY LOCATION (CHOSEN AFTER SOURCE) */}

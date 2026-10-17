@@ -19,7 +19,7 @@ interface InventoryState {
   supplySourcesList?: SupplySourceRecord[];
   kitTypesList?: KitTypeRecord[];
   trucksList?: TruckRecord[];
-  addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => void;
+  addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'> & { allocatedBatches?: any[] }) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => Promise<{ ok: boolean; message: string }>;
   senderSignAndRelease: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
@@ -118,7 +118,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       kitTypeId: newRelease.kitTypeId,
       sourceWarehouseId: newRelease.sourceWarehouseId,
       sourceLguId: newRelease.sourceLguId,
-      destinationLguId: newRelease.destinationLguId
+      destinationLguId: newRelease.destinationLguId,
+      allocatedBatches: newRelease.allocatedBatches || []
     });
     setShowReleaseModal(false);
     showResult(`Release allocation for ${newRelease.municipality || 'LGU'} (${(newRelease.amountRequested ?? 0).toLocaleString()} ${newRelease.fnfiCategory}) created successfully.`);
@@ -454,8 +455,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     {(Array.isArray(release.allocatedBatches) && release.allocatedBatches.length > 0) ? (
                       <div className="flex flex-wrap gap-1 mb-2">
                         {release.allocatedBatches.map(batch => (
-                          <span key={batch?.batchTokenId || Math.random()} className="px-2 py-1 bg-green-50 text-green-700 rounded text-xs font-bold">
-                            {batch?.batchTokenId || 'Batch'} ({batch?.quantity ?? 0})
+                          <span
+                            key={batch?.batchTokenId || Math.random()}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 border border-blue-200 rounded text-xs font-bold"
+                          >
+                            <span>{batch?.batchNumber || batch?.batchTokenId || 'Batch'}</span>
+                            {batch?.expirationDate && (
+                              <span className="text-[10px] text-blue-600 font-normal">
+                                (Exp: {batch.expirationDate})
+                              </span>
+                            )}
+                            <span className="font-mono bg-blue-200/70 text-blue-900 px-1 py-0.2 rounded text-[10px]">
+                              {batch?.quantity ?? 0}
+                            </span>
                           </span>
                         ))}
                       </div>
@@ -704,14 +716,14 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Amount Requested</label>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Quantity Requested</label>
                 <div className="px-4 py-3 bg-gray-100 rounded-lg">
                   <span className="text-lg font-bold text-gray-900">{(selectedRelease.amountRequested ?? 0).toLocaleString()} kits</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Amount to Approve <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Quantity to Approve <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   inputMode="numeric"

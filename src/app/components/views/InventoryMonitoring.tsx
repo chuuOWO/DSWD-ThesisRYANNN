@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Package,
   TrendingDown,
@@ -13,14 +13,26 @@ import {
   Boxes,
   CheckCircle,
   Clock,
-  FileText
+  FileText,
+  Calendar,
+  AlertCircle,
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import type { LguRecord, KitTypeRecord } from '../../services/backendApi';
+import { backendApi, type LguRecord, type KitTypeRecord, type InventoryBatchRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
 import { normalizeCategoryName } from '../../lib/lguSync';
 import type { UserProfile } from '../../services/authApi';
 import { InventoryReportPdfModal } from '../modals/InventoryReportPdfModal';
+import {
+  EXPIRY_THRESHOLDS,
+  getDaysRemaining,
+  getExpiryTier,
+  getExpiryBadgeConfig,
+  type ExpiryTier
+} from '../../lib/expiryConstants';
+import { FefoLotsLedgerTable } from './FefoLotsLedgerTable';
 
 interface InventoryState {
   inventory: { category: string; warehouseA: number; warehouseB: number; warehouseBreakdown?: Record<string, number> }[];
@@ -64,6 +76,20 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
   const [isExpirationCollapsed, setIsExpirationCollapsed] = useState(true);
   const [isChartCollapsed, setIsChartCollapsed] = useState(false);
   const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
+
+  // View mode tab: 'overview' (aggregate stockpile) or 'fefo-ledger' (dedicated lot-level FEFO table)
+  const [activeTab, setActiveTab] = useState<'overview' | 'fefo-ledger'>('overview');
+
+  // FEFO Ledger States
+  const [batchesList, setBatchesList] = useState<InventoryBatchRecord[]>([]);
+  const [isBatchesLoading, setIsBatchesLoading] = useState(false);
+  const [fefoSearchQuery, setFefoSearchQuery] = useState('');
+  const [fefoUrgencyFilter, setFefoUrgencyFilter] = useState<'all' | 'critical' | 'moderate' | 'safe' | 'expired'>('all');
+  const [fefoFacilityFilter, setFefoFacilityFilter] = useState('All');
+  const [fefoCategoryFilter, setFefoCategoryFilter] = useState('All');
+  const [fefoSortOrder, setFefoSortOrder] = useState<'earliest' | 'latest' | 'quantity'>('earliest');
+  const [fefoPage, setFefoPage] = useState(1);
+  const fefoPageSize = 10;
 
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
@@ -173,9 +199,191 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
     }));
   }, [outgoingReleasesList, lguPriorityReports, lgusList, dynamicCategories]);
 
+  // Load and synchronize discrete inventory batch lots
+  const loadBatches = async () => {
+    setIsBatchesLoading(true);
+    try {
+      const records = await backendApi.getInventoryBatches();
+      setBatchesList(records);
+    } catch (err) {
+      console.error('Failed to load inventory batches:', err);
+    } finally {
+      setIsBatchesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadBatches();
+  }, [incomingGoodsList, outgoingReleasesList]);
+
+  // Combine database inventory batches with verified incoming manifests for comprehensive lot coverage
+  const allBatches = useMemo(() => {
+    const map = new Map<string, InventoryBatchRecord>();
+
+    batchesList.forEach((b) => {
+      if (b.batchTokenId) {
+        map.set(b.batchTokenId, { ...b });
+      }
+    });
+
+    incomingGoodsList
+      .filter((inc) => inc.status === 'Verified' && inc.expirationDate)
+      .forEach((inc) => {
+        const tokenId = inc.batchTokenId || (inc.manifestNumber ? `BATCH-${inc.manifestNumber}` : `BATCH-${inc.id}`);
+        if (!map.has(tokenId)) {
+          map.set(tokenId, {
+            batchTokenId: tokenId,
+            incomingManifestId: inc.manifestNumber || inc.id,
+            kitTypeId: inc.fnfiCategory,
+            kitName: inc.fnfiCategory,
+            initialQuantity: Number(inc.quantity || 0),
+            remainingQuantity: Number(inc.quantity || 0),
+            warehouseId: inc.warehouseSource || inc.destination,
+            expirationDate: inc.expirationDate,
+            manifestHash: inc.manifestHash,
+            mintedAt: inc.dateReceived || inc.verifiedAt
+          });
+        }
+      });
+
+    return Array.from(map.values());
+  }, [batchesList, incomingGoodsList]);
+
+  const resolveBatchCategory = (batch: InventoryBatchRecord): string => {
+    if (batch.kitName) {
+      const norm = normalizeCategoryName(batch.kitName);
+      if (norm) return norm;
+    }
+    if (batch.kitTypeId) {
+      const found = kitTypesList.find(
+        (k) => k.id === batch.kitTypeId || k.name.toLowerCase() === batch.kitTypeId?.toLowerCase()
+      );
+      if (found) return normalizeCategoryName(found.name) || found.name;
+      const norm = normalizeCategoryName(batch.kitTypeId);
+      if (norm) return norm;
+    }
+    return batch.kitName || batch.kitTypeId || 'Relief Goods';
+  };
+
+  const resolveBatchFacility = (batch: InventoryBatchRecord): string => {
+    if (batch.warehouseId) {
+      const lower = batch.warehouseId.toLowerCase();
+      if (lower.includes('oton')) return 'Oton Main Warehouse';
+      if (lower.includes('pototan')) return 'Pototan Main Warehouse';
+      return batch.warehouseId;
+    }
+    if (batch.lguId) {
+      const found = lgusList.find((l) => l.id === batch.lguId);
+      if (found) return `${found.municipality || found.lguName} LGU`;
+      return batch.lguId;
+    }
+    return 'Main Warehouse';
+  };
+
+  // Filtered & sorted FEFO batches for the dedicated ledger table
+  const filteredBatches = useMemo(() => {
+    let result = allBatches.map((batch) => {
+      const category = resolveBatchCategory(batch);
+      const facility = resolveBatchFacility(batch);
+      const daysRemaining = getDaysRemaining(batch.expirationDate);
+      const tier = getExpiryTier(batch.expirationDate);
+      return {
+        ...batch,
+        category,
+        facility,
+        daysRemaining,
+        tier
+      };
+    });
+
+    if (fefoSearchQuery.trim()) {
+      const q = fefoSearchQuery.toLowerCase().trim();
+      result = result.filter(
+        (b) =>
+          b.batchTokenId.toLowerCase().includes(q) ||
+          (b.incomingManifestId && b.incomingManifestId.toLowerCase().includes(q)) ||
+          b.category.toLowerCase().includes(q) ||
+          b.facility.toLowerCase().includes(q)
+      );
+    }
+
+    if (fefoUrgencyFilter !== 'all') {
+      result = result.filter((b) => b.tier === fefoUrgencyFilter);
+    }
+
+    if (fefoCategoryFilter !== 'All') {
+      result = result.filter((b) => b.category === fefoCategoryFilter);
+    }
+
+    if (fefoFacilityFilter !== 'All') {
+      result = result.filter((b) => b.facility.toLowerCase().includes(fefoFacilityFilter.toLowerCase()));
+    }
+
+    result.sort((a, b) => {
+      if (fefoSortOrder === 'earliest') {
+        return a.daysRemaining - b.daysRemaining;
+      }
+      if (fefoSortOrder === 'latest') {
+        return b.daysRemaining - a.daysRemaining;
+      }
+      if (fefoSortOrder === 'quantity') {
+        return b.remainingQuantity - a.remainingQuantity;
+      }
+      return 0;
+    });
+
+    return result;
+  }, [allBatches, fefoSearchQuery, fefoUrgencyFilter, fefoCategoryFilter, fefoFacilityFilter, fefoSortOrder, kitTypesList, lgusList]);
+
+  // FEFO Metrics Summary across all active batches
+  const fefoMetrics = useMemo(() => {
+    let criticalLots = 0;
+    let moderateLots = 0;
+    let safeLots = 0;
+    let expiredLots = 0;
+    let criticalUnits = 0;
+    let moderateUnits = 0;
+    let safeUnits = 0;
+    let expiredUnits = 0;
+
+    allBatches.forEach((b) => {
+      const tier = getExpiryTier(b.expirationDate);
+      const rem = Math.max(0, Number(b.remainingQuantity || 0));
+      if (tier === 'critical') {
+        criticalLots += 1;
+        criticalUnits += rem;
+      } else if (tier === 'moderate') {
+        moderateLots += 1;
+        moderateUnits += rem;
+      } else if (tier === 'safe') {
+        safeLots += 1;
+        safeUnits += rem;
+      } else if (tier === 'expired') {
+        expiredLots += 1;
+        expiredUnits += rem;
+      }
+    });
+
+    return {
+      totalBatches: allBatches.length,
+      criticalLots,
+      criticalUnits,
+      moderateLots,
+      moderateUnits,
+      safeLots,
+      safeUnits,
+      expiredLots,
+      expiredUnits
+    };
+  }, [allBatches]);
+
+  const fefoTotalPages = Math.max(1, Math.ceil(filteredBatches.length / fefoPageSize));
+  const paginatedBatches = useMemo(() => {
+    const start = (fefoPage - 1) * fefoPageSize;
+    return filteredBatches.slice(start, start + fefoPageSize);
+  }, [filteredBatches, fefoPage, fefoPageSize]);
+
   const releaseStatuses = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'];
-  const today = new Date();
-  const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   const displayData: InventoryItem[] = useMemo(() => {
     return dynamicCategories.map((category) => {
@@ -196,20 +404,21 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
         })
         .reduce((sum, release) => sum + (release.amountApproved || release.amountRequested || 0), 0);
 
-      const expiringItems = incomingGoodsList
-        .filter((incoming) => {
-          const incCanonical = normalizeCategoryName(incoming.fnfiCategory);
+      // Remaining stock in critical expiry window (<= 100 days)
+      const expiringItems = allBatches
+        .filter((batch) => {
+          const cat = resolveBatchCategory(batch);
+          const canonical = normalizeCategoryName(cat);
           return (
-            (incCanonical === canonicalCategory || (incoming.fnfiCategory || '').toLowerCase() === category.toLowerCase()) &&
-            incoming.status === 'Verified'
+            canonical === canonicalCategory ||
+            cat.toLowerCase() === category.toLowerCase()
           );
         })
-        .filter((incoming) => {
-          if (!incoming.expirationDate) return false;
-          const expirationDate = new Date(incoming.expirationDate);
-          return expirationDate <= thirtyDaysFromNow && expirationDate >= today;
+        .filter((batch) => {
+          const tier = getExpiryTier(batch.expirationDate);
+          return tier === 'critical';
         })
-        .reduce((sum, incoming) => sum + (incoming.quantity || 0), 0);
+        .reduce((sum, batch) => sum + Math.max(0, Number(batch.remainingQuantity || 0)), 0);
 
       const totalWarehouseStock = matchingItems.reduce((sum: number, i: any) => {
         if (i.warehouseBreakdown && Object.keys(i.warehouseBreakdown).length > 0) {
@@ -229,7 +438,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
         expiringItems
       };
     });
-  }, [dynamicCategories, inventory, outgoingReleasesList, incomingGoodsList]);
+  }, [dynamicCategories, inventory, outgoingReleasesList, allBatches, kitTypesList]);
 
   // Calculate LGU totals per category
   const lguTotals = useMemo(() => {
@@ -497,27 +706,40 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
                     <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0" />
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-red-900 text-sm">Expiration Warning</h3>
+                        <h3 className="font-bold text-red-900 text-sm">Critical Expiration Warning</h3>
                         <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-red-200 text-red-800">
-                          {totalExpiring}
+                          {totalExpiring.toLocaleString()} units
                         </span>
                       </div>
                       <p className="text-xs text-red-800 mt-0.5">
-                        {totalExpiring} items expiring in warehouse within 30 days
+                        {totalExpiring.toLocaleString()} consumable units ({fefoMetrics.criticalLots} batches) expiring within {EXPIRY_THRESHOLDS.CRITICAL_MAX_DAYS} days
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsExpirationCollapsed((prev) => !prev);
-                    }}
-                    className="p-1 rounded-md text-red-800 hover:bg-red-200/60 transition-colors cursor-pointer"
-                    title={isExpirationCollapsed ? 'Expand Expiration Warning' : 'Minimize Expiration Warning'}
-                  >
-                    {isExpirationCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveTab('fefo-ledger');
+                        setFefoUrgencyFilter('critical');
+                      }}
+                      className="px-2.5 py-1 text-xs font-bold text-red-700 bg-red-100 hover:bg-red-200 rounded-lg transition cursor-pointer"
+                    >
+                      View Lots &rarr;
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsExpirationCollapsed((prev) => !prev);
+                      }}
+                      className="p-1 rounded-md text-red-800 hover:bg-red-200/60 transition-colors cursor-pointer"
+                      title={isExpirationCollapsed ? 'Expand Expiration Warning' : 'Minimize Expiration Warning'}
+                    >
+                      {isExpirationCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                    </button>
+                  </div>
                 </div>
 
                 {!isExpirationCollapsed && (
@@ -528,7 +750,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
                         <div key={item.category} className="bg-white rounded p-2 border border-red-200 shadow-xs">
                           <div className="flex justify-between items-center">
                             <span className="font-bold text-sm text-gray-900">{item.category}</span>
-                            <span className="text-sm font-bold text-red-700">{item.expiringItems} expiring</span>
+                            <span className="text-sm font-bold text-red-700">{item.expiringItems.toLocaleString()} expiring (&le; {EXPIRY_THRESHOLDS.CRITICAL_MAX_DAYS}d)</span>
                           </div>
                         </div>
                       ))}
@@ -540,7 +762,68 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
         </div>
       )}
 
-      {/* Smart Facility Scope, Search & Buffer Filters */}
+      {/* Primary View Mode Switcher: Commodity Stockpile vs FEFO Expiring Lots Ledger */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-200 shadow-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('overview')}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'overview'
+                ? 'bg-[#2500ba] text-white shadow-xs'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`}
+          >
+            <Boxes className="w-4 h-4" />
+            <span>Facility Stockpile Overview</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('fefo-ledger')}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'fefo-ledger'
+                ? 'bg-[#2500ba] text-white shadow-xs'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`}
+          >
+            <Clock className="w-4 h-4" />
+            <span>FEFO Expiring Lots Ledger</span>
+            {fefoMetrics.criticalLots > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-600 text-white">
+                {fefoMetrics.criticalLots} Critical
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'fefo-ledger' && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void loadBatches()}
+              disabled={isBatchesLoading}
+              className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-bold text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isBatchesLoading ? 'animate-spin text-[#2500ba]' : ''}`} />
+              <span>Refresh Lots</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {activeTab === 'fefo-ledger' ? (
+        <FefoLotsLedgerTable
+          allBatches={allBatches}
+          dynamicCategories={dynamicCategories}
+          kitTypesList={kitTypesList}
+          lgusList={lgusList}
+          isBatchesLoading={isBatchesLoading}
+          onRefreshBatches={loadBatches}
+          initialUrgencyFilter={fefoUrgencyFilter}
+        />
+      ) : (
+        <>
+          {/* Smart Facility Scope, Search & Buffer Filters */}
       <div className="bg-white rounded-xl p-5 border border-gray-200 shadow-xs space-y-4">
         {/* Scope Tabs: Main Hubs Focus vs Include LGUs */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-gray-100">
@@ -983,6 +1266,8 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* Official Inventory PDF Export Modal */}
       <InventoryReportPdfModal
