@@ -157,6 +157,8 @@ const handoverAbi = [
   'function confirmReceiptForLgu(string drNumber,string handoverContractId,string destination,string receiverGps,address targetLguRecipient) returns (uint256)',
   'function handoverIdByDrNumber(string drNumber) view returns (uint256)',
   'function handoverIdByContractId(string handoverContractId) view returns (uint256)',
+  'function currentHandoverId() view returns (uint256)',
+  'function getHandover(uint256 handoverId) view returns (tuple(uint256 handoverId, string drNumber, string handoverContractId, string category, uint256 quantity, string[] batchTokenIds, uint256[] batchQuantities, string fromLocation, string destination, address currentCustodian, address designatedDriver, address receiver, string senderGps, string receiverGps, uint256 releasedAt, uint256 acceptedAt, uint8 status, uint256 hopCount))',
   'function getHandoverHops(uint256 handoverId) view returns (tuple(address fromParty,address toParty,string gps,uint256 timestamp,string note)[])',
   'function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)',
   'function balanceOf(address account, uint256 id) view returns (uint256)',
@@ -486,6 +488,28 @@ export const blockchain = {
     }, onStage);
   },
 
+  async getCurrentHandoverCount(): Promise<bigint> {
+    if (!handoverContractAddress) return 0n;
+    try {
+      const contract = new Contract(handoverContractAddress, handoverAbi, getReadOnlyProvider());
+      const count = await contract.currentHandoverId();
+      return BigInt(count.toString());
+    } catch {
+      return 0n;
+    }
+  },
+
+  async getHandover(handoverId: bigint | number): Promise<any> {
+    if (!handoverContractAddress || !handoverId) return null;
+    try {
+      const contract = new Contract(handoverContractAddress, handoverAbi, getReadOnlyProvider());
+      return await contract.getHandover(handoverId);
+    } catch (e) {
+      console.warn('getHandover error:', e);
+      return null;
+    }
+  },
+
   async getHandoverIdByDr(drNumber: string): Promise<bigint> {
     if (!handoverContractAddress) return 0n;
     try {
@@ -536,12 +560,39 @@ export const blockchain = {
         } catch {}
       }
 
+      // Pre-flight on-chain DR Collision Detection
+      let effectiveDrNumber = input.drNumber.trim();
+      let effectiveContractId = input.handoverContractId.trim();
+      let isDisambiguated = false;
+
+      try {
+        const existingHid = await contract.handoverIdByDrNumber(effectiveDrNumber);
+        if (existingHid > 0n) {
+          const existingH = await contract.getHandover(existingHid);
+          const isConflict = existingH && (
+            Number(existingH.status) !== 0 ||
+            existingH.category !== input.category ||
+            BigInt(existingH.quantity) !== BigInt(input.quantity)
+          );
+
+          if (isConflict) {
+            const disambiguator = `V${Date.now().toString().slice(-4)}`;
+            effectiveDrNumber = `${effectiveDrNumber}-${disambiguator}`;
+            effectiveContractId = `${effectiveContractId}-${disambiguator}`;
+            isDisambiguated = true;
+            console.warn(`[Blockchain] DR collision detected for ${input.drNumber} (existing handover #${existingHid.toString()}). Disambiguated on-chain to ${effectiveDrNumber}.`);
+          }
+        }
+      } catch (checkErr) {
+        console.warn('[Blockchain] Collision pre-flight check warning:', checkErr);
+      }
+
       onStage?.('mining');
       let tx;
       if (targetRecipientWallet && ethers.isAddress(targetRecipientWallet)) {
         tx = await contract.signReleaseWithDriver(
-          input.drNumber,
-          input.handoverContractId,
+          effectiveDrNumber,
+          effectiveContractId,
           input.category,
           BigInt(input.quantity),
           input.batchTokenIds,
@@ -553,8 +604,8 @@ export const blockchain = {
         );
       } else {
         tx = await contract.signRelease(
-          input.drNumber,
-          input.handoverContractId,
+          effectiveDrNumber,
+          effectiveContractId,
           input.category,
           BigInt(input.quantity),
           input.batchTokenIds,
@@ -567,6 +618,21 @@ export const blockchain = {
 
       onStage?.('mining', tx.hash);
       const receipt = await tx.wait(1);
+
+      // If disambiguated on-chain, sync back to Supabase
+      if (isDisambiguated) {
+        try {
+          await supabase
+            .from('outgoing_requests')
+            .update({
+              dr_number: effectiveDrNumber,
+              handover_contract_id: effectiveContractId
+            })
+            .eq('dr_number', input.drNumber.trim());
+        } catch (syncErr) {
+          console.warn('[Blockchain] Supabase sync after disambiguation warning:', syncErr);
+        }
+      }
 
       return {
         hash: receipt?.hash || tx.hash,

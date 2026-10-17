@@ -11,6 +11,7 @@ import { evaluatePriorityIndicator } from '../lib/priorityLogic';
 import { normalizeCategoryName } from '../lib/lguSync';
 import { formatUserErrorMessage } from '../lib/errorUtils';
 import { parseIncidentInfo } from '../lib/incidentHelper';
+import { blockchain } from './blockchain';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -2280,27 +2281,63 @@ export const backendApi = {
     }
   },
 
-  async getNextDrIndex() {
+  async getNextDrIndex(): Promise<number> {
     try {
-      const { data, error } = await supabase
+      // 1. App counters baseline
+      const { data } = await supabase
         .from('app_counters')
         .select('value')
         .eq('key', 'dr_index')
         .maybeSingle();
 
-      if (error || !data) {
-        return null;
+      let maxIndex = (data as { value?: number } | null)?.value ?? 0;
+
+      // 2. Scan highest existing DR in outgoing_requests table
+      try {
+        const { data: outReqs } = await supabase
+          .from('outgoing_requests')
+          .select('dr_number');
+
+        if (outReqs) {
+          for (const req of outReqs) {
+            const match = req.dr_number?.match(/DR-\d{4}-(\d+)/i);
+            if (match) {
+              const num = parseInt(match[1], 10);
+              if (!isNaN(num) && num > maxIndex) {
+                maxIndex = num;
+              }
+            }
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Outgoing requests DR scan warning:', dbErr);
       }
 
-      const nextValue = ((data as { value?: number } | null)?.value ?? 0) + 1;
+      // 3. Scan highest existing handover on Sepolia smart contract
+      try {
+        const onChainCount = await blockchain.getCurrentHandoverCount();
+        if (Number(onChainCount) > maxIndex) {
+          maxIndex = Number(onChainCount);
+        }
+      } catch (chainErr) {
+        console.warn('On-chain handover count scan warning:', chainErr);
+      }
+
+      const nextValue = Math.max(maxIndex, 0) + 1;
       await supabase
         .from('app_counters')
-        .update({ value: nextValue, updated_at: new Date().toISOString() })
-        .eq('key', 'dr_index');
+        .upsert({ key: 'dr_index', value: nextValue, updated_at: new Date().toISOString() });
       return nextValue;
     } catch {
-      return null;
+      return 1;
     }
+  },
+
+  async generateNextDrNumber(): Promise<string> {
+    const nextIdx = await this.getNextDrIndex();
+    const year = new Date().getFullYear();
+    const safeIdx = nextIdx && nextIdx > 0 ? nextIdx : 1;
+    return `DR-${year}-${String(safeIdx).padStart(3, '0')}`;
   },
 
   async markHandoverAccepted(drNumber: string, receiverGps: string, txHash?: string) {

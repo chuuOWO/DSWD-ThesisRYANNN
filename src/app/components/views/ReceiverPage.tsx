@@ -1541,7 +1541,19 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           handoverId = await blockchain.getHandoverIdByDr(payload.drNumber);
         }
         if (handoverId > 0n) {
-          console.log(`On-chain recovery: handover ${handoverId} confirmed for ${payload.drNumber}.`);
+          const handoverDetails = await blockchain.getHandover(handoverId).catch(() => null);
+          const isMatchingHandover = handoverDetails && (
+            handoverDetails.category === payload.category &&
+            BigInt(handoverDetails.quantity) === BigInt(payload.quantity) &&
+            Number(handoverDetails.status) === 1
+          );
+
+          if (!isMatchingHandover) {
+            console.warn(`Handover #${handoverId} exists on-chain but does not match current payload (mismatched category/quantity or already accepted). Not recovering.`);
+            throw err;
+          }
+
+          console.log(`On-chain recovery: matching handover ${handoverId} confirmed for ${payload.drNumber}.`);
           await backendApi.assignEscortAndTruckToRelease(payload.drNumber, effectiveTruckId, profile?.id, 'In Transit');
           await backendApi.updateOutgoing(payload.drNumber, {
             senderSignature: `on-chain-handover-${handoverId}`,

@@ -1382,14 +1382,17 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => {
-    const nextIndex = outgoingReleasesList.reduce((max, release) => {
+    const maxKnownIndex = outgoingReleasesList.reduce((max, release) => {
       const match = release.drNumber.match(/DR-\d{4}-(\d+)/i);
       if (!match) return max;
       const value = Number.parseInt(match[1], 10);
       return Number.isFinite(value) ? Math.max(max, value) : max;
-    }, 0) + 1;
+    }, 0);
+    // On-chain safe floor: Handovers 1, 2, 3, 4 already exist on Sepolia testnet
+    const nextIndex = Math.max(maxKnownIndex, 4) + 1;
     const year = new Date().getFullYear();
     const newDR = `DR-${year}-${String(nextIndex).padStart(3, '0')}`;
+    backendApi.getNextDrIndex().catch(() => {});
     const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : (newRelease.deliveryStatus || 'Allocating');
     const matchedLgu = lgusList.find(l =>
       (newRelease.lguId && l.id === newRelease.lguId) ||
