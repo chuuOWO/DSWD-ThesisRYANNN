@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2, UserCheck, Truck } from 'lucide-react';
+import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2 } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
 import {
   backendApi,
@@ -1032,65 +1032,6 @@ export function AddReleaseModal({
             <p className="text-xs text-amber-900/80 leading-relaxed">
               Mandatory calamity justification required by DSWD Disaster Response Management Bureau (DRMB) protocols for relief releases.
             </p>
-          </div>
-
-          {/* SECTION 5: RELIEF ESCORT & CONVOY TRUCK (OPTIONAL / PRE-ASSIGN) */}
-          <div className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-2 text-xs font-bold text-indigo-950 uppercase tracking-wide">
-                <Truck className="w-4 h-4 text-indigo-700" />
-                <span>5. Relief Escort Officer & Convoy Truck (Optional)</span>
-              </label>
-              <span className="text-[10px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200">
-                Logistics Assignment
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
-                  <Truck className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Convoy Relief Truck</span>
-                </label>
-                <select
-                  value={formData.assignedTruckId || ''}
-                  onChange={(e) => handleChange('assignedTruckId', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Unassigned (Assign later)</option>
-                  {availableTrucks.map((truck) => (
-                    <option key={truck.truckId} value={truck.truckId}>
-                      {truck.truckId} • {truck.plateNumber} ({truck.model || 'Heavy Cargo'} - {truck.capacityKg?.toLocaleString()} kg)
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-gray-500 mt-1">
-                  Designated transport unit in DSWD Region VI relief convoy.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
-                  <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Relief Escort Officer</span>
-                </label>
-                <select
-                  value={formData.assignedEscortProfileId || ''}
-                  onChange={(e) => handleChange('assignedEscortProfileId', e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Unassigned (Assign later)</option>
-                  {escorts.map((escort) => (
-                    <option key={escort.id} value={escort.id}>
-                      {escort.fullName} ({escort.email || 'Escort Officer'})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-gray-500 mt-1">
-                  Assigned officer responsible for physical custody and GNSS tracking.
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* Delivery Status Indicator */}
