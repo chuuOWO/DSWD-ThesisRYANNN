@@ -263,14 +263,24 @@ export function SettingsModal({
     }
   }, [isOpen, activeTab]);
 
-  // Sync active smart account on mount or tab change
+  // Sync active smart account on mount or tab change and persist to database if mismatched
   useEffect(() => {
     if (isOpen && activeTab === 'wallet') {
-      blockchain.getConnectedWalletAddress().then(addr => {
-        if (addr) setActiveWallet(addr);
+      blockchain.getConnectedWalletAddress().then(async (addr) => {
+        if (addr) {
+          setActiveWallet(addr);
+          if (profile.id && profile.walletAddress !== addr) {
+            try {
+              await authApi.updateWalletAddress(profile.id, addr);
+              await refreshProfile();
+            } catch (syncErr) {
+              console.warn('[Settings] Auto-sync wallet address failed:', syncErr);
+            }
+          }
+        }
       });
     }
-  }, [isOpen, activeTab]);
+  }, [isOpen, activeTab, profile.id, profile.walletAddress, refreshProfile]);
 
   // Cleanup camera stream
   useEffect(() => {

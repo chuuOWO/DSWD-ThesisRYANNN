@@ -321,6 +321,50 @@ export function LGUDetailModal({
     });
   }, [lgu, allTransactions]);
 
+  // Count transactions per time filter for quick visual indicator badges
+  const countsByTimeFilter = useMemo(() => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+
+    let allCount = 0;
+    let tenDaysCount = 0;
+    let thirtyDaysCount = 0;
+    let ninetyDaysCount = 0;
+
+    allTransactions.forEach((tx) => {
+      if (typeFilter !== 'all' && tx.type !== typeFilter) return;
+      if (categoryFilter !== 'all') {
+        const canonicalTx = normalizeCategoryName(tx.category);
+        const canonicalFilter = normalizeCategoryName(categoryFilter);
+        if (canonicalTx !== canonicalFilter) return;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchCode = tx.referenceCode.toLowerCase().includes(q);
+        const matchCat = tx.category.toLowerCase().includes(q);
+        const matchSource = tx.source.toLowerCase().includes(q);
+        const matchDest = tx.destination.toLowerCase().includes(q);
+        const matchMode = (tx.deliveryMode || '').toLowerCase().includes(q);
+        const matchStatus = tx.status.toLowerCase().includes(q);
+        if (!matchCode && !matchCat && !matchSource && !matchDest && !matchMode && !matchStatus) return;
+      }
+
+      allCount++;
+      if (tx.date) {
+        const txDate = new Date(tx.date);
+        if (!isNaN(txDate.getTime())) {
+          const diffTime = today.getTime() - txDate.getTime();
+          const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+          if (diffDays <= 10) tenDaysCount++;
+          if (diffDays <= 30) thirtyDaysCount++;
+          if (diffDays <= 90) ninetyDaysCount++;
+        }
+      }
+    });
+
+    return { allCount, tenDaysCount, thirtyDaysCount, ninetyDaysCount };
+  }, [allTransactions, typeFilter, categoryFilter, searchQuery]);
+
   // Filter transactions based on UI selections
   const filteredTransactions = useMemo(() => {
     const today = new Date();
@@ -573,62 +617,97 @@ export function LGUDetailModal({
               </div>
 
               {/* Time Horizon Quick Filters (includes past 10 days!) */}
-              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg self-start sm:self-auto">
+              <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl self-start sm:self-auto border border-gray-200">
                 <button
                   type="button"
                   onClick={() => {
                     setTimeFilter('all');
                     setCurrentPage(1);
                   }}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition ${
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
                     timeFilter === 'all'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white text-blue-900 font-bold shadow-xs border border-gray-200'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
                   }`}
+                  title="Show all transactions across all dates"
                 >
-                  All Time
+                  <span>All Time</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      timeFilter === 'all' ? 'bg-blue-100 text-blue-800' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    {countsByTimeFilter.allCount}
+                  </span>
                 </button>
+
                 <button
                   type="button"
                   onClick={() => {
                     setTimeFilter('10days');
                     setCurrentPage(1);
                   }}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition ${
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
                     timeFilter === '10days'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-blue-700 hover:text-blue-900 bg-blue-50'
+                      ? 'bg-blue-600 text-white font-bold shadow-xs'
+                      : 'text-blue-700 hover:text-blue-900 hover:bg-blue-50'
                   }`}
+                  title="Filter transactions recorded in the past 10 days"
                 >
-                  Past 10 Days
+                  <span>Past 10 Days</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      timeFilter === '10days' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'
+                    }`}
+                  >
+                    {countsByTimeFilter.tenDaysCount}
+                  </span>
                 </button>
+
                 <button
                   type="button"
                   onClick={() => {
                     setTimeFilter('30days');
                     setCurrentPage(1);
                   }}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition ${
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
                     timeFilter === '30days'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white text-blue-900 font-bold shadow-xs border border-gray-200'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
                   }`}
+                  title="Filter transactions recorded in the past 30 days"
                 >
-                  Past 30 Days
+                  <span>Past 30 Days</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      timeFilter === '30days' ? 'bg-blue-100 text-blue-800' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    {countsByTimeFilter.thirtyDaysCount}
+                  </span>
                 </button>
+
                 <button
                   type="button"
                   onClick={() => {
                     setTimeFilter('90days');
                     setCurrentPage(1);
                   }}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition ${
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
                     timeFilter === '90days'
-                      ? 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white text-blue-900 font-bold shadow-xs border border-gray-200'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/70'
                   }`}
+                  title="Filter transactions recorded in the past 90 days"
                 >
-                  Past 90 Days
+                  <span>Past 90 Days</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      timeFilter === '90days' ? 'bg-blue-100 text-blue-800' : 'bg-gray-200 text-gray-700'
+                    }`}
+                  >
+                    {countsByTimeFilter.ninetyDaysCount}
+                  </span>
                 </button>
               </div>
             </div>
@@ -644,7 +723,7 @@ export function LGUDetailModal({
                     setTypeFilter(e.target.value as 'all' | 'Incoming' | 'Outgoing');
                     setCurrentPage(1);
                   }}
-                  className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
                 >
                   <option value="all">All Flow (Incoming &amp; Outgoing)</option>
                   <option value="Incoming">Incoming Only (Inflow)</option>
@@ -661,7 +740,7 @@ export function LGUDetailModal({
                     setCategoryFilter(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
                 >
                   <option value="all">All Items &amp; Kits</option>
                   <option value="Food Pack">Only Food Packs (FFP)</option>
@@ -782,6 +861,19 @@ export function LGUDetailModal({
                   <p className="text-xs text-gray-500 mt-1">
                     Try switching filters (e.g., select &quot;All Time&quot; or &quot;All Items &amp; Kits&quot;).
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTimeFilter('all');
+                      setTypeFilter('all');
+                      setCategoryFilter('all');
+                      setSearchQuery('');
+                      setCurrentPage(1);
+                    }}
+                    className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-bold transition cursor-pointer"
+                  >
+                    Reset All Filters
+                  </button>
                 </div>
               )}
 

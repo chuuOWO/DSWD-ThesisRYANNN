@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import { formatUserErrorMessage } from '../lib/errorUtils';
 import { backendApi } from './backendApi';
 import { provisionSmartAccountAddress } from './embeddedWallet';
+import { getAdminRelayerAddress } from './blockchain';
 
 export type UserRole = 'dswd_admin' | 'receiver';
 export type AccountStatus = 'pending' | 'verified' | 'rejected';
@@ -110,7 +111,21 @@ export const authApi = {
           .maybeSingle();
 
         if (data) {
-          if (!data.wallet_address && (data.id || userId)) {
+          const isAdmin = data.role === 'dswd_admin' || data.role === 'admin';
+          const relayerAddress = getAdminRelayerAddress();
+
+          if (isAdmin && relayerAddress && data.wallet_address !== relayerAddress) {
+            data.wallet_address = relayerAddress;
+            supabase
+              .from('profiles')
+              .update({ wallet_address: relayerAddress })
+              .eq('id', data.id)
+              .then(({ error: updateErr }) => {
+                if (updateErr) {
+                  console.warn(`Could not sync relayer wallet for admin ${data.email}:`, updateErr.message);
+                }
+              });
+          } else if (!data.wallet_address && (data.id || userId)) {
             try {
               const targetId = String(data.id || userId);
               const targetEmail = String(data.email || cleanEmail || '');
@@ -136,7 +151,21 @@ export const authApi = {
           .maybeSingle();
 
         if (data) {
-          if (!data.wallet_address && data.id) {
+          const isAdmin = data.role === 'dswd_admin' || data.role === 'admin';
+          const relayerAddress = getAdminRelayerAddress();
+
+          if (isAdmin && relayerAddress && data.wallet_address !== relayerAddress) {
+            data.wallet_address = relayerAddress;
+            supabase
+              .from('profiles')
+              .update({ wallet_address: relayerAddress })
+              .eq('id', data.id)
+              .then(({ error: updateErr }) => {
+                if (updateErr) {
+                  console.warn(`Could not sync relayer wallet for admin ${data.email}:`, updateErr.message);
+                }
+              });
+          } else if (!data.wallet_address && data.id) {
             try {
               const autoWallet = await provisionSmartAccountAddress(String(data.id), String(data.email || cleanEmail));
               if (autoWallet) {
@@ -527,10 +556,24 @@ export const authApi = {
 
       const rows = data ?? [];
 
-      // Auto-provision deterministic Sepolia smart account addresses for any profiles missing one
+      const relayerAddress = getAdminRelayerAddress();
+
+      // Auto-provision or align Sepolia smart account addresses
       const enrichedRows = await Promise.all(
         rows.map(async (row) => {
-          if (!row.wallet_address && row.id && row.email) {
+          const isAdmin = row.role === 'dswd_admin' || row.role === 'admin';
+          if (isAdmin && relayerAddress && row.wallet_address !== relayerAddress) {
+            row.wallet_address = relayerAddress;
+            supabase
+              .from('profiles')
+              .update({ wallet_address: relayerAddress })
+              .eq('id', row.id)
+              .then(({ error: updateErr }) => {
+                if (updateErr) {
+                  console.warn(`Could not sync relayer wallet for admin ${row.email}:`, updateErr.message);
+                }
+              });
+          } else if (!row.wallet_address && row.id && row.email) {
             try {
               const autoWallet = await provisionSmartAccountAddress(String(row.id), String(row.email));
               if (autoWallet) {

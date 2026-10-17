@@ -59,16 +59,21 @@ export const generateBatchTokenId = (): string => {
   return `BATCH-${yyyy}-${mm}${dd}-${random10}`;
 };
 
+const env: any =
+  (typeof import.meta !== 'undefined' && (import.meta as any).env) ||
+  (typeof process !== 'undefined' && process.env) ||
+  {};
+
 const contractAddress =
-  import.meta.env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
-  import.meta.env.VITE_BATCH_TOKEN_CONTRACT_ADDRESS ||
-  import.meta.env.VITE_HANDOVER_CONTRACT_ADDRESS ||
+  env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
+  env.VITE_BATCH_TOKEN_CONTRACT_ADDRESS ||
+  env.VITE_HANDOVER_CONTRACT_ADDRESS ||
   '0xCde64aBedE22F9842F5678Fe4cd84781960863eC';
 const batchTokenContractAddress = contractAddress;
 const handoverContractAddress = contractAddress;
-const targetChainId = Number(import.meta.env.VITE_BLOCKCHAIN_CHAIN_ID ?? 11155111);
-const targetChainName = import.meta.env.VITE_BLOCKCHAIN_CHAIN_NAME ?? 'Sepolia';
-const targetRpcUrl = import.meta.env.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/omM_Iuble2BuREAtDvGm-';
+const targetChainId = Number(env.VITE_BLOCKCHAIN_CHAIN_ID ?? 11155111);
+const targetChainName = env.VITE_BLOCKCHAIN_CHAIN_NAME ?? 'Sepolia';
+const targetRpcUrl = env.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/omM_Iuble2BuREAtDvGm-';
 
 type AuthorizedRole = Exclude<UserRole, 'Unregistered'>;
 
@@ -163,7 +168,7 @@ const getReadOnlyProvider = () => {
 };
 
 const getSigner = async () => {
-  const relayerKey = import.meta.env.VITE_SEPOLIA_RELAYER_PRIVATE_KEY?.trim();
+  const relayerKey = env.VITE_SEPOLIA_RELAYER_PRIVATE_KEY?.trim();
   if (relayerKey && relayerKey.length >= 64) {
     const formattedKey = relayerKey.startsWith('0x') ? relayerKey : `0x${relayerKey}`;
     const provider = getReadOnlyProvider();
@@ -207,7 +212,26 @@ const getSigner = async () => {
   throw new Error('Sepolia signer not found. Please set VITE_SEPOLIA_RELAYER_PRIVATE_KEY in .env or connect MetaMask.');
 };
 
+export const getAdminRelayerAddress = (): string | null => {
+  const relayerKey =
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SEPOLIA_RELAYER_PRIVATE_KEY)?.trim() ||
+    (typeof process !== 'undefined' && process.env?.VITE_SEPOLIA_RELAYER_PRIVATE_KEY)?.trim();
+  if (relayerKey && relayerKey.length >= 64) {
+    const formattedKey = relayerKey.startsWith('0x') ? relayerKey : `0x${relayerKey}`;
+    try {
+      return new ethers.Wallet(formattedKey).address;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
 export const blockchain = {
+  getAdminRelayerAddress(): string | null {
+    return getAdminRelayerAddress();
+  },
+
   isConfigured(): boolean {
     return Boolean(contractAddress);
   },

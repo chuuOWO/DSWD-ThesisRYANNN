@@ -393,6 +393,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
   const [isIdRevealed, setIsIdRevealed] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSyncingWallet, setIsSyncingWallet] = useState(false);
 
   // Confirmation Modals for Decline and Delete
   const [confirmDeclineUser, setConfirmDeclineUser] = useState<UserProfile | null>(null);
@@ -539,6 +540,29 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
       });
     } finally {
       setIsProcessingAction(false);
+    }
+  };
+
+  const handleSyncRelayerWallet = async () => {
+    const relayerAddr = blockchain.getAdminRelayerAddress();
+    if (!selectedProfile || !relayerAddr) return;
+    setIsSyncingWallet(true);
+    try {
+      await authApi.updateWalletAddress(selectedProfile.id, relayerAddr);
+      setSelectedProfile((prev) => (prev ? { ...prev, walletAddress: relayerAddr } : null));
+      setToastMessage({
+        type: 'success',
+        text: `Synchronized wallet to Sepolia relayer ${relayerAddr.slice(0, 6)}...${relayerAddr.slice(-4)}`
+      });
+      await loadProfiles();
+    } catch (err: any) {
+      console.error('Failed to sync relayer wallet:', err);
+      setToastMessage({
+        type: 'error',
+        text: err?.message || 'Failed to sync wallet address.'
+      });
+    } finally {
+      setIsSyncingWallet(false);
     }
   };
 
@@ -2947,21 +2971,52 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-end">
+                  <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                    {selectedProfile.role === 'dswd_admin' && (
+                      <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        Authorized Sepolia Relayer
+                      </span>
+                    )}
+
+                    {selectedProfile.role === 'dswd_admin' &&
+                      blockchain.getAdminRelayerAddress() &&
+                      selectedProfile.walletAddress !== blockchain.getAdminRelayerAddress() && (
+                        <button
+                          type="button"
+                          onClick={handleSyncRelayerWallet}
+                          disabled={isSyncingWallet}
+                          className="text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition cursor-pointer"
+                        >
+                          {isSyncingWallet ? 'Syncing...' : 'Sync to Sepolia Relayer'}
+                        </button>
+                      )}
+
                     <a
                       href={`https://sepolia.etherscan.io/address/${selectedProfile.walletAddress}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-[11px] text-blue-700 hover:underline inline-flex items-center gap-1 font-semibold"
+                      className="text-[11px] text-blue-700 hover:underline inline-flex items-center gap-1 font-semibold ml-auto"
                     >
                       View on Etherscan <ExternalLink className="w-2.5 h-2.5" />
                     </a>
                   </div>
                 </div>
               ) : (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                  <span>No smart account has been provisioned for this account yet. The user can generate one in Profile Settings.</span>
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <span>No smart account has been provisioned for this account yet. The user can generate one in Profile Settings.</span>
+                  </div>
+                  {selectedProfile.role === 'dswd_admin' && blockchain.getAdminRelayerAddress() && (
+                    <button
+                      type="button"
+                      onClick={handleSyncRelayerWallet}
+                      disabled={isSyncingWallet}
+                      className="text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-white px-2.5 py-1 rounded border border-blue-200 transition cursor-pointer"
+                    >
+                      {isSyncingWallet ? 'Syncing...' : 'Bind Sepolia Relayer Address'}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
