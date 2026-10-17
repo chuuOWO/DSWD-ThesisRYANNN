@@ -238,10 +238,10 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
             kitName: inc.fnfiCategory,
             initialQuantity: Number(inc.quantity || 0),
             remainingQuantity: Number(inc.quantity || 0),
-            warehouseId: inc.warehouseSource || inc.destination,
+            warehouseId: inc.destinationWarehouseId || inc.destination,
             expirationDate: inc.expirationDate,
             manifestHash: inc.manifestHash,
-            mintedAt: inc.dateReceived || inc.verifiedAt
+            mintedAt: inc.mintedAt || inc.dateReceived
           });
         }
       });
