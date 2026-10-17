@@ -524,7 +524,37 @@ export const authApi = {
         console.error('Failed to fetch profiles from Supabase:', error);
         throw error;
       }
-      return (data ?? []).map(mapProfile);
+
+      const rows = data ?? [];
+
+      // Auto-provision deterministic Sepolia smart account addresses for any profiles missing one
+      const enrichedRows = await Promise.all(
+        rows.map(async (row) => {
+          if (!row.wallet_address && row.id && row.email) {
+            try {
+              const autoWallet = await provisionSmartAccountAddress(String(row.id), String(row.email));
+              if (autoWallet) {
+                row.wallet_address = autoWallet;
+                // Asynchronously persist the provisioned wallet address back to Supabase profiles
+                supabase
+                  .from('profiles')
+                  .update({ wallet_address: autoWallet })
+                  .eq('id', row.id)
+                  .then(({ error: updateErr }) => {
+                    if (updateErr) {
+                      console.warn(`Could not persist auto-wallet for ${row.email}:`, updateErr.message);
+                    }
+                  });
+              }
+            } catch (walletErr) {
+              console.warn(`Failed to auto-provision wallet for user ${row.id}:`, walletErr);
+            }
+          }
+          return row;
+        })
+      );
+
+      return enrichedRows.map(mapProfile);
     } catch (err) {
       console.warn('Failed to fetch profiles:', err);
       return [];

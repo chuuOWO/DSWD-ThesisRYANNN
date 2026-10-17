@@ -137,9 +137,10 @@ export function computeSynchronizedLgus(params: {
       return source === muniLower || (muniLower.length > 2 && source.includes(muniLower));
     });
 
-    // 3. Direct incoming goods stocked directly to this LGU
+    // 3. Direct incoming goods stocked directly to this LGU (strictly verified only)
     const lguIncomingDirect = incomingGoods.filter((inc) => {
       if (!inc) return false;
+      if (inc.status !== 'Verified') return false;
       if (inc.destinationType === 'LGU') {
         const dest = (inc.destination || '').trim().toLowerCase();
         return dest === muniLower || (muniLower.length > 2 && dest.includes(muniLower));

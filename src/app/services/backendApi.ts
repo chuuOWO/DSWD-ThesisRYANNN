@@ -10,6 +10,7 @@ import {
 import { evaluatePriorityIndicator } from '../lib/priorityLogic';
 import { normalizeCategoryName } from '../lib/lguSync';
 import { formatUserErrorMessage } from '../lib/errorUtils';
+import { parseIncidentInfo } from '../lib/incidentHelper';
 
 export interface IncomingPayload {
   manifestNumber: string;
@@ -26,14 +27,14 @@ export interface IncomingPayload {
   kitTypeId?: string;
   destinationWarehouseId?: string;
   destinationLguId?: string;
-  status?: 'Draft' | 'Pending Verification' | 'Verified' | 'Minted';
+  status?: 'Draft' | 'Pending Verification' | 'Verified';
   manifestHash?: string;
   txHash?: string;
   walletAddress?: string;
 }
 
 export interface IncomingUpdatePayload {
-  status?: 'Draft' | 'Pending Verification' | 'Verified' | 'Minted' | 'Correction Requested' | 'Rejected';
+  status?: 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected';
   manifestHash?: string;
   txHash?: string;
   batchTokenId?: string;
@@ -286,6 +287,7 @@ export interface OutgoingPayload {
   province: string;
   municipality: string;
   fnfiCategory: string;
+  category?: string;
   amountRequested: number;
   amountApproved: number;
   warehouseSource: string;
@@ -299,6 +301,7 @@ export interface OutgoingPayload {
   receiverGps?: string;
   destinationAddress?: string;
   destination_address?: string;
+  txHash?: string;
   walletAddress?: string;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
@@ -312,6 +315,12 @@ export interface OutgoingPayload {
   kit_type_id?: string | null;
   sourceType?: 'Warehouse' | 'LGU';
   source_type?: 'Warehouse' | 'LGU';
+  deliveryPriority?: number;
+  delivery_priority?: number;
+  isHeld?: boolean;
+  is_held?: boolean;
+  correctionNote?: string;
+  correction_note?: string;
 }
 
 export interface LGUInventoryReportPayload {
@@ -386,11 +395,19 @@ export interface OutgoingUpdatePayload {
   walletAddress?: string;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
+  deliveryPriority?: number;
+  delivery_priority?: number;
+  isHeld?: boolean;
+  is_held?: boolean;
+  correctionNote?: string;
+  correction_note?: string;
 }
 
 export interface TruckLiveLocation {
   truck_id: string;
   current_dr_number?: string | null;
+  driver_profile_id?: string | null;
+  destination_lgu_id?: string | null;
   status?: 'In Transit' | 'Loading' | 'Delivered' | 'Idle' | string | null;
   speed?: number | null;
   heading?: number | null;
@@ -437,10 +454,103 @@ const throwIfError = (error: unknown, context: string) => {
   }
 };
 
+export const isUuid = (val?: string | null): boolean =>
+  Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(val).trim()));
+
 const definedOnly = <T extends Record<string, unknown>>(values: T) =>
   Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
 
 export const backendApi = {
+  async resolveWarehouseId(nameOrId?: string | null): Promise<string | null> {
+    if (isUuid(nameOrId)) return nameOrId!;
+    const target = (nameOrId || '').toLowerCase().trim();
+    const { data } = await supabase.from('warehouses').select('id, name');
+    if (data && data.length > 0) {
+      const match = data.find(w => w.name.toLowerCase() === target || target.includes(w.name.toLowerCase()) || w.name.toLowerCase().includes(target));
+      if (match) return match.id;
+      return data[0].id;
+    }
+    return null;
+  },
+
+  async resolveLguId(municipalityOrId?: string | null): Promise<string | null> {
+    if (isUuid(municipalityOrId)) return municipalityOrId!;
+    const target = (municipalityOrId || '').toLowerCase().trim();
+    const { data } = await supabase.from('lgus').select('id, municipality, lgu_name');
+    if (data && data.length > 0) {
+      const match = data.find(l =>
+        l.municipality.toLowerCase() === target ||
+        (l.lgu_name && l.lgu_name.toLowerCase().includes(target)) ||
+        target.includes(l.municipality.toLowerCase())
+      );
+      if (match) return match.id;
+      return data[0].id;
+    }
+    return null;
+  },
+
+  async resolveKitTypeId(nameOrId?: string | null): Promise<string | null> {
+    if (isUuid(nameOrId)) return nameOrId!;
+    const target = (nameOrId || '').toLowerCase().trim();
+    const canonical = normalizeCategoryName(target).toLowerCase();
+    const { data } = await supabase.from('kit_types').select('id, name');
+    if (data && data.length > 0) {
+      const match = data.find(k => {
+        const kName = k.name.toLowerCase();
+        const kCanonical = normalizeCategoryName(kName).toLowerCase();
+        return kName === target ||
+               kCanonical === canonical ||
+               kName.includes(target) ||
+               target.includes(kName) ||
+               kCanonical.includes(canonical) ||
+               canonical.includes(kCanonical);
+      });
+      if (match) return match.id;
+      return data[0].id;
+    }
+    return null;
+  },
+
+  async resolveSupplySourceId(nameOrId?: string | null): Promise<string | null> {
+    if (isUuid(nameOrId)) return nameOrId!;
+    if (!nameOrId) return null;
+    const target = nameOrId.toLowerCase().trim();
+    const { data } = await supabase.from('supply_sources').select('id, name, short_code');
+    if (data && data.length > 0) {
+      const match = data.find(s =>
+        (s.name && s.name.toLowerCase() === target) ||
+        (s.short_code && s.short_code.toLowerCase() === target)
+      );
+      if (match) return match.id;
+    }
+    return null;
+  },
+
+  async ensureIncidentExists(rawCode?: string | null): Promise<string> {
+    const cleanCode = (parseIncidentInfo(rawCode).incidentCode || rawCode || '').trim();
+    if (!cleanCode) return 'INC-2026-PREPOSITION';
+
+    try {
+      const { data: existing } = await supabase
+        .from('incidents')
+        .select('incident_code')
+        .eq('incident_code', cleanCode)
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from('incidents').insert({
+          incident_code: cleanCode,
+          disaster_name: cleanCode.startsWith('RIS-') ? `Request & Issue Slip ${cleanCode}` : `Disaster Incident ${cleanCode}`,
+          disaster_type: cleanCode.startsWith('RIS-') ? 'Relief Augmentation / Slip' : 'Relief Operation',
+          status: 'Active'
+        });
+      }
+      return cleanCode;
+    } catch {
+      return 'INC-2026-PREPOSITION';
+    }
+  },
+
   async getDashboard() {
     const [
       incomingResult,
@@ -458,25 +568,20 @@ export const backendApi = {
       lguStockResult,
       batchesResult
     ] = await Promise.all([
-      supabase.from('incoming_manifests_v2').select('*').order('created_at', { ascending: false })
-        .then(res => res.error ? supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }) : res),
-      supabase.from('outgoing_requests_v2').select('*').order('created_at', { ascending: false })
-        .then(res => res.error ? supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }) : res),
-      supabase.from('lgu_inventory_reports_v2').select('*').order('reported_at', { ascending: false })
-        .then(res => res.error ? supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }) : res),
+      supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
+      supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }),
+      supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }),
       supabase.from('discrepancy_reports').select('*').order('reported_at', { ascending: false }),
-      supabase.from('lgus_v2').select('*').order('lgu_name', { ascending: true })
-        .then(res => res.error ? supabase.from('lgus').select('*').order('province', { ascending: true }) : res),
+      supabase.from('lgus').select('*').order('province', { ascending: true }),
       supabase.from('provinces').select('*').order('name', { ascending: true }),
-      supabase.from('warehouses_v2').select('*').order('name', { ascending: true })
-        .then(res => res.error ? supabase.from('warehouses').select('*').order('name', { ascending: true }) : res),
+      supabase.from('warehouses').select('*').order('name', { ascending: true }),
       supabase.from('supply_sources').select('*').order('name', { ascending: true }),
       supabase.from('kit_types').select('*').order('name', { ascending: true }),
-      supabase.from('trucks').select('*').order('trk_truck_id', { ascending: true }),
-      supabase.from('incidents').select('*').order('incd_declared_at', { ascending: false }),
+      supabase.from('trucks').select('*').order('truck_id', { ascending: true }),
+      supabase.from('incidents').select('*').order('declared_at', { ascending: false }),
       supabase.from('warehouse_stock').select('*'),
       supabase.from('lgu_stock').select('*'),
-      supabase.from('inventory_batches').select('*').order('bat_minted_at', { ascending: false })
+      supabase.from('inventory_batches').select('*').order('minted_at', { ascending: false })
     ]);
 
     throwIfError(incomingResult.error, 'Unable to load incoming manifests');
@@ -493,46 +598,46 @@ export const backendApi = {
       sources: sourcesResult.error ? [] : sourcesResult.data ?? [],
       kits: kitsResult.error ? [] : kitsResult.data ?? [],
       trucks: trucksResult.error || !trucksResult.data?.length ? DEFAULT_TRUCKS : trucksResult.data.map((r: any) => ({
-        truckId: String(r.trk_truck_id || r.truck_id),
-        plateNumber: String(r.trk_plate_number || r.plate_number),
-        model: String(r.trk_model || r.model || 'DSWD Relief Cargo Truck'),
-        capacityKg: Number(r.trk_capacity_kg || r.capacity_kg || 5000),
-        isActive: Boolean(r.trk_is_active ?? r.is_active ?? true),
-        createdAt: r.trk_created_at || r.created_at,
-        updatedAt: r.trk_updated_at || r.updated_at
+        truckId: String(r.truck_id || r.trk_truck_id),
+        plateNumber: String(r.plate_number || r.trk_plate_number),
+        model: String(r.model || r.trk_model || 'DSWD Relief Cargo Truck'),
+        capacityKg: Number(r.capacity_kg || r.trk_capacity_kg || 5000),
+        isActive: Boolean(r.is_active ?? r.trk_is_active ?? true),
+        createdAt: r.created_at || r.trk_created_at,
+        updatedAt: r.updated_at || r.trk_updated_at
       })),
       incidents: incidentsResult.error || !incidentsResult.data?.length ? DEFAULT_INCIDENTS : incidentsResult.data.map((r: any) => ({
-        incidentCode: String(r.incd_incident_code || r.incident_code),
-        disasterName: String(r.incd_disaster_name || r.disaster_name),
-        disasterType: String(r.incd_disaster_type || r.disaster_type),
-        declaredAt: r.incd_declared_at || r.declared_at,
-        status: (r.incd_status || r.status || 'Active') as 'Active' | 'Monitoring' | 'Closed',
-        region: String(r.incd_region || r.region || 'Region VI (Western Visayas)')
+        incidentCode: String(r.incident_code || r.incd_incident_code),
+        disasterName: String(r.disaster_name || r.incd_disaster_name),
+        disasterType: String(r.disaster_type || r.incd_disaster_type),
+        declaredAt: r.declared_at || r.incd_declared_at,
+        status: (r.status || r.incd_status || 'Active') as 'Active' | 'Monitoring' | 'Closed',
+        region: String(r.region || r.incd_region || 'Region VI (Western Visayas)')
       })),
       warehouseStock: warehouseStockResult.error ? [] : (warehouseStockResult.data ?? []).map((r: any) => ({
-        warehouseId: String(r.wst_warehouse_id || r.warehouse_id),
-        kitTypeId: String(r.wst_kit_type_id || r.kit_type_id),
-        quantity: Number(r.wst_quantity || r.quantity || 0),
-        updatedAt: String(r.wst_updated_at || r.updated_at || new Date().toISOString())
+        warehouseId: String(r.warehouse_id || r.wst_warehouse_id),
+        kitTypeId: String(r.kit_type_id || r.wst_kit_type_id),
+        quantity: Number(r.quantity || r.wst_quantity || 0),
+        updatedAt: String(r.updated_at || r.wst_updated_at || new Date().toISOString())
       })),
       lguStock: lguStockResult.error ? [] : (lguStockResult.data ?? []).map((r: any) => ({
-        lguId: String(r.lst_lgu_id || r.lgu_id),
-        kitTypeId: String(r.lst_kit_type_id || r.kit_type_id),
-        quantity: Number(r.lst_quantity || r.quantity || 0),
-        updatedAt: String(r.lst_updated_at || r.updated_at || new Date().toISOString())
+        lguId: String(r.lgu_id || r.lst_lgu_id),
+        kitTypeId: String(r.kit_type_id || r.lst_kit_type_id),
+        quantity: Number(r.quantity || r.lst_quantity || 0),
+        updatedAt: String(r.updated_at || r.lst_updated_at || new Date().toISOString())
       })),
       batches: batchesResult.error ? [] : (batchesResult.data ?? []).map((r: any) => ({
-        batchTokenId: String(r.bat_batch_token_id || r.batch_token_id),
-        incomingManifestId: r.bat_incoming_manifest_id || r.incoming_manifest_id,
-        kitTypeId: r.bat_kit_type_id || r.kit_type_id,
-        initialQuantity: Number(r.bat_initial_quantity || r.initial_quantity || 0),
-        remainingQuantity: Number(r.bat_remaining_quantity || r.remaining_quantity || 0),
-        warehouseId: r.bat_warehouse_id || r.warehouse_id,
-        lguId: r.bat_lgu_id || r.lgu_id,
-        expirationDate: r.bat_expiration_date || r.expiration_date,
-        manifestHash: r.bat_manifest_hash || r.manifest_hash,
-        mintedByProfileId: r.bat_minted_by_profile_id || r.minted_by_profile_id,
-        mintedAt: r.bat_minted_at || r.minted_at
+        batchTokenId: String(r.batch_token_id || r.bat_batch_token_id),
+        incomingManifestId: r.incoming_manifest_id || r.bat_incoming_manifest_id,
+        kitTypeId: r.kit_type_id || r.bat_kit_type_id,
+        initialQuantity: Number(r.initial_quantity || r.bat_initial_quantity || 0),
+        remainingQuantity: Number(r.remaining_quantity || r.bat_remaining_quantity || 0),
+        warehouseId: r.warehouse_id || r.bat_warehouse_id,
+        lguId: r.lgu_id || r.bat_lgu_id,
+        expirationDate: r.expiration_date || r.bat_expiration_date,
+        manifestHash: r.manifest_hash || r.bat_manifest_hash,
+        mintedByProfileId: r.minted_by_profile_id || r.bat_minted_by_profile_id,
+        mintedAt: r.minted_at || r.bat_minted_at
       }))
     };
   },
@@ -787,20 +892,28 @@ export const backendApi = {
         updated_at: new Date().toISOString()
       };
 
+      let nextColVal = 0;
       if (catLower.includes('food pack') || catLower === 'food pack') {
         updates.food_packs = Math.max(0, (wh.food_packs || 0) - quantity);
+        nextColVal = Number(updates.food_packs);
       } else if (catLower.includes('hygiene') || catLower === 'hygiene kit') {
         updates.hygiene_kits = Math.max(0, (wh.hygiene_kits || 0) - quantity);
+        nextColVal = Number(updates.hygiene_kits);
       } else if (catLower.includes('sleeping') || catLower === 'sleeping kit') {
         updates.sleeping_kits = Math.max(0, (wh.sleeping_kits || 0) - quantity);
+        nextColVal = Number(updates.sleeping_kits);
       } else if (catLower.includes('kitchen') || catLower === 'kitchen kit') {
         updates.kitchen_kits = Math.max(0, (wh.kitchen_kits || 0) - quantity);
+        nextColVal = Number(updates.kitchen_kits);
       } else if (catLower.includes('family kit') || catLower === 'family kit') {
         updates.family_kits = Math.max(0, (wh.family_kits || 0) - quantity);
+        nextColVal = Number(updates.family_kits);
       } else if (catLower.includes('sack') || catLower === 'laminated sack') {
         updates.laminated_sacks = Math.max(0, (wh.laminated_sacks || 0) - quantity);
+        nextColVal = Number(updates.laminated_sacks);
       } else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) {
         updates.rtef = Math.max(0, (wh.rtef || 0) - quantity);
+        nextColVal = Number(updates.rtef);
       }
 
       const canonical = normalizeCategoryName(category);
@@ -816,6 +929,20 @@ export const backendApi = {
         console.error('Failed to deduct warehouse stock:', error.message);
         return { ok: false };
       }
+
+      const kitId = await this.resolveKitTypeId(category);
+      if (kitId) {
+        await supabase.from('warehouse_stock').upsert(
+          {
+            warehouse_id: wh.id,
+            kit_type_id: kitId,
+            quantity: nextColVal || nextVal,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'warehouse_id, kit_type_id' }
+        );
+      }
+
       return { ok: true };
     } catch (err) {
       console.error('Error in deductWarehouseStock:', err);
@@ -844,20 +971,28 @@ export const backendApi = {
         updated_at: new Date().toISOString()
       };
 
+      let nextColVal = 0;
       if (catLower.includes('food pack') || catLower === 'food pack' || canonical === 'Food Pack') {
         updates.food_packs = (wh.food_packs || 0) + quantity;
+        nextColVal = Number(updates.food_packs);
       } else if (catLower.includes('hygiene') || catLower === 'hygiene kit' || canonical === 'Hygiene Kit') {
         updates.hygiene_kits = (wh.hygiene_kits || 0) + quantity;
+        nextColVal = Number(updates.hygiene_kits);
       } else if (catLower.includes('sleeping') || catLower === 'sleeping kit' || canonical === 'Sleeping Kit') {
         updates.sleeping_kits = (wh.sleeping_kits || 0) + quantity;
+        nextColVal = Number(updates.sleeping_kits);
       } else if (catLower.includes('kitchen') || catLower === 'kitchen kit' || canonical === 'Kitchen Kit') {
         updates.kitchen_kits = (wh.kitchen_kits || 0) + quantity;
+        nextColVal = Number(updates.kitchen_kits);
       } else if (catLower.includes('family kit') || catLower === 'family kit' || canonical === 'Family Kit') {
         updates.family_kits = (wh.family_kits || 0) + quantity;
+        nextColVal = Number(updates.family_kits);
       } else if (catLower.includes('sack') || catLower === 'laminated sack' || canonical === 'Laminated Sack') {
         updates.laminated_sacks = (wh.laminated_sacks || 0) + quantity;
+        nextColVal = Number(updates.laminated_sacks);
       } else if (catLower.includes('rtef') || catLower.includes('ready-to-eat') || canonical === 'RTEF') {
         updates.rtef = (wh.rtef || 0) + quantity;
+        nextColVal = Number(updates.rtef);
       }
 
       const stockMap = { ...(wh.current_stock || {}) };
@@ -872,6 +1007,20 @@ export const backendApi = {
         console.error('Failed to add warehouse stock:', error.message);
         return { ok: false };
       }
+
+      const kitId = await this.resolveKitTypeId(category);
+      if (kitId) {
+        await supabase.from('warehouse_stock').upsert(
+          {
+            warehouse_id: wh.id,
+            kit_type_id: kitId,
+            quantity: nextColVal || nextVal,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'warehouse_id, kit_type_id' }
+        );
+      }
+
       return { ok: true };
     } catch (err) {
       console.error('Error in addWarehouseStock:', err);
@@ -882,35 +1031,146 @@ export const backendApi = {
   async deductLguStock(municipality: string, category: string, quantity: number): Promise<{ ok: boolean }> {
     try {
       const cleanMuni = municipality.trim();
-      const { data: lgu } = await supabase
+      let query = supabase
         .from('lgus')
         .select('*')
-        .ilike('municipality', cleanMuni)
+        .ilike('municipality', cleanMuni);
+      let { data: lgu } = await query.limit(1).maybeSingle();
+
+      if (!lgu) {
+        const norm = normalizeLguName(cleanMuni);
+        if (norm) {
+          const { data: fallbackLgu } = await supabase
+            .from('lgus')
+            .select('*')
+            .ilike('municipality', norm)
+            .limit(1)
+            .maybeSingle();
+          lgu = fallbackLgu;
+        }
+      }
+
+      if (!lgu) {
+        console.warn(`LGU "${cleanMuni}" not found for stock deduction.`);
+        return { ok: false };
+      }
+
+      const canonical = normalizeCategoryName(category);
+      const catLower = (category || '').toLowerCase();
+      const kitId = await this.resolveKitTypeId(category);
+
+      const { data: stockRows } = await supabase
+        .from('lgu_stock')
+        .select('kit_type_id, quantity')
+        .eq('lgu_id', lgu.id);
+
+      const stockMapByKit = new Map<string, number>();
+      if (stockRows) {
+        stockRows.forEach((r: any) => stockMapByKit.set(r.kit_type_id, Number(r.quantity) || 0));
+      }
+
+      const { data: latestRep } = await supabase
+        .from('lgu_inventory_reports')
+        .select('food_packs, hygiene_kits, family_kits')
+        .eq('lgu_id', lgu.id)
+        .order('reported_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (!lgu) return { ok: false };
+      const foodKitId = await this.resolveKitTypeId('Family Food Pack');
+      const hygieneKitId = await this.resolveKitTypeId('Hygiene Kit');
+      const familyKitId = await this.resolveKitTypeId('Family Kit');
 
-      const catLower = category.toLowerCase();
-      const updates: Record<string, unknown> = {
-        last_reported_at: new Date().toISOString()
-      };
+      let foodPacks = stockMapByKit.get(foodKitId || '') ?? latestRep?.food_packs ?? lgu.food_packs ?? 0;
+      let hygieneKits = stockMapByKit.get(hygieneKitId || '') ?? latestRep?.hygiene_kits ?? lgu.hygiene_kits ?? 0;
+      let familyKits = stockMapByKit.get(familyKitId || '') ?? latestRep?.family_kits ?? lgu.family_kits ?? 0;
 
-      if (catLower.includes('food')) {
-        updates.food_packs = Math.max(0, (lgu.food_packs || 0) - quantity);
-      } else if (catLower.includes('hygiene')) {
-        updates.hygiene_kits = Math.max(0, (lgu.hygiene_kits || 0) - quantity);
-      } else if (catLower.includes('family')) {
-        updates.family_kits = Math.max(0, (lgu.family_kits || 0) - quantity);
-      } else if (catLower.includes('sleeping')) {
-        updates.sleeping_kits = Math.max(0, (lgu.sleeping_kits || 0) - quantity);
+      let nextKitVal = 0;
+      if (canonical === 'Food Pack' || catLower.includes('food')) {
+        foodPacks = Math.max(0, foodPacks - quantity);
+        nextKitVal = foodPacks;
+      } else if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) {
+        hygieneKits = Math.max(0, hygieneKits - quantity);
+        nextKitVal = hygieneKits;
+      } else if (canonical === 'Family Kit' || catLower.includes('family')) {
+        familyKits = Math.max(0, familyKits - quantity);
+        nextKitVal = familyKits;
+      } else {
+        foodPacks = Math.max(0, foodPacks - quantity);
+        nextKitVal = foodPacks;
       }
 
       const stockMap = { ...(lgu.current_stock || {}) };
-      stockMap[category] = Math.max(0, (stockMap[category] || 0) - quantity);
-      updates.current_stock = stockMap;
+      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const nextVal = Math.max(0, currentVal - quantity);
+      if (canonical) stockMap[canonical] = nextVal;
+      stockMap[category] = nextVal;
 
-      await supabase.from('lgus').update(updates).eq('id', lgu.id);
+      const evalRes = evaluatePriorityIndicator({
+        targetQuota: Number(lgu.max_stock ?? 3000),
+        currentStock: foodPacks,
+        affectedFamilies: Number(lgu.affected_families ?? 0),
+        damageIndex: Number(lgu.damage_index ?? 0)
+      });
+
+      const baseUpdates: Record<string, unknown> = {
+        urgency_score: evalRes.urgencyScore,
+        priority_color: evalRes.priorityColor,
+        recommendation: evalRes.recommendation,
+        last_reported_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const fullUpdates = {
+        ...baseUpdates,
+        food_packs: foodPacks,
+        hygiene_kits: hygieneKits,
+        family_kits: familyKits,
+        current_stock: stockMap
+      };
+
+      const { error: updErr } = await supabase.from('lgus').update(fullUpdates).eq('id', lgu.id);
+      if (updErr) {
+        await supabase.from('lgus').update(baseUpdates).eq('id', lgu.id);
+      }
+
+      if (kitId) {
+        await supabase.from('lgu_stock').upsert(
+          {
+            lgu_id: lgu.id,
+            kit_type_id: kitId,
+            quantity: nextKitVal,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'lgu_id, kit_type_id' }
+        );
+      }
+
+      await supabase.from('lgu_inventory_reports').insert({
+        lgu_id: lgu.id,
+        municipality: lgu.municipality,
+        province: lgu.province,
+        lgu_name: lgu.lgu_name,
+        food_packs: foodPacks,
+        hygiene_kits: hygieneKits,
+        family_kits: familyKits,
+        affected_families: Number(lgu.affected_families ?? 0),
+        damage_index: Number(lgu.damage_index ?? 0),
+        urgency_score: evalRes.urgencyScore,
+        priority_color: evalRes.priorityColor,
+        recommendation: evalRes.recommendation,
+        reported_at: new Date().toISOString()
+      });
+
+      await this.appendStockLedger({
+        facilityType: 'LGU',
+        lguId: lgu.id,
+        kitTypeId: kitId || category,
+        deltaQuantity: -quantity,
+        balanceAfter: nextKitVal,
+        movementType: 'MUTUAL_AID_OUT'
+      });
+
       return { ok: true };
     } catch (err) {
       console.warn('Failed to deduct LGU stock:', err);
@@ -948,52 +1208,122 @@ export const backendApi = {
         return { ok: false };
       }
 
-      const catLower = category.toLowerCase();
       const canonical = normalizeCategoryName(category);
-      const updates: Record<string, unknown> = {
-        last_reported_at: new Date().toISOString()
-      };
+      const catLower = (category || '').toLowerCase();
+      const kitId = await this.resolveKitTypeId(category);
 
-      if (catLower.includes('food') || canonical === 'Food Pack') {
-        updates.food_packs = (lgu.food_packs || 0) + quantity;
-      } else if (catLower.includes('hygiene') || canonical === 'Hygiene Kit') {
-        updates.hygiene_kits = (lgu.hygiene_kits || 0) + quantity;
-      } else if (catLower.includes('family') || canonical === 'Family Kit') {
-        updates.family_kits = (lgu.family_kits || 0) + quantity;
-      } else if (catLower.includes('sleeping') || canonical === 'Sleeping Kit') {
-        updates.sleeping_kits = (lgu.sleeping_kits || 0) + quantity;
-      } else if (catLower.includes('kitchen') || canonical === 'Kitchen Kit') {
-        updates.kitchen_kits = (lgu.kitchen_kits || 0) + quantity;
-      } else if (catLower.includes('sack') || canonical === 'Laminated Sack') {
-        updates.laminated_sacks = (lgu.laminated_sacks || 0) + quantity;
-      } else if (catLower.includes('rtef') || canonical === 'RTEF') {
-        updates.rtef = (lgu.rtef || 0) + quantity;
+      const { data: stockRows } = await supabase
+        .from('lgu_stock')
+        .select('kit_type_id, quantity')
+        .eq('lgu_id', lgu.id);
+
+      const stockMapByKit = new Map<string, number>();
+      if (stockRows) {
+        stockRows.forEach((r: any) => stockMapByKit.set(r.kit_type_id, Number(r.quantity) || 0));
+      }
+
+      const { data: latestRep } = await supabase
+        .from('lgu_inventory_reports')
+        .select('food_packs, hygiene_kits, family_kits')
+        .eq('lgu_id', lgu.id)
+        .order('reported_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const foodKitId = await this.resolveKitTypeId('Family Food Pack');
+      const hygieneKitId = await this.resolveKitTypeId('Hygiene Kit');
+      const familyKitId = await this.resolveKitTypeId('Family Kit');
+
+      let foodPacks = stockMapByKit.get(foodKitId || '') ?? latestRep?.food_packs ?? lgu.food_packs ?? 0;
+      let hygieneKits = stockMapByKit.get(hygieneKitId || '') ?? latestRep?.hygiene_kits ?? lgu.hygiene_kits ?? 0;
+      let familyKits = stockMapByKit.get(familyKitId || '') ?? latestRep?.family_kits ?? lgu.family_kits ?? 0;
+
+      let nextKitVal = 0;
+      if (canonical === 'Food Pack' || catLower.includes('food')) {
+        foodPacks = foodPacks + quantity;
+        nextKitVal = foodPacks;
+      } else if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) {
+        hygieneKits = hygieneKits + quantity;
+        nextKitVal = hygieneKits;
+      } else if (canonical === 'Family Kit' || catLower.includes('family')) {
+        familyKits = familyKits + quantity;
+        nextKitVal = familyKits;
+      } else {
+        foodPacks = foodPacks + quantity;
+        nextKitVal = foodPacks;
       }
 
       const stockMap = { ...(lgu.current_stock || {}) };
-      const canonicalKey = canonical || category;
-      stockMap[canonicalKey] = (stockMap[canonicalKey] || 0) + quantity;
-      if (category !== canonicalKey) {
-        stockMap[category] = stockMap[canonicalKey];
-      }
-      updates.current_stock = stockMap;
+      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const nextVal = currentVal + quantity;
+      if (canonical) stockMap[canonical] = nextVal;
+      stockMap[category] = nextVal;
 
-      const updatedFoodPacks = updates.food_packs !== undefined ? Number(updates.food_packs) : Number(lgu.food_packs || 0);
-      const maxStock = Number(lgu.max_stock ?? 3000);
       const evalRes = evaluatePriorityIndicator({
-        foodPacks: updatedFoodPacks,
+        targetQuota: Number(lgu.max_stock ?? 3000),
+        currentStock: foodPacks,
         affectedFamilies: Number(lgu.affected_families ?? 0),
-        targetQuota: maxStock
+        damageIndex: Number(lgu.damage_index ?? 0)
       });
-      updates.urgency_score = evalRes.urgencyScore;
-      updates.priority_color = evalRes.priorityColor;
-      updates.recommendation = evalRes.systemResponse;
 
-      const { error } = await supabase.from('lgus').update(updates).eq('id', lgu.id);
-      if (error) {
-        console.warn('Failed to update LGU stock:', error.message);
-        return { ok: false };
+      const baseUpdates: Record<string, unknown> = {
+        urgency_score: evalRes.urgencyScore,
+        priority_color: evalRes.priorityColor,
+        recommendation: evalRes.recommendation,
+        last_reported_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const fullUpdates = {
+        ...baseUpdates,
+        food_packs: foodPacks,
+        hygiene_kits: hygieneKits,
+        family_kits: familyKits,
+        current_stock: stockMap
+      };
+
+      const { error: updErr } = await supabase.from('lgus').update(fullUpdates).eq('id', lgu.id);
+      if (updErr) {
+        await supabase.from('lgus').update(baseUpdates).eq('id', lgu.id);
       }
+
+      if (kitId) {
+        await supabase.from('lgu_stock').upsert(
+          {
+            lgu_id: lgu.id,
+            kit_type_id: kitId,
+            quantity: nextKitVal,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'lgu_id, kit_type_id' }
+        );
+      }
+
+      await supabase.from('lgu_inventory_reports').insert({
+        lgu_id: lgu.id,
+        municipality: lgu.municipality,
+        province: lgu.province,
+        lgu_name: lgu.lgu_name,
+        food_packs: foodPacks,
+        hygiene_kits: hygieneKits,
+        family_kits: familyKits,
+        affected_families: Number(lgu.affected_families ?? 0),
+        damage_index: Number(lgu.damage_index ?? 0),
+        urgency_score: evalRes.urgencyScore,
+        priority_color: evalRes.priorityColor,
+        recommendation: evalRes.recommendation,
+        reported_at: new Date().toISOString()
+      });
+
+      await this.appendStockLedger({
+        facilityType: 'LGU',
+        lguId: lgu.id,
+        kitTypeId: kitId || category,
+        deltaQuantity: quantity,
+        balanceAfter: nextKitVal,
+        movementType: 'INTAKE_VERIFIED'
+      });
+
       return { ok: true };
     } catch (err) {
       console.warn('Failed to add LGU stock:', err);
@@ -1018,23 +1348,20 @@ export const backendApi = {
     });
 
     const updates: Record<string, unknown> = {
-      current_stock: canonicalUpdates,
       updated_at: new Date().toISOString(),
       last_reported_at: new Date().toISOString()
     };
-    if (canonicalUpdates['Food Pack'] !== undefined) updates.food_packs = canonicalUpdates['Food Pack'];
-    if (canonicalUpdates['Hygiene Kit'] !== undefined) updates.hygiene_kits = canonicalUpdates['Hygiene Kit'];
-    if (canonicalUpdates['Sleeping Kit'] !== undefined) updates.sleeping_kits = canonicalUpdates['Sleeping Kit'];
-    if (canonicalUpdates['Kitchen Kit'] !== undefined) updates.kitchen_kits = canonicalUpdates['Kitchen Kit'];
-    if (canonicalUpdates['Family Kit'] !== undefined) updates.family_kits = canonicalUpdates['Family Kit'];
-    if (canonicalUpdates['Laminated Sack'] !== undefined) updates.laminated_sacks = canonicalUpdates['Laminated Sack'];
-    if (canonicalUpdates['RTEF'] !== undefined) updates.rtef = canonicalUpdates['RTEF'];
 
     try {
-      const { data: currentLgu } = await supabase.from('lgus').select('max_stock, affected_families, food_packs').eq('id', lguId).maybeSingle();
+      const { data: currentLgu } = await supabase
+        .from('lgus')
+        .select('id, municipality, province, lgu_name, max_stock, affected_families, damage_index')
+        .eq('id', lguId)
+        .maybeSingle();
+
       if (currentLgu) {
         const targetQuota = Number(currentLgu.max_stock ?? 3000);
-        const evalFood = canonicalUpdates['Food Pack'] !== undefined ? Number(canonicalUpdates['Food Pack']) : Number(currentLgu.food_packs ?? 0);
+        const evalFood = canonicalUpdates['Food Pack'] !== undefined ? Number(canonicalUpdates['Food Pack']) : 0;
         const evalRes = evaluatePriorityIndicator({
           foodPacks: evalFood,
           affectedFamilies: Number(currentLgu.affected_families ?? 0),
@@ -1043,25 +1370,41 @@ export const backendApi = {
         updates.urgency_score = evalRes.urgencyScore;
         updates.priority_color = evalRes.priorityColor;
         updates.recommendation = evalRes.systemResponse;
+
+        await supabase.from('lgu_inventory_reports').insert({
+          lgu_id: currentLgu.id,
+          municipality: currentLgu.municipality,
+          province: currentLgu.province,
+          lgu_name: currentLgu.lgu_name,
+          food_packs: canonicalUpdates['Food Pack'] || 0,
+          hygiene_kits: canonicalUpdates['Hygiene Kit'] || 0,
+          family_kits: canonicalUpdates['Family Kit'] || 0,
+          affected_families: Number(currentLgu.affected_families ?? 0),
+          damage_index: Number(currentLgu.damage_index ?? 0),
+          urgency_score: evalRes.urgencyScore,
+          priority_color: evalRes.priorityColor,
+          recommendation: evalRes.systemResponse,
+          reported_at: new Date().toISOString()
+        });
       }
-    } catch {}
+    } catch (err) {
+      console.warn('LGU emergency report warning:', err);
+    }
 
     const { error } = await supabase
       .from('lgus')
       .update(updates)
       .eq('id', lguId);
 
-    throwIfError(error, 'Failed to update LGU stock in database');
+    throwIfError(error, 'Failed to update LGU in database');
 
-    try {
-      await supabase.from('discrepancy_reports').insert({
-        report_type: 'Emergency LGU Stock Correction',
-        manifest_number: `EMERGENCY-LGU-${lguId.slice(0, 8)}`,
-        note: `Emergency correction by ${actorName || 'Admin'}: ${reason.trim()}. Adjusted stock: ${JSON.stringify(stockUpdates)}`
-      });
-    } catch (discErr) {
-      console.warn('Could not record emergency discrepancy log:', discErr);
-    }
+    await this.logActivity({
+      action: 'STOCK_CORRECTION',
+      entityType: 'LGU',
+      entityId: lguId,
+      actorName: actorName || 'Admin',
+      details: `Emergency stock correction for LGU: ${reason.trim()}. Adjusted stock: ${JSON.stringify(stockUpdates)}`
+    }).catch(() => {});
 
     return { ok: true, message: 'LGU stock overridden and audit log saved.' };
   },
@@ -1251,6 +1594,26 @@ export const backendApi = {
 
       const activeRows = includeArchived ? data : (data ?? []).filter((r: any) => r.is_active !== false);
 
+      const reportsMap = new Map<string, any>();
+      try {
+        const { data: latestReports } = await supabase
+          .from('lgu_inventory_reports')
+          .select('lgu_id, municipality, food_packs, hygiene_kits, family_kits, reported_at')
+          .order('reported_at', { ascending: false });
+        if (latestReports) {
+          for (const rep of latestReports) {
+            const keyById = rep.lgu_id;
+            const keyByMuni = rep.municipality?.trim().toLowerCase();
+            if (keyById && !reportsMap.has(keyById)) {
+              reportsMap.set(keyById, rep);
+            }
+            if (keyByMuni && !reportsMap.has(keyByMuni)) {
+              reportsMap.set(keyByMuni, rep);
+            }
+          }
+        }
+      } catch {}
+
       return activeRows.map((row: Record<string, any>) => {
         const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
 
@@ -1261,6 +1624,13 @@ export const backendApi = {
         let extractedFamilyKits = Number(row.family_kits ?? 0);
         let extractedLaminatedSacks = Number(row.laminated_sacks ?? 0);
         let extractedRtef = Number(row.rtef ?? 0);
+
+        const rep = reportsMap.get(row.id) || reportsMap.get(String(row.municipality || '').trim().toLowerCase());
+        if (rep) {
+          extractedFoodPacks = Number(rep.food_packs ?? 0);
+          extractedHygieneKits = Number(rep.hygiene_kits ?? 0);
+          extractedFamilyKits = Number(rep.family_kits ?? 0);
+        }
 
         Object.entries(rawStock).forEach(([key, val]) => {
           const canonical = normalizeCategoryName(key);
@@ -1403,14 +1773,6 @@ export const backendApi = {
         longitude: payload.longitude ?? 122.3892,
         remarks: payload.remarks?.trim() || '',
         max_stock: payload.maxStock !== undefined ? Number(payload.maxStock) || 3000 : 3000,
-        food_packs: payload.initialStock?.['Food Pack'] || 0,
-        hygiene_kits: payload.initialStock?.['Hygiene Kit'] || 0,
-        sleeping_kits: payload.initialStock?.['Sleeping Kit'] || 0,
-        kitchen_kits: payload.initialStock?.['Kitchen Kit'] || 0,
-        family_kits: payload.initialStock?.['Family Kit'] || 0,
-        laminated_sacks: payload.initialStock?.['Laminated Sack'] || 0,
-        rtef: payload.initialStock?.['RTEF'] || 0,
-        current_stock: payload.initialStock || {},
         last_reported_at: new Date().toISOString(),
         is_active: true
       })
@@ -1455,26 +1817,6 @@ export const backendApi = {
     if (payload.remarks !== undefined) updates.remarks = payload.remarks.trim();
     if (payload.maxStock !== undefined) updates.max_stock = Number(payload.maxStock) || 3000;
 
-    if (payload.initialStock) {
-      const canonicalInitial: Record<string, number> = {};
-      Object.entries(payload.initialStock).forEach(([k, v]) => {
-        const canonical = normalizeCategoryName(k);
-        const val = Number(v) || 0;
-        if (canonical) canonicalInitial[canonical] = val;
-        canonicalInitial[k] = val;
-      });
-
-      updates.current_stock = canonicalInitial;
-      if (canonicalInitial['Food Pack'] !== undefined) updates.food_packs = canonicalInitial['Food Pack'];
-      if (canonicalInitial['Hygiene Kit'] !== undefined) updates.hygiene_kits = canonicalInitial['Hygiene Kit'];
-      if (canonicalInitial['Sleeping Kit'] !== undefined) updates.sleeping_kits = canonicalInitial['Sleeping Kit'];
-      if (canonicalInitial['Kitchen Kit'] !== undefined) updates.kitchen_kits = canonicalInitial['Kitchen Kit'];
-      if (canonicalInitial['Family Kit'] !== undefined) updates.family_kits = canonicalInitial['Family Kit'];
-      if (canonicalInitial['Laminated Sack'] !== undefined) updates.laminated_sacks = canonicalInitial['Laminated Sack'];
-      if (canonicalInitial['RTEF'] !== undefined) updates.rtef = canonicalInitial['RTEF'];
-      updates.last_reported_at = new Date().toISOString();
-    }
-
     const { error } = await supabase
       .from('lgus')
       .update(updates)
@@ -1484,9 +1826,17 @@ export const backendApi = {
 
     if (payload.initialStock && payload.municipality) {
       try {
-        const foodReport = updates.food_packs !== undefined ? Number(updates.food_packs) : 0;
-        const hygieneReport = updates.hygiene_kits !== undefined ? Number(updates.hygiene_kits) : 0;
-        const familyReport = updates.family_kits !== undefined ? Number(updates.family_kits) : 0;
+        const canonicalInitial: Record<string, number> = {};
+        Object.entries(payload.initialStock).forEach(([k, v]) => {
+          const canonical = normalizeCategoryName(k);
+          const val = Number(v) || 0;
+          if (canonical) canonicalInitial[canonical] = val;
+          canonicalInitial[k] = val;
+        });
+
+        const foodReport = canonicalInitial['Food Pack'] || 0;
+        const hygieneReport = canonicalInitial['Hygiene Kit'] || 0;
+        const familyReport = canonicalInitial['Family Kit'] || 0;
         await supabase
           .from('lgu_inventory_reports')
           .insert({
@@ -1541,76 +1891,76 @@ export const backendApi = {
   },
 
   async createIncoming(payload: IncomingPayload) {
-    const v3Payload: Record<string, any> = {
+    // 1. Resolve destination warehouse or LGU ID to satisfy chk_incoming_dest_mutex
+    let destWhId = payload.destinationWarehouseId || null;
+    let destLguId = payload.destinationLguId || null;
+
+    if (payload.destinationType === 'Warehouse') {
+      destLguId = null;
+      if (!isUuid(destWhId)) {
+        destWhId = await this.resolveWarehouseId(payload.destination || destWhId);
+      }
+    } else {
+      destWhId = null;
+      if (!isUuid(destLguId)) {
+        destLguId = await this.resolveLguId(payload.destination || destLguId);
+      }
+    }
+
+    // 2. Resolve kit type and supply source IDs
+    let kitId = isUuid(payload.kitTypeId) ? payload.kitTypeId : await this.resolveKitTypeId(payload.fnfiCategory || payload.kitTypeId);
+    let sourceId = isUuid(payload.supplySourceId) ? payload.supplySourceId : await this.resolveSupplySourceId(payload.source || payload.supplySourceId);
+
+    // 3. Clean and ensure incident/RIS code exists in incidents table to prevent FK 23503 errors
+    const rawIncident = payload.incidentCode?.trim();
+    let effectiveIncident: string | null = null;
+    if (rawIncident) {
+      const parsed = parseIncidentInfo(rawIncident).incidentCode || rawIncident;
+      effectiveIncident = await this.ensureIncidentExists(parsed);
+    }
+
+    const insertPayload: Record<string, any> = {
       manifest_number: payload.manifestNumber,
-      date_received: payload.dateReceived,
-      category: payload.fnfiCategory,
-      quantity: payload.quantity,
-      unit_type: payload.unitType,
-      expiration_date: payload.expirationDate,
-      source: payload.source,
-      destination_type: payload.destinationType,
-      destination: payload.destination,
-      incident_code: payload.incidentCode,
+      date_received: payload.dateReceived || new Date().toISOString().split('T')[0],
+      category: payload.fnfiCategory || 'Family Food Pack',
+      quantity: Number(payload.quantity) || 1,
+      unit_type: payload.unitType || 'packs',
+      expiration_date: payload.expirationDate || null,
+      source: payload.source || '',
+      destination_type: payload.destinationType || 'Warehouse',
+      destination: payload.destination || '',
+      incident_code: effectiveIncident,
       status: payload.status ?? 'Draft',
-      manifest_hash: payload.manifestHash,
-      tx_hash: payload.txHash,
-      wallet_address: payload.walletAddress,
-      // v3 relational references and snapshots
-      supply_source_id: payload.supplySourceId || null,
-      kit_type_id: payload.kitTypeId || null,
-      destination_warehouse_id: payload.destinationWarehouseId || null,
-      destination_lgu_id: payload.destinationLguId || null,
-      source_name_snapshot: payload.source,
-      destination_name_snapshot: payload.destination,
-      item_name_snapshot: payload.fnfiCategory
+      manifest_hash: payload.manifestHash || '',
+      supply_source_id: sourceId || null,
+      kit_type_id: kitId || null,
+      destination_warehouse_id: destWhId || null,
+      destination_lgu_id: destLguId || null
     };
 
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('incoming_manifests')
-      .insert(v3Payload)
+      .insert(insertPayload)
       .select('id')
       .single();
-
-    if (error && (error.code === '42703' || error.message?.includes('supply_source_id') || error.message?.includes('source_name_snapshot'))) {
-      const legacyPayload = {
-        manifest_number: payload.manifestNumber,
-        date_received: payload.dateReceived,
-        category: payload.fnfiCategory,
-        quantity: payload.quantity,
-        unit_type: payload.unitType,
-        expiration_date: payload.expirationDate,
-        source: payload.source,
-        destination_type: payload.destinationType,
-        destination: payload.destination,
-        incident_code: payload.incidentCode,
-        status: payload.status ?? 'Draft',
-        manifest_hash: payload.manifestHash,
-        tx_hash: payload.txHash,
-        wallet_address: payload.walletAddress
-      };
-      const retry = await supabase
-        .from('incoming_manifests')
-        .insert(legacyPayload)
-        .select('id')
-        .single();
-      data = retry.data;
-      error = retry.error;
-    }
 
     throwIfError(error, 'Failed to create incoming manifest');
     return data;
   },
 
   async updateIncoming(manifestNumber: string, payload: IncomingUpdatePayload) {
+    let cleanIncident: string | undefined = undefined;
+    if (payload.incidentCode !== undefined) {
+      const parsed = parseIncidentInfo(payload.incidentCode).incidentCode || payload.incidentCode?.trim();
+      if (parsed) {
+        cleanIncident = await this.ensureIncidentExists(parsed);
+      }
+    }
+
     const updates = definedOnly({
       status: payload.status,
       manifest_hash: payload.manifestHash,
-      tx_hash: payload.txHash,
-      batch_token_id: payload.batchTokenId,
-      minted_at: payload.mintedAt,
-      wallet_address: payload.walletAddress,
-      incident_code: payload.incidentCode,
+      incident_code: cleanIncident,
       category: payload.category,
       quantity: payload.quantity,
       unit_type: payload.unitType,
@@ -1621,100 +1971,106 @@ export const backendApi = {
       correction_note: payload.correctionNote
     });
 
-    let { error } = await supabase
+    const { error } = await supabase
       .from('incoming_manifests')
       .update(updates)
       .eq('manifest_number', manifestNumber);
-
-    if (error && (error.message?.includes('correction_note') || (error as any).code === '42703')) {
-      const { correction_note, ...rest } = updates;
-      const retry = await supabase
-        .from('incoming_manifests')
-        .update(rest)
-        .eq('manifest_number', manifestNumber);
-      error = retry.error;
-    }
 
     throwIfError(error, 'Failed to update incoming manifest');
     return { ok: true };
   },
 
   async createOutgoing(payload: OutgoingPayload) {
-    const v3Payload: Record<string, any> = {
+    // 1. Resolve source warehouse or source LGU to satisfy chk_outgoing_source_mutex
+    const isSourceWh = (payload.sourceType ?? payload.source_type ?? 'Warehouse') === 'Warehouse';
+    let srcWhId = payload.sourceWarehouseId ?? payload.source_warehouse_id ?? null;
+    let srcLguId = payload.sourceLguId ?? payload.source_lgu_id ?? null;
+
+    if (isSourceWh) {
+      srcLguId = null;
+      if (!isUuid(srcWhId)) {
+        srcWhId = await this.resolveWarehouseId(payload.warehouseSource || srcWhId);
+      }
+    } else {
+      srcWhId = null;
+      if (!isUuid(srcLguId)) {
+        srcLguId = await this.resolveLguId(payload.warehouseSource || srcLguId);
+      }
+    }
+
+    // 2. Resolve destination LGU (required NOT NULL in outgoing_requests)
+    let destLguId = payload.lguId ?? payload.lgu_id ?? null;
+    if (!isUuid(destLguId)) {
+      destLguId = await this.resolveLguId(payload.municipality || payload.lguName || destLguId);
+    }
+
+    // 3. Resolve kit type ID
+    let kitId = payload.kitTypeId ?? payload.kit_type_id ?? null;
+    if (!isUuid(kitId)) {
+      kitId = await this.resolveKitTypeId(payload.fnfiCategory || payload.category || kitId);
+    }
+
+    // 4. Resolve truck (must be valid truck_id or null)
+    const rawTruck = payload.assignedTruckId ?? payload.assigned_truck_id;
+    const truckId = rawTruck?.trim() ? rawTruck.trim() : null;
+
+    // 5. Resolve escort profile ID (must be a valid UUID or null to prevent 22P02 errors)
+    const rawDriverId = payload.assignedEscortProfileId ?? payload.assigned_driver_profile_id;
+    const driverProfileId = isUuid(rawDriverId) ? rawDriverId : null;
+
+    // 6. Clean and ensure incident code exists in incidents table
+    const rawIncident = payload.incidentCode?.trim();
+    let effectiveIncident: string | null = null;
+    if (rawIncident) {
+      const parsed = parseIncidentInfo(rawIncident).incidentCode || rawIncident;
+      effectiveIncident = await this.ensureIncidentExists(parsed);
+    }
+
+    const insertPayload: Record<string, any> = {
       dr_number: payload.drNumber,
-      date_allocated: payload.dateAllocated,
-      lgu_id: payload.lguId ?? payload.lgu_id ?? null,
-      destination_lgu_id: payload.lguId ?? payload.lgu_id ?? null,
-      lgu_name: payload.lguName,
-      province: payload.province,
-      municipality: payload.municipality,
-      category: payload.fnfiCategory,
-      item_name_snapshot: payload.fnfiCategory,
-      kit_type_id: payload.kitTypeId ?? payload.kit_type_id ?? null,
-      amount_requested: payload.amountRequested,
-      amount_approved: payload.amountApproved,
-      warehouse_source: payload.warehouseSource,
-      source_warehouse_id: payload.sourceWarehouseId ?? payload.source_warehouse_id ?? null,
-      source_lgu_id: payload.sourceLguId ?? payload.source_lgu_id ?? null,
-      source_name_snapshot: payload.warehouseSource,
-      delivery_mode: payload.deliveryMode,
+      date_allocated: payload.dateAllocated || new Date().toISOString().split('T')[0],
+      source_type: isSourceWh ? 'Warehouse' : 'LGU',
+      source_warehouse_id: srcWhId || null,
+      source_lgu_id: srcLguId || null,
+      lgu_id: destLguId,
+      kit_type_id: kitId || null,
+      amount_requested: Number(payload.amountRequested) || 1,
+      amount_approved: Number(payload.amountApproved ?? payload.amountRequested ?? 0),
+      warehouse_source: payload.warehouseSource || 'DSWD Logistics Hub',
+      delivery_mode: payload.deliveryMode || 'DSWD Assigned Receiver',
       delivery_status: payload.deliveryStatus ?? 'Allocating',
-      incident_code: payload.incidentCode,
-      allocated_batches: payload.allocatedBatches,
-      sender_gps: payload.senderGps,
-      receiver_gps: payload.receiverGps,
-      destination_address: payload.destinationAddress ?? payload.destination_address,
-      tx_hash: payload.txHash,
-      wallet_address: payload.walletAddress,
-      assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null,
-      assigned_driver_profile_id: payload.assignedEscortProfileId ?? payload.assigned_driver_profile_id ?? null,
-      source_type: payload.sourceType ?? payload.source_type ?? 'Warehouse'
+      incident_code: effectiveIncident,
+      allocated_batches: payload.allocatedBatches ?? [],
+      sender_gps: payload.senderGps || '',
+      receiver_gps: payload.receiverGps || '',
+      destination_address: payload.destinationAddress ?? payload.destination_address ?? '',
+      tx_hash: payload.txHash || '',
+      wallet_address: payload.walletAddress || '',
+      assigned_truck_id: truckId,
+      assigned_driver_profile_id: driverProfileId,
+      lgu_name: payload.lguName || '',
+      province: payload.province || '',
+      municipality: payload.municipality || '',
+      category: payload.fnfiCategory || payload.category || 'Family Food Pack',
+      delivery_priority: Number(payload.deliveryPriority ?? 0),
+      is_held: Boolean(payload.isHeld ?? false),
+      correction_note: payload.correctionNote || ''
     };
 
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('outgoing_requests')
-      .insert(v3Payload)
+      .insert(insertPayload)
       .select('id')
       .single();
-
-    if (error && (error.code === '42703' || error.message?.includes('assigned_driver_profile_id') || error.message?.includes('source_warehouse_id'))) {
-      const legacyPayload = {
-        dr_number: payload.drNumber,
-        date_allocated: payload.dateAllocated,
-        lgu_id: payload.lguId ?? payload.lgu_id ?? null,
-        lgu_name: payload.lguName,
-        province: payload.province,
-        municipality: payload.municipality,
-        category: payload.fnfiCategory,
-        amount_requested: payload.amountRequested,
-        amount_approved: payload.amountApproved,
-        warehouse_source: payload.warehouseSource,
-        delivery_mode: payload.deliveryMode,
-        delivery_status: payload.deliveryStatus ?? 'Allocating',
-        incident_code: payload.incidentCode,
-        allocated_batches: payload.allocatedBatches,
-        sender_gps: payload.senderGps,
-        receiver_gps: payload.receiverGps,
-        destination_address: payload.destinationAddress ?? payload.destination_address,
-        tx_hash: payload.txHash,
-        wallet_address: payload.walletAddress,
-        assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null,
-        source_type: payload.sourceType ?? payload.source_type ?? 'Warehouse'
-      };
-      const retry = await supabase
-        .from('outgoing_requests')
-        .insert(legacyPayload)
-        .select('id')
-        .single();
-      data = retry.data;
-      error = retry.error;
-    }
 
     throwIfError(error, 'Failed to create outgoing request');
     return data;
   },
 
   async updateOutgoing(drNumber: string, payload: OutgoingUpdatePayload) {
+    const rawTruck = payload.assignedTruckId ?? payload.assigned_truck_id;
+    const cleanTruck = rawTruck !== undefined ? (rawTruck?.trim() || null) : undefined;
+
     const updates = definedOnly({
       amount_approved: payload.amountApproved,
       amount_requested: payload.amountRequested ?? payload.amount_requested,
@@ -1728,7 +2084,8 @@ export const backendApi = {
       sender_signature: payload.senderSignature,
       receiver_signature: payload.receiverSignature,
       wallet_address: payload.walletAddress,
-      assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id
+      assigned_truck_id: cleanTruck,
+      correction_note: payload.correctionNote
     });
 
     const { error } = await supabase
@@ -1763,36 +2120,22 @@ export const backendApi = {
 
     throwIfError(error, 'Failed to create LGU inventory report');
 
-    // Materialize authoritative stock & priority metrics into public.lgus
+    // Update authoritative metrics on public.lgus (trigger also handles this)
     try {
-      const { data: existingLgu } = await supabase
-        .from('lgus')
-        .select('current_stock')
-        .ilike('municipality', payload.municipality.trim())
-        .maybeSingle();
-
-      const nextStock: Record<string, number> = { ...(existingLgu?.current_stock || {}) };
-      nextStock['Food Pack'] = payload.foodPacks;
-      nextStock['Hygiene Kit'] = payload.hygieneKits;
-      nextStock['Family Kit'] = payload.familyKits;
-
       await supabase
         .from('lgus')
         .update({
-          food_packs: payload.foodPacks,
-          hygiene_kits: payload.hygieneKits,
-          family_kits: payload.familyKits,
           affected_families: payload.affectedFamilies,
           damage_index: payload.damageIndex,
           urgency_score: payload.urgencyScore,
           priority_color: payload.priorityColor,
           recommendation: payload.recommendation,
           last_reported_at: new Date().toISOString(),
-          current_stock: nextStock
+          updated_at: new Date().toISOString()
         })
         .ilike('municipality', payload.municipality.trim());
     } catch (lguErr) {
-      console.warn('Failed to update public.lgus on inventory report:', lguErr);
+      console.warn('Failed to update public.lgus metrics on inventory report:', lguErr);
     }
 
     return data;
@@ -1817,15 +2160,44 @@ export const backendApi = {
   },
 
   async createDiscrepancyReport(payload: DiscrepancyReportPayload) {
+    const reportType = payload.reportType === 'Incoming' ? 'Incoming' : 'Outgoing';
+    let manifestNumber: string | null = null;
+    let drNumber: string | null = null;
+
+    if (reportType === 'Incoming') {
+      const rawManifest = payload.manifestNumber?.trim();
+      if (rawManifest) {
+        let clean = rawManifest;
+        if (isUuid(clean)) {
+          const { data: mRow } = await supabase.from('incoming_manifests').select('manifest_number').eq('id', clean).maybeSingle();
+          if (mRow?.manifest_number) clean = mRow.manifest_number;
+        }
+        manifestNumber = clean;
+      }
+    } else {
+      const rawDr = payload.drNumber?.trim();
+      if (rawDr) {
+        let clean = rawDr;
+        if (isUuid(clean)) {
+          const { data: dRow } = await supabase.from('outgoing_requests').select('dr_number').eq('id', clean).maybeSingle();
+          if (dRow?.dr_number) clean = dRow.dr_number;
+        }
+        drNumber = clean;
+      }
+    }
+
+    const reportedByProfileId = isUuid((payload as any).reportedByProfileId) ? (payload as any).reportedByProfileId : null;
+
     const { data, error } = await supabase
       .from('discrepancy_reports')
       .insert({
-        report_type: payload.reportType,
-        manifest_number: payload.manifestNumber,
-        dr_number: payload.drNumber,
-        note: payload.note,
-        reported_by_role: payload.reportedByRole,
-        reported_by_wallet: payload.reportedByWallet
+        report_type: reportType,
+        manifest_number: manifestNumber,
+        dr_number: drNumber,
+        reported_by_profile_id: reportedByProfileId,
+        note: payload.note || 'Discrepancy reported',
+        reported_by_role: payload.reportedByRole || null,
+        reported_by_wallet: payload.reportedByWallet || null
       })
       .select('id')
       .single();
@@ -1991,9 +2363,11 @@ export const backendApi = {
     escortProfileId?: string | null,
     deliveryStatus: string = 'In Transit'
   ) {
+    const cleanTruck = truckId?.trim() ? truckId.trim() : null;
+    const cleanEscort = isUuid(escortProfileId) ? escortProfileId : null;
     const updates: Record<string, unknown> = {
-      assigned_truck_id: truckId,
-      assigned_driver_profile_id: escortProfileId ?? null
+      assigned_truck_id: cleanTruck,
+      assigned_driver_profile_id: cleanEscort
     };
     if (deliveryStatus) {
       updates.delivery_status = deliveryStatus;
@@ -2004,7 +2378,7 @@ export const backendApi = {
       .eq('dr_number', drNumber);
 
     if (error && (error.code === '42703' || error.message?.includes('assigned_driver_profile_id'))) {
-      const fallbackUpdates: Record<string, unknown> = { assigned_truck_id: truckId };
+      const fallbackUpdates: Record<string, unknown> = { assigned_truck_id: cleanTruck };
       if (deliveryStatus) fallbackUpdates.delivery_status = deliveryStatus;
       const retry = await supabase.from('outgoing_requests').update(fallbackUpdates).eq('dr_number', drNumber);
       error = retry.error;
@@ -2034,16 +2408,36 @@ export const backendApi = {
 
   async upsertTruckLiveLocation(payload: TruckLiveLocation) {
     try {
+      const cleanTruck = String(payload.truck_id || '').trim();
+      if (!cleanTruck) return { ok: false };
+
+      let cleanDr = payload.current_dr_number?.trim() || null;
+      if (cleanDr) {
+        const { data: drExists } = await supabase
+          .from('outgoing_requests')
+          .select('dr_number')
+          .ilike('dr_number', cleanDr)
+          .maybeSingle();
+        if (!drExists) {
+          cleanDr = null;
+        }
+      }
+
+      const driverProfileId = isUuid(payload.driver_profile_id) ? payload.driver_profile_id : null;
+      const destLguId = isUuid((payload as any).destination_lgu_id) ? (payload as any).destination_lgu_id : null;
+
       const sanitizedPayload: Record<string, unknown> = {
-        truck_id: payload.truck_id,
-        current_dr_number: payload.current_dr_number ?? null,
+        truck_id: cleanTruck,
+        current_dr_number: cleanDr,
+        destination_lgu_id: destLguId,
+        driver_profile_id: driverProfileId,
         status: payload.status ?? 'In Transit',
-        speed: payload.speed ?? 0,
-        heading: payload.heading ?? 0,
-        latitude: payload.latitude,
-        longitude: payload.longitude,
-        gps_text: payload.gps_text,
-        accuracy: payload.accuracy ?? null,
+        speed: Number(payload.speed) || 0,
+        heading: Number(payload.heading) || 0,
+        latitude: Number(payload.latitude) || 10.7202,
+        longitude: Number(payload.longitude) || 122.5621,
+        gps_text: payload.gps_text || `${payload.latitude}, ${payload.longitude}`,
+        accuracy: payload.accuracy !== undefined ? Number(payload.accuracy) : null,
         wallet_address: payload.wallet_address ?? null,
         updated_at: payload.updated_at || new Date().toISOString()
       };
@@ -2156,8 +2550,6 @@ export const backendApi = {
         }
       }
 
-      const isUuid = (val?: string | null) =>
-        Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val.trim()));
 
       const { error } = await supabase
         .from('activity_logs')
@@ -2423,23 +2815,91 @@ export const backendApi = {
     }
   },
 
-  async appendStockLedger(entry: StockLedgerInput): Promise<{ ok: boolean }> {
+  async appendStockLedger(entry: any): Promise<{ ok: boolean }> {
     try {
+      let facilityType: 'Warehouse' | 'LGU' = 'Warehouse';
+      if (entry.facilityType === 'Warehouse' || entry.facilityType === 'LGU') {
+        facilityType = entry.facilityType;
+      } else if (entry.destinationLguId || entry.lguId || entry.movementType === 'LGU_RECEIVED' || entry.movementType === 'AID_RECEIVED') {
+        facilityType = 'LGU';
+      }
+
+      let whId: string | null = null;
+      let lguId: string | null = null;
+
+      if (facilityType === 'Warehouse') {
+        const rawWh = entry.warehouseId || entry.destinationWarehouseId || entry.warehouseSource;
+        if (isUuid(rawWh)) {
+          whId = rawWh;
+        } else if (rawWh) {
+          whId = await this.resolveWarehouseId(rawWh);
+        }
+      } else {
+        const rawLgu = entry.lguId || entry.destinationLguId || entry.lguName || entry.municipality;
+        if (isUuid(rawLgu)) {
+          lguId = rawLgu;
+        } else if (rawLgu) {
+          lguId = await this.resolveLguId(rawLgu);
+        }
+      }
+
+      let kitId = entry.kitTypeId;
+      if (!isUuid(kitId)) {
+        kitId = await this.resolveKitTypeId(entry.category || entry.fnfiCategory || entry.kitTypeId || 'Family Food Pack');
+      }
+
+      let movementType: 'INTAKE_VERIFIED' | 'RELEASE_DISPATCHED' | 'AID_RECEIVED' | 'MUTUAL_AID_OUT' | 'AUDIT_CORRECTION';
+      const rawMovement = String(entry.movementType || '');
+      if (rawMovement === 'INTAKE_VERIFIED' || rawMovement === 'RELEASE_DISPATCHED' || rawMovement === 'AID_RECEIVED' || rawMovement === 'MUTUAL_AID_OUT' || rawMovement === 'AUDIT_CORRECTION') {
+        movementType = rawMovement;
+      } else if (rawMovement === 'LGU_RECEIVED') {
+        movementType = 'AID_RECEIVED';
+      } else if (rawMovement === 'CUSTODY_TRANSFER') {
+        movementType = 'RELEASE_DISPATCHED';
+      } else {
+        movementType = 'AUDIT_CORRECTION';
+      }
+
+      const delta = Number(entry.deltaQuantity ?? entry.quantityChange ?? 0);
+      const balanceAfter = Math.max(0, Number(entry.balanceAfter ?? Math.abs(delta)));
+
+      let refManifestId: string | null = null;
+      if (isUuid(entry.referenceManifestId)) {
+        refManifestId = entry.referenceManifestId;
+      } else if (entry.referenceManifestId || entry.manifestNumber) {
+        const mNum = entry.referenceManifestId || entry.manifestNumber;
+        const { data: mRow } = await supabase.from('incoming_manifests').select('id').ilike('manifest_number', String(mNum).trim()).maybeSingle();
+        refManifestId = mRow?.id || null;
+      }
+
+      let refDrId: string | null = null;
+      if (isUuid(entry.referenceDrId)) {
+        refDrId = entry.referenceDrId;
+      } else if (entry.referenceDrId || entry.drNumber || entry.outgoingRequestId) {
+        const drNum = entry.referenceDrId || entry.drNumber || entry.outgoingRequestId;
+        const { data: dRow } = await supabase.from('outgoing_requests').select('id').ilike('dr_number', String(drNum).trim()).maybeSingle();
+        refDrId = dRow?.id || null;
+      }
+
+      const actorProfileId = isUuid(entry.actorProfileId)
+        ? entry.actorProfileId
+        : (isUuid(entry.performedByProfileId) ? entry.performedByProfileId : null);
+
       const { error } = await supabase.from('stock_ledger').insert({
-        facility_type: entry.facilityType,
-        warehouse_id: entry.warehouseId || null,
-        lgu_id: entry.lguId || null,
-        kit_type_id: entry.kitTypeId,
-        delta_quantity: entry.deltaQuantity,
-        balance_after: entry.balanceAfter,
-        movement_type: entry.movementType,
-        reference_manifest_id: entry.referenceManifestId || null,
-        reference_dr_id: entry.referenceDrId || null,
-        actor_profile_id: entry.actorProfileId || null,
+        facility_type: facilityType,
+        warehouse_id: whId,
+        lgu_id: lguId,
+        kit_type_id: kitId,
+        delta_quantity: delta,
+        balance_after: balanceAfter,
+        movement_type: movementType,
+        reference_manifest_id: refManifestId,
+        reference_dr_id: refDrId,
+        actor_profile_id: actorProfileId,
         created_at: new Date().toISOString()
       });
       if (error) {
-        console.warn('appendStockLedger warning (ignoring if table not yet created):', error.message);
+        console.warn('appendStockLedger warning:', error.message);
       }
       return { ok: true };
     } catch (err) {
@@ -2450,7 +2910,7 @@ export const backendApi = {
 
   async getInventoryBatches(filters?: { warehouseId?: string; lguId?: string; kitTypeId?: string }): Promise<InventoryBatchRecord[]> {
     try {
-      let query = supabase.from('inventory_batches').select('*').order('created_at', { ascending: false });
+      let query = supabase.from('inventory_batches').select('*').order('minted_at', { ascending: false });
       if (filters?.warehouseId) query = query.eq('warehouse_id', filters.warehouseId);
       if (filters?.lguId) query = query.eq('lgu_id', filters.lguId);
       if (filters?.kitTypeId) query = query.eq('kit_type_id', filters.kitTypeId);
@@ -2463,7 +2923,7 @@ export const backendApi = {
           .in('status', ['Verified', 'Minted']);
         if (!manifests) return [];
         return manifests.map((m: any) => ({
-          batchTokenId: m.batch_token_id || `BATCH-${m.manifest_number}`,
+          batchTokenId: m.manifest_number ? `BATCH-${m.manifest_number}` : m.id,
           incomingManifestId: m.id || m.manifest_number,
           kitTypeId: m.kit_type_id || m.category,
           kitName: m.category,
@@ -2473,8 +2933,8 @@ export const backendApi = {
           lguId: m.destination_lgu_id,
           expirationDate: m.expiration_date,
           manifestHash: m.manifest_hash,
-          mintedByProfileId: m.minted_by_profile_id,
-          mintedAt: m.minted_at || m.created_at
+          mintedByProfileId: m.verified_by_profile_id,
+          mintedAt: m.created_at
         }));
       }
       return data.map((b: any) => ({
@@ -2499,17 +2959,32 @@ export const backendApi = {
   async createInventoryBatch(batch: Partial<InventoryBatchRecord>): Promise<{ batchTokenId: string }> {
     const tokenId = batch.batchTokenId || `BATCH-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
     try {
+      const kitId = isUuid(batch.kitTypeId) ? batch.kitTypeId : await this.resolveKitTypeId(batch.kitTypeId);
+      const whId = isUuid(batch.warehouseId) ? batch.warehouseId : (batch.warehouseId ? await this.resolveWarehouseId(batch.warehouseId) : null);
+      const lguId = isUuid(batch.lguId) ? batch.lguId : (batch.lguId ? await this.resolveLguId(batch.lguId) : null);
+      const profileId = isUuid(batch.mintedByProfileId) ? batch.mintedByProfileId : null;
+
+      let incManifestId = isUuid(batch.incomingManifestId) ? batch.incomingManifestId : null;
+      if (!incManifestId && batch.incomingManifestId) {
+        const { data: incRow } = await supabase
+          .from('incoming_manifests')
+          .select('id')
+          .eq('manifest_number', String(batch.incomingManifestId).trim())
+          .maybeSingle();
+        if (incRow?.id) incManifestId = incRow.id;
+      }
+
       const { error } = await supabase.from('inventory_batches').insert({
         batch_token_id: tokenId,
-        incoming_manifest_id: batch.incomingManifestId || null,
-        kit_type_id: batch.kitTypeId || 'kit_food_pack',
+        incoming_manifest_id: incManifestId,
+        kit_type_id: kitId,
         initial_quantity: batch.initialQuantity || 0,
         remaining_quantity: batch.remainingQuantity ?? batch.initialQuantity ?? 0,
-        warehouse_id: batch.warehouseId || null,
-        lgu_id: batch.lguId || null,
+        warehouse_id: whId,
+        lgu_id: lguId,
         expiration_date: batch.expirationDate || null,
         manifest_hash: batch.manifestHash || null,
-        minted_by_profile_id: batch.mintedByProfileId || null,
+        minted_by_profile_id: profileId,
         minted_at: batch.mintedAt || new Date().toISOString()
       });
       if (error) {
@@ -2543,9 +3018,15 @@ export const backendApi = {
 
   async allocateBatchesToRequest(drNumber: string, allocations: { batchTokenId: string; quantity: number }[]): Promise<{ ok: boolean }> {
     try {
+      let canonicalDr = drNumber.trim();
+      if (isUuid(canonicalDr)) {
+        const { data: dRow } = await supabase.from('outgoing_requests').select('dr_number').eq('id', canonicalDr).maybeSingle();
+        if (dRow?.dr_number) canonicalDr = dRow.dr_number;
+      }
+
       for (const alloc of allocations) {
         await supabase.from('outgoing_batch_allocations').insert({
-          outgoing_request_id: drNumber,
+          outgoing_request_id: canonicalDr,
           batch_token_id: alloc.batchTokenId,
           allocated_quantity: alloc.quantity,
           allocated_at: new Date().toISOString()
@@ -2561,7 +3042,7 @@ export const backendApi = {
           const newQty = Math.max(0, Number(batch.remaining_quantity ?? 0) - alloc.quantity);
           await supabase
             .from('inventory_batches')
-            .update({ remaining_quantity: newQty, updated_at: new Date().toISOString() })
+            .update({ remaining_quantity: newQty })
             .eq('batch_token_id', alloc.batchTokenId);
         }
       }
@@ -2598,20 +3079,71 @@ export const backendApi = {
     }
   },
 
-  async recordCustodyHop(hop: Omit<CustodyHopRecord, 'id'>): Promise<{ ok: boolean }> {
+  async recordCustodyHop(hop: any): Promise<{ ok: boolean }> {
     try {
+      const drNumber = String(hop.outgoingRequestId || hop.drNumber || '').trim();
+      if (!drNumber) return { ok: true };
+
+      let canonicalDr = drNumber;
+      if (isUuid(canonicalDr)) {
+        const { data: outReq } = await supabase
+          .from('outgoing_requests')
+          .select('dr_number')
+          .eq('id', canonicalDr)
+          .maybeSingle();
+        if (outReq?.dr_number) {
+          canonicalDr = outReq.dr_number;
+        }
+      }
+
+      const { data: existingDr } = await supabase
+        .from('outgoing_requests')
+        .select('dr_number')
+        .ilike('dr_number', canonicalDr)
+        .maybeSingle();
+
+      if (!existingDr) {
+        console.warn(`recordCustodyHop: outgoing request ${canonicalDr} not found in database.`);
+        return { ok: true };
+      }
+
+      let toDriverId = hop.toDriverProfileId;
+      if (!isUuid(toDriverId)) {
+        const { data: anyProf } = await supabase
+          .from('profiles')
+          .select('id')
+          .or('role.eq.receiver,role.eq.driver,role.eq.escort,role.ilike.%escort%')
+          .limit(1)
+          .maybeSingle();
+        toDriverId = anyProf?.id || null;
+      }
+
+      if (!toDriverId) {
+        console.warn('recordCustodyHop: no valid to_driver_profile_id UUID available.');
+        return { ok: true };
+      }
+
+      const fromDriverId = isUuid(hop.fromDriverProfileId) ? hop.fromDriverProfileId : null;
+      const fromTruck = hop.fromTruckId?.trim() ? hop.fromTruckId.trim() : null;
+      const toTruck = hop.toTruckId?.trim() ? hop.toTruckId.trim() : null;
+      const gps = hop.gpsCoordinates || hop.gps_coordinates || '10.7202, 122.5621';
+      const note = hop.note || hop.notes || null;
+      const txHash = hop.txHash || hop.blockchainTxHash || null;
+      const seq = Math.max(1, Math.floor(Number(hop.sequence || 1)));
+
       const { error } = await supabase.from('custody_hops').insert({
-        outgoing_request_id: hop.outgoingRequestId,
-        sequence: hop.sequence,
-        from_driver_profile_id: hop.fromDriverProfileId || null,
-        to_driver_profile_id: hop.toDriverProfileId,
-        from_truck_id: hop.fromTruckId || null,
-        to_truck_id: hop.toTruckId || null,
-        gps_coordinates: hop.gpsCoordinates,
-        note: hop.note || null,
-        tx_hash: hop.txHash || null,
+        outgoing_request_id: existingDr.dr_number,
+        sequence: seq,
+        from_driver_profile_id: fromDriverId,
+        to_driver_profile_id: toDriverId,
+        from_truck_id: fromTruck,
+        to_truck_id: toTruck,
+        gps_coordinates: gps,
+        note: note,
+        tx_hash: txHash,
         transferred_at: hop.transferredAt || new Date().toISOString()
       });
+
       if (error) {
         console.warn('recordCustodyHop warning:', error.message);
       }

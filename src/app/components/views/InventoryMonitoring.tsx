@@ -140,18 +140,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
       });
     });
 
-    // 1. Accumulate accepted/delivered goods to each LGU from outgoing requests
-    outgoingReleasesList.forEach((release) => {
-      if (!['Delivered', 'Accepted'].includes(release.deliveryStatus)) return;
-      const raw = release.municipality || release.lguName || 'General LGU';
-      const lgu = cleanLguName(raw);
-      const record = ensureLgu(lgu);
-      const qty = release.amountApproved || release.amountRequested || 0;
-      const cat = normalizeCategoryName(release.fnfiCategory) || release.fnfiCategory;
-      if (cat) {
-        record[cat] = (record[cat] || 0) + qty;
-      }
-    });
+    // Outgoing releases are disaster responses distributed to victims and do not increase LGU buffer stockpile.
 
     // 1b. Deduct outbound dispatches immediately from source LGU upon dispatch
     outgoingReleasesList.forEach((release) => {
@@ -211,7 +200,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
           const incCanonical = normalizeCategoryName(incoming.fnfiCategory);
           return (
             (incCanonical === canonicalCategory || (incoming.fnfiCategory || '').toLowerCase() === category.toLowerCase()) &&
-            (incoming.status === 'Verified' || incoming.status === 'Minted')
+            incoming.status === 'Verified'
           );
         })
         .filter((incoming) => {
@@ -221,13 +210,20 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
         })
         .reduce((sum, incoming) => sum + (incoming.quantity || 0), 0);
 
+      const totalWarehouseStock = matchingItems.reduce((sum, i) => {
+        if (i.warehouseBreakdown && Object.keys(i.warehouseBreakdown).length > 0) {
+          return sum + Object.values(i.warehouseBreakdown).reduce((wSum, q) => wSum + (Number(q) || 0), 0);
+        }
+        return sum + (i.warehouseA || 0) + (i.warehouseB || 0);
+      }, 0);
+
       return {
         category,
         warehouseA,
         warehouseB,
-        totalStock: warehouseA + warehouseB,
+        totalStock: totalWarehouseStock,
         released,
-        available: warehouseA + warehouseB,
+        available: totalWarehouseStock,
         expiringItems
       };
     });

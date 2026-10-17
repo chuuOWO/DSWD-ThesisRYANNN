@@ -29,7 +29,6 @@ const statusStyles: Record<IncomingStatus, string> = {
   Draft: 'bg-gray-100 text-gray-700',
   'Pending Verification': 'bg-yellow-100 text-yellow-800',
   Verified: 'bg-green-100 text-green-700',
-  Minted: 'bg-green-100 text-green-700',
   'Correction Requested': 'bg-orange-100 text-orange-700',
   Rejected: 'bg-red-100 text-red-700'
 };
@@ -38,7 +37,6 @@ const statusLabels: Record<IncomingStatus, string> = {
   Draft: 'Draft',
   'Pending Verification': 'For Verification',
   Verified: 'Verified & Stocked',
-  Minted: 'Verified & Stocked',
   'Correction Requested': 'Correction Filed',
   Rejected: 'Rejected'
 };
@@ -232,10 +230,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     return filteredGoods.slice(start, start + pageSize);
   }, [filteredGoods, currentPage, pageSize]);
 
-  const postedCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
+  const postedCount = incomingGoodsList.filter(item => item.status === 'Verified').length;
   const pendingCount = incomingGoodsList.filter(item => item.status === 'Pending Verification').length;
   const warehouseTotalQty = incomingGoodsList
-    .filter(item => item.destinationType === 'Warehouse' && (item.status === 'Verified' || item.status === 'Minted'))
+    .filter(item => item.destinationType === 'Warehouse' && item.status === 'Verified')
     .reduce((sum, item) => sum + item.quantity, 0);
 
   // FEFO shelf-life tracking for incoming batches sorted by earliest expiration
@@ -280,7 +278,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const pipelineStats = useMemo(() => {
     const draft = incomingGoodsList.filter(i => i.status === 'Draft').length;
     const pending = incomingGoodsList.filter(i => i.status === 'Pending Verification').length;
-    const verified = incomingGoodsList.filter(i => i.status === 'Verified' || i.status === 'Minted').length;
+    const verified = incomingGoodsList.filter(i => i.status === 'Verified').length;
     const correction = incomingGoodsList.filter(i => i.status === 'Correction Requested').length;
     return { draft, pending, verified, correction };
   }, [incomingGoodsList]);
@@ -470,7 +468,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     )}
                   </td>
                   <td className="px-4 py-4">
-                    {item.status === 'Verified' || item.status === 'Minted' ? (
+                    {item.status === 'Verified' ? (
                       <div className="space-y-1">
                         <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
                           Stocked in {item.destination}
@@ -514,7 +512,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           <CheckCircle className="w-3 h-3" /> Verify & Stock
                         </button>
                       )}
-                      {['Verified', 'Minted', 'Correction Requested'].includes(item.status) && (
+                      {['Verified', 'Correction Requested'].includes(item.status) && (
                         <button onClick={() => openActionModal('correction', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer">
                           <RotateCcw className="w-3 h-3" /> Correction
                         </button>

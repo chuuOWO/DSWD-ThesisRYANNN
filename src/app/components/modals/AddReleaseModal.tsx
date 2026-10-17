@@ -475,6 +475,7 @@ export function AddReleaseModal({
         kitTypeId: matchedKit?.id,
         sourceWarehouseId: srcWhId,
         sourceLguId: srcLguId,
+        lguId: destLguId,
         destinationLguId: destLguId
       };
 

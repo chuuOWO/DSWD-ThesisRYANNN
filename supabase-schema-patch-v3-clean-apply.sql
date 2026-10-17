@@ -457,7 +457,7 @@ create table public.outgoing_requests (
   amount_approved integer not null default 0 check (amount_approved >= 0),
   delivery_mode text default 'DSWD Assigned Receiver',
   delivery_status text not null default 'Allocating' check (
-    delivery_status in ('Allocating', 'Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed', 'Correction Requested', 'Cancelled')
+    delivery_status in ('Draft', 'Allocating', 'Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed', 'Correction Requested', 'Cancelled')
   ),
   incident_code text references public.incidents(incident_code) on update cascade on delete set null,
   assigned_truck_id text references public.trucks(truck_id) on update cascade on delete set null,
@@ -1135,7 +1135,10 @@ insert into public.profiles (
   phone_number,
   job_position,
   role,
-  status
+  status,
+  wallet_address,
+  truck_id,
+  lgu_name
 )
 select
   u.id,
@@ -1157,11 +1160,21 @@ select
   coalesce(u.raw_user_meta_data->>'phone_number', ''),
   coalesce(u.raw_user_meta_data->>'job_position', case when lower(coalesce(u.raw_user_meta_data->>'role', '')) in ('admin', 'dswd_admin') then 'DSWD Administrator' else 'Field Officer' end),
   case when lower(coalesce(u.raw_user_meta_data->>'role', '')) in ('admin', 'dswd_admin') then 'dswd_admin' else 'receiver' end,
-  case when lower(coalesce(u.raw_user_meta_data->>'role', '')) in ('admin', 'dswd_admin') then 'verified' else coalesce(u.raw_user_meta_data->>'status', 'pending') end
+  case when lower(coalesce(u.raw_user_meta_data->>'role', '')) in ('admin', 'dswd_admin') then 'verified' else coalesce(u.raw_user_meta_data->>'status', 'pending') end,
+  u.raw_user_meta_data->>'wallet_address',
+  case
+    when exists (select 1 from public.trucks t where t.truck_id = (u.raw_user_meta_data->>'truck_id'))
+    then (u.raw_user_meta_data->>'truck_id')
+    else null
+  end as truck_id,
+  u.raw_user_meta_data->>'lgu_name'
 from auth.users u
 on conflict (id) do update set
   role = excluded.role,
-  status = excluded.status;
+  status = excluded.status,
+  wallet_address = coalesce(public.profiles.wallet_address, excluded.wallet_address),
+  truck_id = coalesce(public.profiles.truck_id, excluded.truck_id),
+  lgu_name = coalesce(public.profiles.lgu_name, excluded.lgu_name);
 
 -- ==============================================================================
 -- END OF CLEAN APPLY SCRIPT (VERSION 3)

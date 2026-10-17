@@ -36,6 +36,7 @@ import {
   UserCheck,
   UserX,
   Users,
+  Wallet,
   X
 } from 'lucide-react';
 import { authApi, type UserProfile } from '../../services/authApi';
@@ -1583,7 +1584,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                               <p className="text-[11px] text-gray-500 font-mono truncate mt-0.5">
                                 {profile.email}
                               </p>
-                              <div className="flex items-center gap-1.5 mt-0.5">
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                 <span className="font-mono text-[9.5px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
                                   ID: {profile.id.slice(0, 8)}...
                                 </span>
@@ -1602,6 +1603,32 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                                     <Copy className="w-2.5 h-2.5" />
                                   )}
                                 </button>
+                                {profile.walletAddress && (
+                                  <div className="flex items-center gap-1">
+                                    <span
+                                      className="font-mono text-[9.5px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-1"
+                                      title={profile.walletAddress}
+                                    >
+                                      <Wallet className="w-2.5 h-2.5 text-indigo-500" />
+                                      {profile.walletAddress.slice(0, 6)}...{profile.walletAddress.slice(-4)}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        copyToClipboard(profile.walletAddress!, `wallet-${profile.id}`);
+                                      }}
+                                      className="text-gray-400 hover:text-gray-700 transition"
+                                      title="Copy Wallet Address"
+                                    >
+                                      {copiedId === `wallet-${profile.id}` ? (
+                                        <Check className="w-2.5 h-2.5 text-green-600" />
+                                      ) : (
+                                        <Copy className="w-2.5 h-2.5" />
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>

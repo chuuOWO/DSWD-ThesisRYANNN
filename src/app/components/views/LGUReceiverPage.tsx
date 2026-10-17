@@ -568,12 +568,27 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       if (canonicalUserLgu?.id) {
         const v3Stocks = await backendApi.getLguStock(canonicalUserLgu.id).catch(() => []);
         if (v3Stocks && v3Stocks.length > 0) {
-          const totalStock = v3Stocks.reduce((sum, item) => sum + (item.current_stock || 0), 0);
+          let foodPacks = 0;
+          let hygieneKits = 0;
+          let familyKits = 0;
+          v3Stocks.forEach((item) => {
+            const name = (item.kitName || item.kitTypeId || '').toLowerCase();
+            const qty = Number(item.quantity) || 0;
+            if (name.includes('food')) {
+              foodPacks += qty;
+            } else if (name.includes('hygiene')) {
+              hygieneKits += qty;
+            } else if (name.includes('family')) {
+              familyKits += qty;
+            } else {
+              foodPacks += qty;
+            }
+          });
           setLguStock({
-            foodPacks: totalStock,
-            hygieneKits: 0,
-            familyKits: 0,
-            lastReported: v3Stocks[0]?.last_updated_at
+            foodPacks,
+            hygieneKits,
+            familyKits,
+            lastReported: v3Stocks[0]?.updatedAt
           });
           return;
         }

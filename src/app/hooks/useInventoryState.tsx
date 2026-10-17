@@ -41,7 +41,7 @@ export interface InventoryItem {
 export type UserRole = 'Admin' | 'Receiver' | 'LGUReceiver' | 'Unregistered';
 
 export type WarehouseName = string;
-export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Minted' | 'Correction Requested' | 'Rejected';
+export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected';
 export type OutgoingStatus = 'Draft' | 'Allocating' | 'Approved' | 'Packed' | 'Released' | 'In Transit' | 'Delivered' | 'Accepted' | 'Distributed' | 'Correction Requested' | 'Cancelled';
 export type { PriorityColor, PriorityLevel };
 
@@ -200,7 +200,7 @@ const isMainWarehouse = (warehouse: string): warehouse is WarehouseName =>
   normalizeWarehouseName(warehouse) !== null;
 
 const isIncomingStatus = (status: unknown): status is IncomingStatus =>
-  typeof status === 'string' && ['Draft', 'Pending Verification', 'Verified', 'Minted', 'Correction Requested', 'Rejected'].includes(status);
+  typeof status === 'string' && ['Draft', 'Pending Verification', 'Verified', 'Correction Requested', 'Rejected'].includes(status);
 
 const isOutgoingStatus = (status: unknown): status is OutgoingStatus =>
   typeof status === 'string' && ['Draft', 'Allocating', 'Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed', 'Correction Requested', 'Cancelled'].includes(status);
@@ -1145,14 +1145,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
 
-    // Warehouse stock is recorded; Direct to LGU deliveries are stocked upon confirmation (verifyIncomingReceipt)
-    if (newGoods.destinationType === 'Warehouse') {
-      const whName = isMainWarehouse(newGoods.destination)
-        ? newGoods.destination
-        : (normalizeWarehouseName(newGoods.destination) || 'Oton Main Warehouse');
-      addStock(newGoods.fnfiCategory, whName as WarehouseName, newGoods.quantity);
-    }
-
+    // Physical warehouse and LGU buffer stocks are updated strictly upon physical inspection & verification (verifyIncomingReceipt)
     backendApi.createIncoming({
       ...newGoods,
       manifestNumber: newId,
@@ -1195,7 +1188,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const existing = incomingGoodsList.find(item => item.id === id);
 
     setIncomingGoodsList(prev => prev.map(item => {
-      if (item.id !== id || item.status === 'Minted') return item;
+      if (item.id !== id) return item;
       const updated = { ...item, ...patch };
       return {
         ...updated,
@@ -1204,8 +1197,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       };
     }));
 
-    // Adjust stock difference if quantity changed
-    if (existing && patch.quantity !== undefined && patch.quantity !== existing.quantity) {
+    // Adjust stock difference if quantity changed on verified manifest
+    if (existing && existing.status === 'Verified' && patch.quantity !== undefined && patch.quantity !== existing.quantity) {
       const diff = patch.quantity - existing.quantity;
       const cat = patch.fnfiCategory || existing.fnfiCategory;
       const dest = patch.destination || existing.destination;
@@ -1213,7 +1206,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       if (destType === 'Warehouse') {
         const whName = isMainWarehouse(dest) ? dest : (normalizeWarehouseName(dest) || 'Oton Main Warehouse');
         addStock(cat, whName as WarehouseName, diff);
-      } else if (destType === 'LGU' && (existing.status === 'Verified' || existing.status === 'Minted')) {
+      } else if (destType === 'LGU') {
         addLguStock(dest, cat, diff);
       }
     }
@@ -1275,6 +1268,40 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const target = incomingGoodsList.find(item => item.id === id);
     if (target && target.destinationType === 'LGU') {
       addLguStock(target.destination, target.fnfiCategory, target.quantity);
+    } else if (target && target.destinationType === 'Warehouse') {
+      const whName = isMainWarehouse(target.destination)
+        ? target.destination
+        : (normalizeWarehouseName(target.destination) || 'Oton Main Warehouse');
+      addStock(target.fnfiCategory, whName as WarehouseName, target.quantity);
+    }
+
+    if (target) {
+      backendApi.createInventoryBatch({
+        batchTokenId: `BATCH-${target.manifestNumber || target.id}`,
+        incomingManifestId: target.id,
+        kitTypeId: target.kitTypeId || target.fnfiCategory || 'kit_food_pack',
+        initialQuantity: target.quantity,
+        remainingQuantity: target.quantity,
+        warehouseId: target.destinationWarehouseId,
+        lguId: target.destinationLguId,
+        expirationDate: target.expirationDate,
+        manifestHash: target.manifestHash,
+        mintedByProfileId: currentActor.id,
+        mintedAt: new Date().toISOString()
+      }).catch(err => console.warn('createInventoryBatch error:', err));
+
+      backendApi.appendStockLedger({
+        facilityType: target.destinationType,
+        warehouseId: target.destinationWarehouseId,
+        lguId: target.destinationLguId,
+        kitTypeId: target.kitTypeId || target.fnfiCategory || 'Family Food Pack',
+        deltaQuantity: target.quantity,
+        balanceAfter: target.quantity,
+        movementType: 'INTAKE_VERIFIED',
+        referenceManifestId: target.id,
+        manifestNumber: target.manifestNumber || target.id,
+        actorProfileId: currentActor.id
+      }).catch(err => console.warn('appendStockLedger error:', err));
     }
 
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Pending Verification'
@@ -1299,131 +1326,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }).catch(() => {});
   };
 
-  const mintBatchToken = async (id: string, actorRole: UserRole = 'Admin') => {
-    if (actorRole !== 'Admin') return { ok: false, message: 'RBAC: only Admin can post/mint a batch token.' };
-    const item = incomingGoodsList.find(item => item.id === id);
-    if (!item || item.status !== 'Verified') return { ok: false, message: 'Only verified manifests can be minted.' };
-    if (item.destinationType === 'LGU') {
-      return { ok: false, message: 'Direct LGU deliveries are stocked directly and do not require blockchain tokens.' };
-    }
-
-    const duplicate = incomingGoodsList.find(other => other.id !== id && other.status === 'Minted' && other.manifestHash === item.manifestHash);
-    if (duplicate) {
-      const duplicateRef = duplicate.batchTokenId ? `${duplicate.id} (${duplicate.batchTokenId})` : duplicate.id;
-      return {
-        ok: false,
-        message: `Duplicate manifest detected. Existing token: ${duplicateRef}. Debug: manifestHash=${item.manifestHash}`
-      };
-    }
-
-    const fallbackIndex = incomingGoodsList.reduce((max, entry) => {
-      if (!entry.batchTokenId) return max;
-      const match = entry.batchTokenId.match(/BATCH-\d{4}-(\d+)/i);
-      if (!match) return max;
-      const value = Number.parseInt(match[1], 10);
-      return Number.isFinite(value) ? Math.max(max, value) : max;
-    }, 0) + 1;
-
-    let nextBatchIndex = fallbackIndex;
-    try {
-      nextBatchIndex = await backendApi.getNextBatchIndex();
-      setIntegrationMode('backend');
-    } catch (error) {
-      logBackendError('Fetch batch counter')(error);
-      setIntegrationMode('mock');
-    }
-
-    const tokenId = generateBatchTokenId();
-    let proof;
-
-    try {
-      await blockchain.requireConnectedWalletRole('Admin');
-      proof = await blockchain.mintBatchToken({
-        manifestNumber: item.id,
-        batchTokenId: tokenId,
-        manifestHash: item.manifestHash,
-        category: item.fnfiCategory,
-        quantity: item.quantity,
-        destination: item.destination
-      });
-    } catch (error) {
-      logBackendError('Mint batch token on blockchain')(error);
-      const baseMessage = toFriendlyTxError(error, 'Minting failed. Please try again.');
-      return { ok: false, message: `${baseMessage} Debug: manifestHash=${item.manifestHash} batchTokenId=${tokenId}` };
-    }
-
-    const mintedAt = nowStamp();
-
-    setIncomingGoodsList(prev => prev.map(incoming => incoming.id === id
-      ? {
-          ...incoming,
-          status: 'Minted',
-          batchTokenId: tokenId,
-          blockchainTxHash: proof.hash,
-          mintedAt,
-          auditTrail: [audit('Batch Token Minted', `Manifest hash ${incoming.manifestHash} minted as ${tokenId}.`, proof.hash), ...incoming.auditTrail]
-        }
-      : incoming));
-
-    backendApi.updateIncoming(id, {
-      status: 'Minted',
-      manifestHash: item.manifestHash,
-      txHash: proof.hash,
-      batchTokenId: tokenId,
-      mintedAt,
-      walletAddress: proof.walletAddress
-    }).catch(error => {
-      logBackendError('Mint incoming manifest')(error);
-      setIntegrationMode('mock');
-    });
-
-    // Record into normalized inventory_batches & append to stock_ledger
-    backendApi.createInventoryBatch({
-      batchTokenId: tokenId,
-      incomingManifestId: item.id,
-      kitTypeId: item.kitTypeId || 'kit_food_pack',
-      initialQuantity: item.quantity,
-      remainingQuantity: item.quantity,
-      warehouseId: item.destinationWarehouseId,
-      lguId: item.destinationLguId,
-      expirationDate: item.expirationDate,
-      manifestHash: item.manifestHash,
-      mintedByProfileId: currentActor.id,
-      mintedAt: new Date().toISOString()
-    }).catch(err => console.warn('createInventoryBatch error:', err));
-
-    backendApi.appendStockLedger({
-      facilityType: item.destinationType,
-      warehouseId: item.destinationWarehouseId,
-      lguId: item.destinationLguId,
-      kitTypeId: item.kitTypeId || 'kit_food_pack',
-      deltaQuantity: item.quantity,
-      balanceAfter: item.quantity,
-      movementType: 'INTAKE_VERIFIED',
-      referenceManifestId: item.id,
-      actorProfileId: currentActor.id
-    }).catch(err => console.warn('appendStockLedger error:', err));
-
-    backendApi.logActivity({
-      action: 'MINT_BATCH_TOKEN',
-      entityType: 'BatchToken',
-      entityId: tokenId,
-      details: `Minted ERC-1155 batch token ${tokenId} (${item.quantity} ${item.unitType || 'units'} of ${item.fnfiCategory}) for manifest ${item.id}.`,
-      txHash: proof.hash,
-      actorRole,
-      actorWallet: proof.walletAddress,
-      metadata: {
-        manifestId: item.id,
-        batchTokenId: tokenId,
-        manifestHash: item.manifestHash,
-        category: item.fnfiCategory,
-        quantity: item.quantity,
-        destination: item.destination,
-        txHash: proof.hash
-      }
-    }).catch(() => {});
-
-    return { ok: true, message: `${tokenId} minted and stock posted via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.` };
+  const mintBatchToken = async (_id: string, _actorRole: UserRole = 'Admin') => {
+    return { ok: true, message: 'Incoming manifests are verified and stocked off-chain without blockchain tokens.' };
   };
 
   const requestIncomingCorrection = (id: string, note: string) => {
@@ -1493,19 +1397,6 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       auditTrail: [audit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
     };
     setOutgoingReleasesList(prev => [releaseWithDR, ...prev]);
-
-    // Immediately deduct source stock upon dispatch if release is pre-approved or released
-    const approvedQty = status === 'Draft' || status === 'Allocating' ? 0 : (newRelease.amountApproved || newRelease.amountRequested || 0);
-    if (approvedQty > 0 && newRelease.deliveryMode !== 'Direct Delivery') {
-      if (isMainWarehouse(newRelease.warehouseSource)) {
-        backendApi.deductWarehouseStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty)
-          .catch(err => console.warn('Supabase deductWarehouseStock error:', err));
-        deductStock(newRelease.fnfiCategory, newRelease.warehouseSource, approvedQty);
-      } else if (newRelease.warehouseSource && (newRelease.sourceType === 'LGU' || !isMainWarehouse(newRelease.warehouseSource))) {
-        backendApi.deductLguStock(newRelease.warehouseSource, newRelease.fnfiCategory, approvedQty)
-          .catch(err => console.warn('Supabase deductLguStock error:', err));
-      }
-    }
 
     backendApi.createOutgoing({
       ...newRelease,
@@ -1648,11 +1539,12 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       facilityType: (release.sourceType || 'Warehouse'),
       warehouseId: release.sourceWarehouseId,
       lguId: release.sourceLguId,
-      kitTypeId: release.kitTypeId || 'kit_food_pack',
+      kitTypeId: release.kitTypeId || release.fnfiCategory || 'Family Food Pack',
       deltaQuantity: -amountApproved,
       balanceAfter: 0,
       movementType: 'RELEASE_DISPATCHED',
       referenceDrId: drNumber,
+      drNumber: drNumber,
       actorProfileId: currentActor.id
     }).catch(err => console.warn('appendStockLedger error:', err));
 
