@@ -557,9 +557,27 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [lguStock, setLguStock] = useState<{ foodPacks: number; hygieneKits: number; familyKits: number; lastReported?: string } | null>(null);
 
+  const [isDiscrepancyModalOpen, setIsDiscrepancyModalOpen] = useState(false);
+  const [discrepancyTargetDr, setDiscrepancyTargetDr] = useState('');
+  const [discrepancyNote, setDiscrepancyNote] = useState('');
+  const [isSubmittingDiscrepancy, setIsSubmittingDiscrepancy] = useState(false);
+
   const loadLguStock = async () => {
     if (!targetMuni) return;
     try {
+      if (canonicalUserLgu?.id) {
+        const v3Stocks = await backendApi.getLguStock(canonicalUserLgu.id).catch(() => []);
+        if (v3Stocks && v3Stocks.length > 0) {
+          const totalStock = v3Stocks.reduce((sum, item) => sum + (item.current_stock || 0), 0);
+          setLguStock({
+            foodPacks: totalStock,
+            hygieneKits: 0,
+            familyKits: 0,
+            lastReported: v3Stocks[0]?.last_updated_at
+          });
+          return;
+        }
+      }
       const reports = await backendApi.getLguPriorityReports(effectiveLguName);
       const matched = reports.find(
         (r) =>
@@ -773,6 +791,32 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         txHash: receiptTxHash
       });
 
+      // Record final handover hop in custody_hops
+      await backendApi.recordCustodyHop({
+        outgoingRequestId: matchingRelease?.id || canonicalDrNumber,
+        sequence: 99,
+        fromDriverProfileId: matchingRelease?.assignedDriverProfileId || undefined,
+        fromTruckId: matchingRelease?.assignedTruckId || undefined,
+        gpsCoordinates: receiverGps,
+        blockchainTxHash: receiptTxHash,
+        notes: `Final custody handover verified and accepted by LGU Receiver at ${finalMuni}`
+      }).catch(() => {});
+
+      // Append LGU_RECEIVED to stock_ledger
+      await backendApi.appendStockLedger({
+        movementType: 'LGU_RECEIVED',
+        outgoingRequestId: matchingRelease?.id,
+        drNumber: canonicalDrNumber,
+        destinationLguId: matchingRelease?.destinationLguId,
+        quantityChange: quantity,
+        referenceTable: 'lgu_inventory_reports',
+        referenceId: canonicalDrNumber,
+        gpsCoordinates: receiverGps,
+        blockchainTxHash: receiptTxHash,
+        performedByProfileId: profile.id,
+        notes: `Physical relief goods received and verified at ${finalMuni}`
+      }).catch(() => {});
+
       await loadLguStock();
 
       // Smooth 5-dot modal completes into "Done!"
@@ -841,8 +885,8 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
             </div>
             <div>
               <p className="text-[11px] font-semibold flex items-center gap-1.5">
-                <span>Receiver View</span>
-                <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Profile</span>
+                <span>LGU Receiver Portal</span>
+                <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Terminal</span>
               </p>
               <div className="flex items-center gap-1.5 mt-0.5">
                 <span className="text-[10px] text-white/90 font-bold truncate max-w-[120px]">
@@ -892,12 +936,12 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               <div>
                 <p className="font-extrabold text-[11px] leading-tight">Still in Warehouse</p>
                 <p className="text-[10px] text-amber-100 leading-tight">
-                  Package is at {originWarehouseName}, preparing to be scanned by the assigned receiver.
+                  Package is at {originWarehouseName}, preparing to be scanned by the assigned Relief Escort Officer.
                 </p>
               </div>
             </div>
             <span className="text-[8.5px] bg-amber-700/90 text-white px-2 py-0.5 rounded font-extrabold uppercase tracking-wide flex-shrink-0 ml-2">
-              Awaiting Receiver Scan
+              Awaiting Escort Scan
             </span>
           </div>
         )}
@@ -1316,8 +1360,22 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                         {(r.amountApproved || r.amountRequested || 0).toLocaleString()} {r.fnfiCategory}
                       </p>
                       <p className="text-[10px] text-gray-500 mt-0.5">
-                        Source: {r.warehouseSource || 'DSWD Logistics Hub'} &bull; Vehicle: {r.assignedTruckId || 'Pending'}
+                        Source: {r.warehouseSource || 'DSWD Logistics Hub'} &bull; Convoy: {r.assignedTruckId || 'Pending'} &bull; Escort: {r.assignedDriverProfileId || r.assignedEscortProfileId ? 'Assigned' : 'Pending'}
                       </p>
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
+                        <span className="text-[9.5px] text-gray-400">Incoming cargo</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDiscrepancyTargetDr(r.drNumber);
+                            setIsDiscrepancyModalOpen(true);
+                          }}
+                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition flex items-center gap-1"
+                        >
+                          <AlertTriangle size={11} />
+                          <span>Report Issue</span>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1462,14 +1520,29 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               ) : (
                 <div className="space-y-2 max-h-60 overflow-y-auto divide-y divide-gray-100">
                   {acceptedReleases.map((r) => (
-                    <div key={r.drNumber} className="pt-2 pb-1 text-xs flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-gray-900">{r.drNumber}</p>
-                        <p className="text-[10px] text-gray-500">{r.fnfiCategory} • {r.amountApproved || r.amountRequested} kits</p>
+                    <div key={r.drNumber} className="pt-2 pb-1 text-xs">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-bold text-gray-900">{r.drNumber}</p>
+                          <p className="text-[10px] text-gray-500">{r.fnfiCategory} • {r.amountApproved || r.amountRequested} kits</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-full text-[9.5px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Accepted
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDiscrepancyTargetDr(r.drNumber);
+                              setIsDiscrepancyModalOpen(true);
+                            }}
+                            className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition"
+                            title="Report damage or shortage"
+                          >
+                            <AlertTriangle size={13} />
+                          </button>
+                        </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[9.5px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Accepted
-                      </span>
                     </div>
                   ))}
                 </div>
@@ -1482,6 +1555,102 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               >
                 Close History
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Discrepancy Reporting Modal */}
+        {isDiscrepancyModalOpen && (
+          <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
+                    <AlertTriangle size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-gray-900">Report Discrepancy</h3>
+                    <p className="text-[10px] text-gray-500 font-mono">{discrepancyTargetDr}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDiscrepancyModalOpen(false);
+                    setDiscrepancyNote('');
+                  }}
+                  className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <label className="font-bold text-gray-700 block">
+                  Discrepancy / Damage Details:
+                </label>
+                <textarea
+                  value={discrepancyNote}
+                  onChange={(e) => setDiscrepancyNote(e.target.value)}
+                  placeholder="e.g., Package arrived with water damage; 8 relief food packs unsealed or missing from batch count."
+                  className="w-full p-3 rounded-xl border border-gray-300 text-xs focus:ring-2 focus:ring-rose-500 focus:outline-none min-h-[90px]"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDiscrepancyModalOpen(false);
+                    setDiscrepancyNote('');
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-gray-100 text-gray-700 text-xs font-bold hover:bg-gray-200 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingDiscrepancy || !discrepancyNote.trim()}
+                  onClick={async () => {
+                    if (!discrepancyNote.trim()) return;
+                    setIsSubmittingDiscrepancy(true);
+                    try {
+                      await backendApi.createDiscrepancyReport({
+                        reportType: 'Outgoing',
+                        drNumber: discrepancyTargetDr,
+                        note: discrepancyNote.trim(),
+                        reportedByRole: 'LGU Receiver',
+                        reportedByWallet: profile?.walletAddress || undefined
+                      });
+                      await backendApi.logActivity({
+                        action: 'DISCREPANCY_REPORTED',
+                        entityType: 'OutgoingRelease',
+                        entityId: discrepancyTargetDr,
+                        details: `LGU Receiver (${profile?.fullName || effectiveLguName}) reported discrepancy: ${discrepancyNote.trim()}`,
+                        actorId: profile?.id,
+                        actorName: profile?.fullName || 'LGU Officer',
+                        actorRole: 'LGU Receiver'
+                      }).catch(() => {});
+                      setIsDiscrepancyModalOpen(false);
+                      setDiscrepancyNote('');
+                      setToastMessage({
+                        type: 'success',
+                        text: `Discrepancy report recorded for ${discrepancyTargetDr}.`
+                      });
+                    } catch (e: any) {
+                      setToastMessage({
+                        type: 'error',
+                        text: e.message || 'Failed to submit discrepancy report.'
+                      });
+                    } finally {
+                      setIsSubmittingDiscrepancy(false);
+                    }
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 disabled:opacity-50 transition"
+                >
+                  {isSubmittingDiscrepancy ? 'Submitting...' : 'Submit Report'}
+                </button>
+              </div>
             </div>
           </div>
         )}

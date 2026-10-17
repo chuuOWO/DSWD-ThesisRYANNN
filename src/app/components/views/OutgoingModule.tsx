@@ -74,7 +74,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     provincesList = [],
     warehousesList = [],
     supplySourcesList = [],
-    kitTypesList = []
+    kitTypesList = [],
+    trucksList = []
   } = inventoryState;
 
   const [showReleaseModal, setShowReleaseModal] = useState(false);
@@ -108,7 +109,15 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       receiverSignature: undefined,
       senderGps: undefined,
       blockchainTxHash: undefined,
-      correctionNote: undefined
+      correctionNote: undefined,
+      assignedTruckId: newRelease.assignedTruckId,
+      assigned_truck_id: newRelease.assignedTruckId,
+      assignedEscortProfileId: newRelease.assignedEscortProfileId,
+      assignedDriverProfileId: newRelease.assignedEscortProfileId,
+      kitTypeId: newRelease.kitTypeId,
+      sourceWarehouseId: newRelease.sourceWarehouseId,
+      sourceLguId: newRelease.sourceLguId,
+      destinationLguId: newRelease.destinationLguId
     });
     setShowReleaseModal(false);
     showResult(`Release allocation for ${newRelease.municipality || 'LGU'} (${(newRelease.amountRequested ?? 0).toLocaleString()} ${newRelease.fnfiCategory}) created successfully.`);
@@ -129,7 +138,15 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       deliveryStatus: updatedRelease.deliveryStatus,
       incidentCode: updatedRelease.incidentCode,
       receiverGps: updatedRelease.receiverGps,
-      destinationAddress: updatedRelease.destinationAddress
+      destinationAddress: updatedRelease.destinationAddress,
+      assignedTruckId: updatedRelease.assignedTruckId,
+      assigned_truck_id: updatedRelease.assignedTruckId,
+      assignedEscortProfileId: updatedRelease.assignedEscortProfileId,
+      assignedDriverProfileId: updatedRelease.assignedEscortProfileId,
+      kitTypeId: updatedRelease.kitTypeId,
+      sourceWarehouseId: updatedRelease.sourceWarehouseId,
+      sourceLguId: updatedRelease.sourceLguId,
+      destinationLguId: updatedRelease.destinationLguId
     });
     setEditingRelease(null);
     showResult(`Release request ${editingRelease.drNumber} updated successfully.`);
@@ -413,6 +430,17 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     <div className="mt-2 space-y-1 text-xs text-gray-600">
                       <p>Sender GPS: {release.senderGps || '-'}</p>
                       <p>Receiver GPS: {release.receiverGps || '-'}</p>
+                      {release.assignedTruckId && (
+                        <p className="font-semibold text-purple-700 flex items-center gap-1">
+                          <TruckIcon className="w-3 h-3" />
+                          <span>Truck: {release.assignedTruckId}</span>
+                        </p>
+                      )}
+                      {release.assignedEscortProfileId && (
+                        <p className="text-[11px] text-indigo-700 font-medium">
+                          <span>Escort Officer: {release.assignedEscortProfileId}</span>
+                        </p>
+                      )}
                     </div>
                     {release.receiverGps && (
                       <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-bold">
@@ -483,7 +511,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       )}
                       {['Approved', 'Packed'].includes(release.deliveryStatus) && (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
-                          <QrCode className="w-3.5 h-3.5 text-amber-600" /> Awaiting Receiver Scan
+                          <QrCode className="w-3.5 h-3.5 text-amber-600" /> Awaiting Escort Scan
                         </span>
                       )}
                       {['In Transit', 'Delivered'].includes(release.deliveryStatus) && (
@@ -613,6 +641,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           warehousesList={warehousesList}
           supplySourcesList={supplySourcesList}
           kitTypesList={kitTypesList}
+          trucksList={trucksList}
           mode="add"
         />
       )}
@@ -627,6 +656,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           warehousesList={warehousesList}
           supplySourcesList={supplySourcesList}
           kitTypesList={kitTypesList}
+          trucksList={trucksList}
           mode="edit"
           initialData={{
             dateAllocated: editingRelease.dateAllocated,
@@ -645,7 +675,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             incidentDate: editingRelease.incidentDate || '',
             reportReason: editingRelease.reportReason || '',
             receiverGps: editingRelease.receiverGps,
-            destinationAddress: editingRelease.destinationAddress
+            destinationAddress: editingRelease.destinationAddress,
+            assignedTruckId: editingRelease.assignedTruckId || editingRelease.assigned_truck_id,
+            assignedEscortProfileId: editingRelease.assignedEscortProfileId || editingRelease.assignedDriverProfileId
           }}
         />
       )}

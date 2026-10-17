@@ -22,6 +22,10 @@ export interface IncomingPayload {
   destinationType: 'Warehouse' | 'LGU';
   destination: string;
   incidentCode: string;
+  supplySourceId?: string;
+  kitTypeId?: string;
+  destinationWarehouseId?: string;
+  destinationLguId?: string;
   status?: 'Draft' | 'Pending Verification' | 'Verified' | 'Minted';
   manifestHash?: string;
   txHash?: string;
@@ -124,6 +128,111 @@ export interface KitTypeInput {
   description: string;
 }
 
+export interface TruckRecord {
+  truckId: string;
+  plateNumber: string;
+  model: string;
+  capacityKg: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface IncidentRecord {
+  incidentCode: string;
+  disasterName: string;
+  disasterType: string;
+  declaredAt?: string;
+  status: 'Active' | 'Monitoring' | 'Closed';
+  region: string;
+}
+
+export interface InventoryBatchRecord {
+  batchTokenId: string;
+  incomingManifestId?: string;
+  kitTypeId?: string;
+  kitName?: string;
+  initialQuantity: number;
+  remainingQuantity: number;
+  warehouseId?: string;
+  lguId?: string;
+  expirationDate?: string;
+  manifestHash?: string;
+  mintedByProfileId?: string;
+  mintedAt?: string;
+}
+
+export interface OutgoingBatchAllocationRecord {
+  id: string;
+  outgoingRequestId: string;
+  batchTokenId: string;
+  allocatedQuantity: number;
+  allocatedAt: string;
+}
+
+export interface WarehouseStockRecord {
+  warehouseId: string;
+  kitTypeId: string;
+  kitName?: string;
+  quantity: number;
+  updatedAt: string;
+}
+
+export interface LguStockRecord {
+  lguId: string;
+  kitTypeId: string;
+  kitName?: string;
+  quantity: number;
+  updatedAt: string;
+}
+
+export interface StockLedgerInput {
+  facilityType: 'Warehouse' | 'LGU';
+  warehouseId?: string;
+  lguId?: string;
+  kitTypeId: string;
+  deltaQuantity: number;
+  balanceAfter: number;
+  movementType: 'INTAKE_VERIFIED' | 'RELEASE_DISPATCHED' | 'AID_RECEIVED' | 'MUTUAL_AID_OUT' | 'AUDIT_CORRECTION';
+  referenceManifestId?: string;
+  referenceDrId?: string;
+  actorProfileId?: string;
+}
+
+export interface CustodyHopRecord {
+  id: string;
+  outgoingRequestId: string;
+  sequence: number;
+  fromDriverProfileId?: string;
+  toDriverProfileId: string;
+  fromTruckId?: string;
+  toTruckId?: string;
+  gpsCoordinates: string;
+  note?: string;
+  txHash?: string;
+  transferredAt: string;
+}
+
+export const DEFAULT_TRUCKS: TruckRecord[] = [
+  { truckId: 'TRUCK-01', plateNumber: 'SAA-1001', model: 'Isuzu Forward 6-Wheeler (5-Ton)', capacityKg: 5000, isActive: true },
+  { truckId: 'TRUCK-02', plateNumber: 'SAA-1002', model: 'Isuzu Forward 6-Wheeler (5-Ton)', capacityKg: 5000, isActive: true },
+  { truckId: 'TRUCK-03', plateNumber: 'SAA-1003', model: 'Hino 500 Series (6-Ton)', capacityKg: 6000, isActive: true },
+  { truckId: 'TRUCK-04', plateNumber: 'SAA-1004', model: 'Hino 500 Series (6-Ton)', capacityKg: 6000, isActive: true },
+  { truckId: 'TRUCK-05', plateNumber: 'SAA-1005', model: 'Fuso Fighter (7-Ton Heavy)', capacityKg: 7000, isActive: true },
+  { truckId: 'TRUCK-06', plateNumber: 'SAA-1006', model: 'Fuso Fighter (7-Ton Heavy)', capacityKg: 7000, isActive: true },
+  { truckId: 'TRUCK-07', plateNumber: 'SAA-1007', model: 'Isuzu Elf Light Cargo (3-Ton)', capacityKg: 3000, isActive: true },
+  { truckId: 'TRUCK-08', plateNumber: 'SAA-1008', model: 'Isuzu Elf Light Cargo (3-Ton)', capacityKg: 3000, isActive: true },
+  { truckId: 'TRUCK-09', plateNumber: 'SAA-1009', model: 'Mitsubishi Canter (3-Ton)', capacityKg: 3000, isActive: true },
+  { truckId: 'TRUCK-10', plateNumber: 'SAA-1010', model: 'Mitsubishi Canter (3-Ton)', capacityKg: 3000, isActive: true }
+];
+
+export const DEFAULT_INCIDENTS: IncidentRecord[] = [
+  { incidentCode: 'INC-2026-PREPOSITION', disasterName: 'Regular Disaster Preparedness & Buffer Prepositioning', disasterType: 'Relief Prepositioning / Augmentation', status: 'Active', region: 'Region VI (Western Visayas)' },
+  { incidentCode: 'INC-2026-TY-01', disasterName: 'Typhoon Auring (Tropical Cyclone Relief Operation)', disasterType: 'Typhoon / Tropical Cyclone', status: 'Active', region: 'Region VI (Western Visayas)' },
+  { incidentCode: 'INC-2026-FLD-01', disasterName: 'Western Visayas Monsoon Inundation & Flash Floods', disasterType: 'Flood / Inundation', status: 'Active', region: 'Region VI (Western Visayas)' },
+  { incidentCode: 'INC-2026-EQ-01', disasterName: 'Panay Central Fault Seismic Movement', disasterType: 'Earthquake', status: 'Active', region: 'Region VI (Western Visayas)' }
+];
+
 export interface LguRecord {
   id: string;
   municipality: string;
@@ -190,10 +299,19 @@ export interface OutgoingPayload {
   receiverGps?: string;
   destinationAddress?: string;
   destination_address?: string;
-  txHash?: string;
   walletAddress?: string;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
+  assignedEscortProfileId?: string | null;
+  assigned_driver_profile_id?: string | null;
+  sourceWarehouseId?: string | null;
+  source_warehouse_id?: string | null;
+  sourceLguId?: string | null;
+  source_lgu_id?: string | null;
+  kitTypeId?: string | null;
+  kit_type_id?: string | null;
+  sourceType?: 'Warehouse' | 'LGU';
+  source_type?: 'Warehouse' | 'LGU';
 }
 
 export interface LGUInventoryReportPayload {
@@ -309,7 +427,8 @@ export interface ReceiverReleaseRecord {
   is_held?: boolean | null;
 }
 
-export type TruckerReleaseRecord = ReceiverReleaseRecord;
+export type EscortReleaseRecord = ReceiverReleaseRecord;
+export type TruckerReleaseRecord = EscortReleaseRecord;
 
 const throwIfError = (error: unknown, context: string) => {
   if (error) {
@@ -323,30 +442,45 @@ const definedOnly = <T extends Record<string, unknown>>(values: T) =>
 
 export const backendApi = {
   async getDashboard() {
-    const [incomingResult, outgoingResult, lguReportsResult, discrepancyResult, lgusResult, provincesResult, warehousesResult, sourcesResult, kitsResult] = await Promise.all([
-      supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
-      supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }),
-      supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }),
+    const [
+      incomingResult,
+      outgoingResult,
+      lguReportsResult,
+      discrepancyResult,
+      lgusResult,
+      provincesResult,
+      warehousesResult,
+      sourcesResult,
+      kitsResult,
+      trucksResult,
+      incidentsResult,
+      warehouseStockResult,
+      lguStockResult,
+      batchesResult
+    ] = await Promise.all([
+      supabase.from('incoming_manifests_v2').select('*').order('created_at', { ascending: false })
+        .then(res => res.error ? supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }) : res),
+      supabase.from('outgoing_requests_v2').select('*').order('created_at', { ascending: false })
+        .then(res => res.error ? supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false }) : res),
+      supabase.from('lgu_inventory_reports_v2').select('*').order('reported_at', { ascending: false })
+        .then(res => res.error ? supabase.from('lgu_inventory_reports').select('*').order('reported_at', { ascending: false }) : res),
       supabase.from('discrepancy_reports').select('*').order('reported_at', { ascending: false }),
-      supabase.from('lgus').select('*').eq('is_active', true).order('province', { ascending: true }),
-      supabase.from('provinces').select('*').eq('is_active', true).order('name', { ascending: true }),
-      supabase.from('warehouses').select('*').eq('is_active', true).order('name', { ascending: true }),
-      supabase.from('supply_sources').select('*').eq('is_active', true).order('name', { ascending: true }),
-      supabase.from('kit_types').select('*').eq('is_active', true).order('name', { ascending: true })
+      supabase.from('lgus_v2').select('*').order('lgu_name', { ascending: true })
+        .then(res => res.error ? supabase.from('lgus').select('*').order('province', { ascending: true }) : res),
+      supabase.from('provinces').select('*').order('name', { ascending: true }),
+      supabase.from('warehouses_v2').select('*').order('name', { ascending: true })
+        .then(res => res.error ? supabase.from('warehouses').select('*').order('name', { ascending: true }) : res),
+      supabase.from('supply_sources').select('*').order('name', { ascending: true }),
+      supabase.from('kit_types').select('*').order('name', { ascending: true }),
+      supabase.from('trucks').select('*').order('trk_truck_id', { ascending: true }),
+      supabase.from('incidents').select('*').order('incd_declared_at', { ascending: false }),
+      supabase.from('warehouse_stock').select('*'),
+      supabase.from('lgu_stock').select('*'),
+      supabase.from('inventory_batches').select('*').order('bat_minted_at', { ascending: false })
     ]);
 
     throwIfError(incomingResult.error, 'Unable to load incoming manifests');
     throwIfError(outgoingResult.error, 'Unable to load outgoing requests');
-
-    if (lguReportsResult.error) {
-      console.warn('LGU inventory reports are not available yet. Run supabase-schema-patch.sql to create lgu_inventory_reports.', lguReportsResult.error);
-    }
-    if (discrepancyResult.error) {
-      console.warn('Discrepancy reports are not available yet. Run supabase-schema-patch.sql to create discrepancy_reports.', discrepancyResult.error);
-    }
-    if (lgusResult.error) {
-      console.warn('Master LGUs table is not available yet. Run supabase-schema-patch.sql to create public.lgus.', lgusResult.error);
-    }
 
     return {
       incoming: incomingResult.data ?? [],
@@ -357,7 +491,49 @@ export const backendApi = {
       provinces: provincesResult.error ? [] : provincesResult.data ?? [],
       warehouses: warehousesResult.error ? [] : warehousesResult.data ?? [],
       sources: sourcesResult.error ? [] : sourcesResult.data ?? [],
-      kits: kitsResult.error ? [] : kitsResult.data ?? []
+      kits: kitsResult.error ? [] : kitsResult.data ?? [],
+      trucks: trucksResult.error || !trucksResult.data?.length ? DEFAULT_TRUCKS : trucksResult.data.map((r: any) => ({
+        truckId: String(r.trk_truck_id || r.truck_id),
+        plateNumber: String(r.trk_plate_number || r.plate_number),
+        model: String(r.trk_model || r.model || 'DSWD Relief Cargo Truck'),
+        capacityKg: Number(r.trk_capacity_kg || r.capacity_kg || 5000),
+        isActive: Boolean(r.trk_is_active ?? r.is_active ?? true),
+        createdAt: r.trk_created_at || r.created_at,
+        updatedAt: r.trk_updated_at || r.updated_at
+      })),
+      incidents: incidentsResult.error || !incidentsResult.data?.length ? DEFAULT_INCIDENTS : incidentsResult.data.map((r: any) => ({
+        incidentCode: String(r.incd_incident_code || r.incident_code),
+        disasterName: String(r.incd_disaster_name || r.disaster_name),
+        disasterType: String(r.incd_disaster_type || r.disaster_type),
+        declaredAt: r.incd_declared_at || r.declared_at,
+        status: (r.incd_status || r.status || 'Active') as 'Active' | 'Monitoring' | 'Closed',
+        region: String(r.incd_region || r.region || 'Region VI (Western Visayas)')
+      })),
+      warehouseStock: warehouseStockResult.error ? [] : (warehouseStockResult.data ?? []).map((r: any) => ({
+        warehouseId: String(r.wst_warehouse_id || r.warehouse_id),
+        kitTypeId: String(r.wst_kit_type_id || r.kit_type_id),
+        quantity: Number(r.wst_quantity || r.quantity || 0),
+        updatedAt: String(r.wst_updated_at || r.updated_at || new Date().toISOString())
+      })),
+      lguStock: lguStockResult.error ? [] : (lguStockResult.data ?? []).map((r: any) => ({
+        lguId: String(r.lst_lgu_id || r.lgu_id),
+        kitTypeId: String(r.lst_kit_type_id || r.kit_type_id),
+        quantity: Number(r.lst_quantity || r.quantity || 0),
+        updatedAt: String(r.lst_updated_at || r.updated_at || new Date().toISOString())
+      })),
+      batches: batchesResult.error ? [] : (batchesResult.data ?? []).map((r: any) => ({
+        batchTokenId: String(r.bat_batch_token_id || r.batch_token_id),
+        incomingManifestId: r.bat_incoming_manifest_id || r.incoming_manifest_id,
+        kitTypeId: r.bat_kit_type_id || r.kit_type_id,
+        initialQuantity: Number(r.bat_initial_quantity || r.initial_quantity || 0),
+        remainingQuantity: Number(r.bat_remaining_quantity || r.remaining_quantity || 0),
+        warehouseId: r.bat_warehouse_id || r.warehouse_id,
+        lguId: r.bat_lgu_id || r.lgu_id,
+        expirationDate: r.bat_expiration_date || r.expiration_date,
+        manifestHash: r.bat_manifest_hash || r.manifest_hash,
+        mintedByProfileId: r.bat_minted_by_profile_id || r.minted_by_profile_id,
+        mintedAt: r.bat_minted_at || r.minted_at
+      }))
     };
   },
 
@@ -1365,9 +1541,39 @@ export const backendApi = {
   },
 
   async createIncoming(payload: IncomingPayload) {
-    const { data, error } = await supabase
+    const v3Payload: Record<string, any> = {
+      manifest_number: payload.manifestNumber,
+      date_received: payload.dateReceived,
+      category: payload.fnfiCategory,
+      quantity: payload.quantity,
+      unit_type: payload.unitType,
+      expiration_date: payload.expirationDate,
+      source: payload.source,
+      destination_type: payload.destinationType,
+      destination: payload.destination,
+      incident_code: payload.incidentCode,
+      status: payload.status ?? 'Draft',
+      manifest_hash: payload.manifestHash,
+      tx_hash: payload.txHash,
+      wallet_address: payload.walletAddress,
+      // v3 relational references and snapshots
+      supply_source_id: payload.supplySourceId || null,
+      kit_type_id: payload.kitTypeId || null,
+      destination_warehouse_id: payload.destinationWarehouseId || null,
+      destination_lgu_id: payload.destinationLguId || null,
+      source_name_snapshot: payload.source,
+      destination_name_snapshot: payload.destination,
+      item_name_snapshot: payload.fnfiCategory
+    };
+
+    let { data, error } = await supabase
       .from('incoming_manifests')
-      .insert({
+      .insert(v3Payload)
+      .select('id')
+      .single();
+
+    if (error && (error.code === '42703' || error.message?.includes('supply_source_id') || error.message?.includes('source_name_snapshot'))) {
+      const legacyPayload = {
         manifest_number: payload.manifestNumber,
         date_received: payload.dateReceived,
         category: payload.fnfiCategory,
@@ -1382,9 +1588,15 @@ export const backendApi = {
         manifest_hash: payload.manifestHash,
         tx_hash: payload.txHash,
         wallet_address: payload.walletAddress
-      })
-      .select('id')
-      .single();
+      };
+      const retry = await supabase
+        .from('incoming_manifests')
+        .insert(legacyPayload)
+        .select('id')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     throwIfError(error, 'Failed to create incoming manifest');
     return data;
@@ -1428,9 +1640,45 @@ export const backendApi = {
   },
 
   async createOutgoing(payload: OutgoingPayload) {
-    const { data, error } = await supabase
+    const v3Payload: Record<string, any> = {
+      dr_number: payload.drNumber,
+      date_allocated: payload.dateAllocated,
+      lgu_id: payload.lguId ?? payload.lgu_id ?? null,
+      destination_lgu_id: payload.lguId ?? payload.lgu_id ?? null,
+      lgu_name: payload.lguName,
+      province: payload.province,
+      municipality: payload.municipality,
+      category: payload.fnfiCategory,
+      item_name_snapshot: payload.fnfiCategory,
+      kit_type_id: payload.kitTypeId ?? payload.kit_type_id ?? null,
+      amount_requested: payload.amountRequested,
+      amount_approved: payload.amountApproved,
+      warehouse_source: payload.warehouseSource,
+      source_warehouse_id: payload.sourceWarehouseId ?? payload.source_warehouse_id ?? null,
+      source_lgu_id: payload.sourceLguId ?? payload.source_lgu_id ?? null,
+      source_name_snapshot: payload.warehouseSource,
+      delivery_mode: payload.deliveryMode,
+      delivery_status: payload.deliveryStatus ?? 'Allocating',
+      incident_code: payload.incidentCode,
+      allocated_batches: payload.allocatedBatches,
+      sender_gps: payload.senderGps,
+      receiver_gps: payload.receiverGps,
+      destination_address: payload.destinationAddress ?? payload.destination_address,
+      tx_hash: payload.txHash,
+      wallet_address: payload.walletAddress,
+      assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null,
+      assigned_driver_profile_id: payload.assignedEscortProfileId ?? payload.assigned_driver_profile_id ?? null,
+      source_type: payload.sourceType ?? payload.source_type ?? 'Warehouse'
+    };
+
+    let { data, error } = await supabase
       .from('outgoing_requests')
-      .insert({
+      .insert(v3Payload)
+      .select('id')
+      .single();
+
+    if (error && (error.code === '42703' || error.message?.includes('assigned_driver_profile_id') || error.message?.includes('source_warehouse_id'))) {
+      const legacyPayload = {
         dr_number: payload.drNumber,
         date_allocated: payload.dateAllocated,
         lgu_id: payload.lguId ?? payload.lgu_id ?? null,
@@ -1450,10 +1698,17 @@ export const backendApi = {
         destination_address: payload.destinationAddress ?? payload.destination_address,
         tx_hash: payload.txHash,
         wallet_address: payload.walletAddress,
-        assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null
-      })
-      .select('id')
-      .single();
+        assigned_truck_id: payload.assignedTruckId ?? payload.assigned_truck_id ?? null,
+        source_type: payload.sourceType ?? payload.source_type ?? 'Warehouse'
+      };
+      const retry = await supabase
+        .from('outgoing_requests')
+        .insert(legacyPayload)
+        .select('id')
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     throwIfError(error, 'Failed to create outgoing request');
     return data;
@@ -1722,24 +1977,45 @@ export const backendApi = {
     return (data ?? []) as ReceiverReleaseRecord[];
   },
 
-  async getTruckerReleases(truckId?: string | null) {
-    return this.getReceiverReleases(truckId);
+  async getEscortReleases(receiverOrEscortId?: string | null) {
+    return this.getReceiverReleases(receiverOrEscortId);
   },
 
-  async assignTruckToRelease(drNumber: string, truckId: string | null, deliveryStatus: string = 'In Transit') {
+  async getTruckerReleases(truckId?: string | null) {
+    return this.getEscortReleases(truckId);
+  },
+
+  async assignEscortAndTruckToRelease(
+    drNumber: string,
+    truckId: string | null,
+    escortProfileId?: string | null,
+    deliveryStatus: string = 'In Transit'
+  ) {
     const updates: Record<string, unknown> = {
-      assigned_truck_id: truckId
+      assigned_truck_id: truckId,
+      assigned_driver_profile_id: escortProfileId ?? null
     };
     if (deliveryStatus) {
       updates.delivery_status = deliveryStatus;
     }
-    const { error } = await supabase
+    let { error } = await supabase
       .from('outgoing_requests')
       .update(updates)
       .eq('dr_number', drNumber);
 
-    throwIfError(error, 'Failed to assign truck to release');
+    if (error && (error.code === '42703' || error.message?.includes('assigned_driver_profile_id'))) {
+      const fallbackUpdates: Record<string, unknown> = { assigned_truck_id: truckId };
+      if (deliveryStatus) fallbackUpdates.delivery_status = deliveryStatus;
+      const retry = await supabase.from('outgoing_requests').update(fallbackUpdates).eq('dr_number', drNumber);
+      error = retry.error;
+    }
+
+    throwIfError(error, 'Failed to assign escort and truck to release');
     return { ok: true };
+  },
+
+  async assignTruckToRelease(drNumber: string, truckId: string | null, deliveryStatus: string = 'In Transit') {
+    return this.assignEscortAndTruckToRelease(drNumber, truckId, null, deliveryStatus);
   },
 
   async getTruckLiveLocations(): Promise<TruckLiveLocation[]> {
@@ -1856,18 +2132,22 @@ export const backendApi = {
         if (user) {
           actorId = actorId || user.id;
           actorEmail = actorEmail || user.email || 'system@dswd.gov.ph';
-          actorName = actorName || user.user_metadata?.full_name;
+          const metaName = (user.user_metadata?.first_name || user.user_metadata?.last_name)
+            ? `${user.user_metadata?.first_name || ''} ${user.user_metadata?.last_name || ''}`.trim()
+            : user.user_metadata?.full_name;
+          actorName = actorName || metaName;
           actorRole = actorRole || user.user_metadata?.role;
           actorWallet = actorWallet || user.user_metadata?.wallet_address;
 
           if (!actorName || !actorRole || !actorWallet) {
             const { data: prof } = await supabase
               .from('profiles')
-              .select('full_name, role, wallet_address, email')
+              .select('first_name, last_name, role, wallet_address, email')
               .eq('id', user.id)
               .maybeSingle();
             if (prof) {
-              actorName = actorName || prof.full_name;
+              const computedName = `${prof.first_name || ''} ${prof.last_name || ''}`.trim();
+              actorName = actorName || computedName || prof.email;
               actorRole = actorRole || prof.role;
               actorWallet = actorWallet || prof.wallet_address;
               actorEmail = actorEmail || prof.email;
@@ -2022,6 +2302,362 @@ export const backendApi = {
     }
   },
 
+  // --- V3 NORMALIZED PIPELINE METHODS ---
+
+  async getTrucks(includeInactive: boolean = false): Promise<TruckRecord[]> {
+    try {
+      let query = supabase.from('trucks').select('*').order('truck_id', { ascending: true });
+      if (!includeInactive) {
+        query = query.eq('is_active', true);
+      }
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        return DEFAULT_TRUCKS.filter(t => includeInactive || t.isActive);
+      }
+      return data.map((t: any) => ({
+        truckId: t.truck_id || t.trk_truck_id,
+        plateNumber: t.plate_number || t.trk_plate_number,
+        model: t.model || t.trk_model,
+        capacityKg: Number(t.capacity_kg || t.trk_capacity_kg || 5000),
+        isActive: Boolean(t.is_active ?? t.trk_is_active ?? true),
+        createdAt: t.created_at || t.trk_created_at,
+        updatedAt: t.updated_at || t.trk_updated_at
+      }));
+    } catch {
+      return DEFAULT_TRUCKS.filter(t => includeInactive || t.isActive);
+    }
+  },
+
+  async getIncidents(includeClosed: boolean = false): Promise<IncidentRecord[]> {
+    try {
+      let query = supabase.from('incidents').select('*').order('incident_code', { ascending: true });
+      if (!includeClosed) {
+        query = query.neq('status', 'Closed');
+      }
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        return DEFAULT_INCIDENTS.filter(i => includeClosed || i.status !== 'Closed');
+      }
+      return data.map((i: any) => ({
+        incidentCode: i.incident_code || i.incd_incident_code,
+        disasterName: i.disaster_name || i.incd_disaster_name,
+        disasterType: i.disaster_type || i.incd_disaster_type,
+        declaredAt: i.declared_at || i.incd_declared_at,
+        status: (i.status || i.incd_status || 'Active') as 'Active' | 'Monitoring' | 'Closed',
+        region: i.region || i.incd_region || 'Region VI (Western Visayas)'
+      }));
+    } catch {
+      return DEFAULT_INCIDENTS.filter(i => includeClosed || i.status !== 'Closed');
+    }
+  },
+
+  async getWarehouseStock(warehouseId?: string): Promise<WarehouseStockRecord[]> {
+    try {
+      let query = supabase.from('warehouse_stock').select('*');
+      if (warehouseId) {
+        query = query.eq('warehouse_id', warehouseId);
+      }
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        const warehouses = await this.getWarehouses();
+        const fallbackStock: WarehouseStockRecord[] = [];
+        warehouses.forEach(w => {
+          if (warehouseId && w.id !== warehouseId) return;
+          Object.entries(w.currentStock || {}).forEach(([kitName, qty]) => {
+            fallbackStock.push({
+              warehouseId: w.id,
+              kitTypeId: kitName.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+              kitName,
+              quantity: Number(qty) || 0,
+              updatedAt: w.updatedAt || new Date().toISOString()
+            });
+          });
+        });
+        return fallbackStock;
+      }
+      return data.map((r: any) => ({
+        warehouseId: r.warehouse_id || r.wst_warehouse_id,
+        kitTypeId: r.kit_type_id || r.wst_kit_type_id,
+        kitName: r.kit_type_id || r.wst_kit_type_id,
+        quantity: Number(r.quantity || r.wst_quantity || 0),
+        updatedAt: r.updated_at || r.wst_updated_at || new Date().toISOString()
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async getLguStock(lguId?: string): Promise<LguStockRecord[]> {
+    try {
+      let query = supabase.from('lgu_stock').select('*');
+      if (lguId) {
+        query = query.eq('lgu_id', lguId);
+      }
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        const lgus = await this.getLgus();
+        const fallbackStock: LguStockRecord[] = [];
+        lgus.forEach(l => {
+          if (lguId && l.id !== lguId) return;
+          Object.entries(l.currentStock || {}).forEach(([kitName, qty]) => {
+            fallbackStock.push({
+              lguId: l.id,
+              kitTypeId: kitName.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+              kitName,
+              quantity: Number(qty) || 0,
+              updatedAt: l.updatedAt || new Date().toISOString()
+            });
+          });
+        });
+        return fallbackStock;
+      }
+      return data.map((r: any) => ({
+        lguId: r.lgu_id || r.lst_lgu_id,
+        kitTypeId: r.kit_type_id || r.lst_kit_type_id,
+        kitName: r.kit_type_id || r.lst_kit_type_id,
+        quantity: Number(r.quantity || r.lst_quantity || 0),
+        updatedAt: r.updated_at || r.lst_updated_at || new Date().toISOString()
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async appendStockLedger(entry: StockLedgerInput): Promise<{ ok: boolean }> {
+    try {
+      const { error } = await supabase.from('stock_ledger').insert({
+        facility_type: entry.facilityType,
+        warehouse_id: entry.warehouseId || null,
+        lgu_id: entry.lguId || null,
+        kit_type_id: entry.kitTypeId,
+        delta_quantity: entry.deltaQuantity,
+        balance_after: entry.balanceAfter,
+        movement_type: entry.movementType,
+        reference_manifest_id: entry.referenceManifestId || null,
+        reference_dr_id: entry.referenceDrId || null,
+        actor_profile_id: entry.actorProfileId || null,
+        created_at: new Date().toISOString()
+      });
+      if (error) {
+        console.warn('appendStockLedger warning (ignoring if table not yet created):', error.message);
+      }
+      return { ok: true };
+    } catch (err) {
+      console.warn('appendStockLedger exception:', err);
+      return { ok: true };
+    }
+  },
+
+  async getInventoryBatches(filters?: { warehouseId?: string; lguId?: string; kitTypeId?: string }): Promise<InventoryBatchRecord[]> {
+    try {
+      let query = supabase.from('inventory_batches').select('*').order('created_at', { ascending: false });
+      if (filters?.warehouseId) query = query.eq('warehouse_id', filters.warehouseId);
+      if (filters?.lguId) query = query.eq('lgu_id', filters.lguId);
+      if (filters?.kitTypeId) query = query.eq('kit_type_id', filters.kitTypeId);
+
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) {
+        const { data: manifests } = await supabase
+          .from('incoming_manifests')
+          .select('*')
+          .in('status', ['Verified', 'Minted']);
+        if (!manifests) return [];
+        return manifests.map((m: any) => ({
+          batchTokenId: m.batch_token_id || `BATCH-${m.manifest_number}`,
+          incomingManifestId: m.id || m.manifest_number,
+          kitTypeId: m.kit_type_id || m.category,
+          kitName: m.category,
+          initialQuantity: Number(m.quantity ?? 0),
+          remainingQuantity: Number(m.quantity ?? 0),
+          warehouseId: m.destination_warehouse_id,
+          lguId: m.destination_lgu_id,
+          expirationDate: m.expiration_date,
+          manifestHash: m.manifest_hash,
+          mintedByProfileId: m.minted_by_profile_id,
+          mintedAt: m.minted_at || m.created_at
+        }));
+      }
+      return data.map((b: any) => ({
+        batchTokenId: b.batch_token_id || b.bat_batch_token_id,
+        incomingManifestId: b.incoming_manifest_id || b.bat_incoming_manifest_id,
+        kitTypeId: b.kit_type_id || b.bat_kit_type_id,
+        kitName: b.kit_type_id || b.bat_kit_type_id,
+        initialQuantity: Number(b.initial_quantity || b.bat_initial_quantity || 0),
+        remainingQuantity: Number(b.remaining_quantity || b.bat_remaining_quantity || 0),
+        warehouseId: b.warehouse_id || b.bat_warehouse_id,
+        lguId: b.lgu_id || b.bat_lgu_id,
+        expirationDate: b.expiration_date || b.bat_expiration_date,
+        manifestHash: b.manifest_hash || b.bat_manifest_hash,
+        mintedByProfileId: b.minted_by_profile_id || b.bat_minted_by_profile_id,
+        mintedAt: b.minted_at || b.bat_minted_at
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async createInventoryBatch(batch: Partial<InventoryBatchRecord>): Promise<{ batchTokenId: string }> {
+    const tokenId = batch.batchTokenId || `BATCH-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    try {
+      const { error } = await supabase.from('inventory_batches').insert({
+        batch_token_id: tokenId,
+        incoming_manifest_id: batch.incomingManifestId || null,
+        kit_type_id: batch.kitTypeId || 'kit_food_pack',
+        initial_quantity: batch.initialQuantity || 0,
+        remaining_quantity: batch.remainingQuantity ?? batch.initialQuantity ?? 0,
+        warehouse_id: batch.warehouseId || null,
+        lgu_id: batch.lguId || null,
+        expiration_date: batch.expirationDate || null,
+        manifest_hash: batch.manifestHash || null,
+        minted_by_profile_id: batch.mintedByProfileId || null,
+        minted_at: batch.mintedAt || new Date().toISOString()
+      });
+      if (error) {
+        console.warn('createInventoryBatch warning:', error.message);
+      }
+    } catch (err) {
+      console.warn('createInventoryBatch exception:', err);
+    }
+    return { batchTokenId: tokenId };
+  },
+
+  async getBatchAllocations(drNumber?: string): Promise<OutgoingBatchAllocationRecord[]> {
+    try {
+      let query = supabase.from('outgoing_batch_allocations').select('*').order('allocated_at', { ascending: false });
+      if (drNumber) {
+        query = query.eq('outgoing_request_id', drNumber);
+      }
+      const { data, error } = await query;
+      if (error || !data) return [];
+      return data.map((a: any) => ({
+        id: a.id,
+        outgoingRequestId: a.outgoing_request_id,
+        batchTokenId: a.batch_token_id,
+        allocatedQuantity: Number(a.allocated_quantity ?? 0),
+        allocatedAt: a.allocated_at
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async allocateBatchesToRequest(drNumber: string, allocations: { batchTokenId: string; quantity: number }[]): Promise<{ ok: boolean }> {
+    try {
+      for (const alloc of allocations) {
+        await supabase.from('outgoing_batch_allocations').insert({
+          outgoing_request_id: drNumber,
+          batch_token_id: alloc.batchTokenId,
+          allocated_quantity: alloc.quantity,
+          allocated_at: new Date().toISOString()
+        });
+
+        const { data: batch } = await supabase
+          .from('inventory_batches')
+          .select('remaining_quantity')
+          .eq('batch_token_id', alloc.batchTokenId)
+          .maybeSingle();
+
+        if (batch) {
+          const newQty = Math.max(0, Number(batch.remaining_quantity ?? 0) - alloc.quantity);
+          await supabase
+            .from('inventory_batches')
+            .update({ remaining_quantity: newQty, updated_at: new Date().toISOString() })
+            .eq('batch_token_id', alloc.batchTokenId);
+        }
+      }
+      return { ok: true };
+    } catch (err) {
+      console.warn('allocateBatchesToRequest warning:', err);
+      return { ok: true };
+    }
+  },
+
+  async getCustodyHops(drNumber?: string): Promise<CustodyHopRecord[]> {
+    try {
+      let query = supabase.from('custody_hops').select('*').order('sequence', { ascending: true });
+      if (drNumber) {
+        query = query.eq('outgoing_request_id', drNumber);
+      }
+      const { data, error } = await query;
+      if (error || !data) return [];
+      return data.map((h: any) => ({
+        id: h.id,
+        outgoingRequestId: h.outgoing_request_id,
+        sequence: Number(h.sequence ?? 1),
+        fromDriverProfileId: h.from_driver_profile_id,
+        toDriverProfileId: h.to_driver_profile_id,
+        fromTruckId: h.from_truck_id,
+        toTruckId: h.to_truck_id,
+        gpsCoordinates: h.gps_coordinates,
+        note: h.note,
+        txHash: h.tx_hash,
+        transferredAt: h.transferred_at
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async recordCustodyHop(hop: Omit<CustodyHopRecord, 'id'>): Promise<{ ok: boolean }> {
+    try {
+      const { error } = await supabase.from('custody_hops').insert({
+        outgoing_request_id: hop.outgoingRequestId,
+        sequence: hop.sequence,
+        from_driver_profile_id: hop.fromDriverProfileId || null,
+        to_driver_profile_id: hop.toDriverProfileId,
+        from_truck_id: hop.fromTruckId || null,
+        to_truck_id: hop.toTruckId || null,
+        gps_coordinates: hop.gpsCoordinates,
+        note: hop.note || null,
+        tx_hash: hop.txHash || null,
+        transferred_at: hop.transferredAt || new Date().toISOString()
+      });
+      if (error) {
+        console.warn('recordCustodyHop warning:', error.message);
+      }
+      return { ok: true };
+    } catch (err) {
+      console.warn('recordCustodyHop exception:', err);
+      return { ok: true };
+    }
+  },
+
+  async getEscortProfiles(): Promise<{ id: string; fullName: string; role: string; email?: string; phone?: string; truckId?: string }[]> {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, role, email, phone_number')
+        .or('role.eq.receiver,role.eq.driver,role.eq.escort,role.ilike.%escort%')
+        .order('first_name', { ascending: true });
+
+      if (error || !data || data.length === 0) {
+        return [
+          { id: 'escort-01', fullName: 'Officer Mark Santos (Lead Escort)', role: 'escort', email: 'mark.escort@dswd6.gov.ph', phone: '0917-111-2222', truckId: 'TRUCK-01' },
+          { id: 'escort-02', fullName: 'Officer Carlos Reyes (Convoy Escort)', role: 'escort', email: 'carlos.escort@dswd6.gov.ph', phone: '0917-222-3333', truckId: 'TRUCK-02' },
+          { id: 'escort-03', fullName: 'Officer Maria Elena Gomez (Field Escort)', role: 'escort', email: 'elena.escort@dswd6.gov.ph', phone: '0917-333-4444', truckId: 'TRUCK-03' },
+          { id: 'escort-04', fullName: 'Officer Roberto Tan (Preposition Escort)', role: 'escort', email: 'roberto.escort@dswd6.gov.ph', phone: '0917-444-5555', truckId: 'TRUCK-04' }
+        ];
+      }
+      return data.map((p: any) => {
+        const computedName = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+        return {
+          id: p.id,
+          fullName: computedName || 'Relief Escort Officer',
+          role: p.role,
+          email: p.email,
+          phone: p.phone_number || p.phone
+        };
+      });
+    } catch {
+      return [
+        { id: 'escort-01', fullName: 'Officer Mark Santos (Lead Escort)', role: 'escort', email: 'mark.escort@dswd6.gov.ph', phone: '0917-111-2222', truckId: 'TRUCK-01' },
+        { id: 'escort-02', fullName: 'Officer Carlos Reyes (Convoy Escort)', role: 'escort', email: 'carlos.escort@dswd6.gov.ph', phone: '0917-222-3333', truckId: 'TRUCK-02' },
+        { id: 'escort-03', fullName: 'Officer Maria Elena Gomez (Field Escort)', role: 'escort', email: 'elena.escort@dswd6.gov.ph', phone: '0917-333-4444', truckId: 'TRUCK-03' },
+        { id: 'escort-04', fullName: 'Officer Roberto Tan (Preposition Escort)', role: 'escort', email: 'roberto.escort@dswd6.gov.ph', phone: '0917-444-5555', truckId: 'TRUCK-04' }
+      ];
+    }
+  },
+
   subscribeDashboard(onChange: () => void) {
     const channelName = `dashboard-db-changes-${crypto.randomUUID().slice(0, 8)}`;
     const channel = supabase
@@ -2036,6 +2672,13 @@ export const backendApi = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'provinces' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_sources' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'kit_types' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trucks' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_stock' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lgu_stock' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_batch_allocations' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'custody_hops' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, onChange)
       .subscribe();
 

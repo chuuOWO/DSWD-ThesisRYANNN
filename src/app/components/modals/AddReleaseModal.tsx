@@ -1,7 +1,17 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2 } from 'lucide-react';
+import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2, UserCheck, Truck } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
-import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
+import {
+  backendApi,
+  DEFAULT_TRUCKS,
+  type LguRecord,
+  type ProvinceRecord,
+  type WarehouseRecord,
+  type SupplySourceRecord,
+  type KitTypeRecord,
+  type TruckRecord,
+  type EscortProfile
+} from '../../services/backendApi';
 import { LocationPickerMap } from '../design/LocationPickerMap';
 import { sanitizeNumbersOnly, sanitizeAlphanumeric, sanitizeSlipReference } from '../../lib/inputValidation';
 import { DEFAULT_PANAY_LGUS, DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
@@ -26,6 +36,15 @@ export interface ReleaseForm {
   deliveryStatus: OutgoingStatus;
   destinationAddress?: string;
   receiverGps?: string;
+  assignedTruckId?: string;
+  assigned_truck_id?: string;
+  assignedEscortProfileId?: string;
+  assignedDriverProfileId?: string;
+  kitTypeId?: string;
+  sourceWarehouseId?: string;
+  sourceLguId?: string;
+  destinationWarehouseId?: string;
+  destinationLguId?: string;
 }
 
 interface AddReleaseModalProps {
@@ -39,6 +58,8 @@ interface AddReleaseModalProps {
   warehousesList?: WarehouseRecord[];
   supplySourcesList?: SupplySourceRecord[];
   kitTypesList?: KitTypeRecord[];
+  trucksList?: TruckRecord[];
+  escortProfilesList?: EscortProfile[];
 }
 
 const defaultFormData: ReleaseForm = {
@@ -57,7 +78,9 @@ const defaultFormData: ReleaseForm = {
   deliveryMode: 'Truck',
   deliveryStatus: 'Allocating',
   destinationAddress: '',
-  receiverGps: ''
+  receiverGps: '',
+  assignedTruckId: '',
+  assignedEscortProfileId: ''
 };
 
 const cleanBuildingName = (val?: string): string => {
@@ -79,8 +102,29 @@ export function AddReleaseModal({
   provincesList = [],
   warehousesList = [],
   supplySourcesList = [],
-  kitTypesList = []
+  kitTypesList = [],
+  trucksList = [],
+  escortProfilesList: propEscortProfiles
 }: AddReleaseModalProps) {
+  const [escorts, setEscorts] = useState<EscortProfile[]>(propEscortProfiles || []);
+
+  useEffect(() => {
+    if (propEscortProfiles && propEscortProfiles.length > 0) {
+      setEscorts(propEscortProfiles);
+      return;
+    }
+    let isMounted = true;
+    backendApi.getEscortProfiles().then(list => {
+      if (isMounted && list && list.length > 0) setEscorts(list);
+    }).catch(() => {});
+    return () => { isMounted = false; };
+  }, [propEscortProfiles]);
+
+  const availableTrucks = useMemo(() => {
+    if (trucksList && trucksList.length > 0) return trucksList;
+    return DEFAULT_TRUCKS;
+  }, [trucksList]);
+
   // Master LGUs from Supabase with authoritative regional fallback
   const availableLgus = useMemo(() => {
     if (lgusList && lgusList.length > 0) return lgusList;
@@ -144,7 +188,9 @@ export function AddReleaseModal({
       incidentCode: parsed.incidentCode || initialData.incidentCode || '',
       incidentDate: initialData.incidentDate || parsed.incidentDate || initialData.dateAllocated || new Date().toISOString().split('T')[0],
       reportReason: isStandardReason ? existingReason : 'Others (Specify)',
-      lguName: cleanBuildingName(initialData.lguName)
+      lguName: cleanBuildingName(initialData.lguName),
+      assignedTruckId: initialData.assignedTruckId || initialData.assigned_truck_id || '',
+      assignedEscortProfileId: initialData.assignedEscortProfileId || initialData.assignedDriverProfileId || ''
     };
   });
 
@@ -206,7 +252,9 @@ export function AddReleaseModal({
       incidentCode: parsed.incidentCode || initialData.incidentCode || '',
       incidentDate: initialData.incidentDate || parsed.incidentDate || initialData.dateAllocated || new Date().toISOString().split('T')[0],
       reportReason: isStandardReason ? existingReason : 'Others (Specify)',
-      lguName: cleanBuildingName(initialData.lguName)
+      lguName: cleanBuildingName(initialData.lguName),
+      assignedTruckId: initialData.assignedTruckId || initialData.assigned_truck_id || '',
+      assignedEscortProfileId: initialData.assignedEscortProfileId || initialData.assignedDriverProfileId || ''
     });
 
     if (existingReason && !isStandardReason) {
@@ -403,12 +451,31 @@ export function AddReleaseModal({
       const buildingFinal = formData.lguName.trim() || `${formData.municipality} Drop-off Center`;
       const initialStatus: OutgoingStatus = mode === 'add' ? 'Allocating' : formData.deliveryStatus;
 
+      const matchedKit = kitTypesList?.find(k => k.name.toLowerCase() === formData.fnfiCategory.toLowerCase());
+      let srcWhId: string | undefined;
+      let srcLguId: string | undefined;
+      if (formData.sourceType === 'Warehouse') {
+        srcWhId = warehousesList?.find(w => w.name.toLowerCase() === formData.warehouseSource.toLowerCase())?.id;
+      } else {
+        srcLguId = availableLgus.find(l => l.municipality.toLowerCase() === sourceMunicipality.toLowerCase())?.id;
+      }
+      const destLgu = availableLgus.find(l => l.municipality.toLowerCase() === formData.municipality.toLowerCase());
+      const destLguId = destLgu?.id;
+
       const submissionData: ReleaseForm = {
         ...formData,
         incidentCode: formattedIncident,
         reportReason: finalReason,
         lguName: buildingFinal,
-        deliveryStatus: initialStatus
+        deliveryStatus: initialStatus,
+        assignedTruckId: formData.assignedTruckId?.trim() || undefined,
+        assigned_truck_id: formData.assignedTruckId?.trim() || undefined,
+        assignedEscortProfileId: formData.assignedEscortProfileId?.trim() || undefined,
+        assignedDriverProfileId: formData.assignedEscortProfileId?.trim() || undefined,
+        kitTypeId: matchedKit?.id,
+        sourceWarehouseId: srcWhId,
+        sourceLguId: srcLguId,
+        destinationLguId: destLguId
       };
 
       onSubmit(submissionData);
@@ -964,6 +1031,65 @@ export function AddReleaseModal({
             <p className="text-xs text-amber-900/80 leading-relaxed">
               Mandatory calamity justification required by DSWD Disaster Response Management Bureau (DRMB) protocols for relief releases.
             </p>
+          </div>
+
+          {/* SECTION 5: RELIEF ESCORT & CONVOY TRUCK (OPTIONAL / PRE-ASSIGN) */}
+          <div className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-bold text-indigo-950 uppercase tracking-wide">
+                <Truck className="w-4 h-4 text-indigo-700" />
+                <span>5. Relief Escort Officer & Convoy Truck (Optional)</span>
+              </label>
+              <span className="text-[10px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded border border-indigo-200">
+                Logistics Assignment
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                  <Truck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Convoy Relief Truck</span>
+                </label>
+                <select
+                  value={formData.assignedTruckId || ''}
+                  onChange={(e) => handleChange('assignedTruckId', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Unassigned (Assign later)</option>
+                  {availableTrucks.map((truck) => (
+                    <option key={truck.truckId} value={truck.truckId}>
+                      {truck.truckId} • {truck.plateNumber} ({truck.model || 'Heavy Cargo'} - {truck.capacityKg?.toLocaleString()} kg)
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Designated transport unit in DSWD Region VI relief convoy.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Relief Escort Officer</span>
+                </label>
+                <select
+                  value={formData.assignedEscortProfileId || ''}
+                  onChange={(e) => handleChange('assignedEscortProfileId', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Unassigned (Assign later)</option>
+                  {escorts.map((escort) => (
+                    <option key={escort.id} value={escort.id}>
+                      {escort.fullName} ({escort.email || 'Escort Officer'})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Assigned officer responsible for physical custody and GNSS tracking.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Delivery Status Indicator */}

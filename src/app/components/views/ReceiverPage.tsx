@@ -22,14 +22,23 @@ import {
   Menu,
   ChevronRight,
   X,
-  ExternalLink
+  ExternalLink,
+  ArrowRightLeft,
+  UserCheck
 } from 'lucide-react';
 import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 
 import type { UserProfile } from '../../services/authApi';
-import { backendApi, type ReceiverReleaseRecord, type LguRecord } from '../../services/backendApi';
+import {
+  backendApi,
+  DEFAULT_TRUCKS,
+  type ReceiverReleaseRecord,
+  type LguRecord,
+  type TruckRecord,
+  type EscortProfile
+} from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
 import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { findMatchingLgu } from '../../lib/lguMatching';
@@ -693,7 +702,7 @@ export function ReceiverPage(props: ReceiverPageProps) {
           </div>
           <h2 className="text-2xl font-black mb-2 tracking-tight">Smartphone Required</h2>
           <p className="text-xs text-slate-300 mb-6 leading-relaxed">
-            The <strong>Receiver GPS Module</strong> requires mobile hardware GNSS / satellite sensors. 
+            The <strong>Relief Escort GPS Telemetry Module</strong> requires mobile hardware GNSS / satellite sensors. 
             Laptops and desktop computers do not have GPS chips and report inaccurate IP routing (e.g. Manila telecom hubs).
           </p>
           <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-6 text-left text-xs space-y-2.5 text-slate-300">
@@ -701,7 +710,7 @@ export function ReceiverPage(props: ReceiverPageProps) {
               <MapPin size={14} className="text-blue-400" />
               <span>How to run this properly:</span>
             </div>
-            <p>1. Open this page (<strong>/receiver</strong>) on your smartphone browser (Chrome or Safari).</p>
+            <p>1. Open this page (<strong>/escort</strong> or <strong>/receiver</strong>) on your smartphone browser (Chrome or Safari).</p>
             <p>2. Allow location permissions when prompted to enable real-time satellite tracking.</p>
           </div>
           <div className="space-y-2">
@@ -710,7 +719,7 @@ export function ReceiverPage(props: ReceiverPageProps) {
               onClick={handleBypassMobile}
               className="w-full py-3 px-4 bg-[#2500ba] hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
             >
-              Continue to Receiver Dashboard (Desktop Mode)
+              Continue to Escort Terminal (Desktop Mode)
             </button>
             {props.onSignOut && (
               <button
@@ -738,6 +747,40 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const receiverId = useMemo(() => getReceiverIdentifier(profile), [profile]);
   const storageKey = `trucker_active_packages_${receiverId}`;
   const lastKnownPosKey = `trucker_last_known_pos_${receiverId}`;
+
+  // Trucks list and active convoy truck
+  const [trucksList, setTrucksList] = useState<TruckRecord[]>(DEFAULT_TRUCKS);
+  const [activeTruckId, setActiveTruckId] = useState<string>(() => {
+    if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim();
+    return 'TRK-001';
+  });
+
+  // Escort profiles for multi-hop convoy relay
+  const [escortProfiles, setEscortProfiles] = useState<EscortProfile[]>([]);
+  const [transferTargetPackage, setTransferTargetPackage] = useState<QrPayload | null>(null);
+  const [transferTargetEscortId, setTransferTargetEscortId] = useState<string>('');
+  const [transferTargetTruckId, setTransferTargetTruckId] = useState<string>('');
+  const [transferNotes, setTransferNotes] = useState<string>('');
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    backendApi.getTrucks().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setTrucksList(data);
+      }
+    }).catch(() => {});
+
+    backendApi.getEscortProfiles().then((data) => {
+      if (isMounted && data && data.length > 0) {
+        setEscortProfiles(data);
+      }
+    }).catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Authoritative LGU list from Supabase
   const [dbLgus, setDbLgus] = useState<LguRecord[]>(lgusList || []);
@@ -839,10 +882,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const completedReleases = useMemo(() => {
     return allReleases.filter(
       (r) =>
-        r.assigned_truck_id === receiverId &&
+        (r.assigned_truck_id === activeTruckId || r.assigned_driver_profile_id === profile?.id || r.assigned_truck_id === receiverId) &&
         ['Delivered', 'Accepted', 'Distributed'].includes(r.delivery_status ?? '')
     );
-  }, [allReleases, receiverId]);
+  }, [allReleases, activeTruckId, profile?.id, receiverId]);
 
   const activePackagesRef = useRef<QrPayload[]>(activePackages);
   useEffect(() => {
@@ -1058,7 +1101,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         if (currentPackages && currentPackages.length > 0 && !isLguReceiver) {
           const activeDr = currentPackages[0]?.drNumber || null;
           void backendApi.upsertTruckLiveLocation({
-            truck_id: receiverId,
+            truck_id: activeTruckId || receiverId,
             current_dr_number: activeDr,
             latitude: updatedLoc.latitude,
             longitude: updatedLoc.longitude,
@@ -1081,7 +1124,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         watchIdRef.current = null;
       }
     };
-  }, [lastKnownPosKey, profile?.walletAddress, receiverId]);
+  }, [lastKnownPosKey, profile?.walletAddress, receiverId, activeTruckId]);
 
   // Clean up camera on unmount
   useEffect(() => {
@@ -1101,7 +1144,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
         if (!isSubscribed) return;
         setAllReleases(releases);
-        const currentRelease = releases.find((r) => r.assigned_truck_id === receiverId) || releases[0] || null;
+        const currentRelease = releases.find((r) => r.assigned_truck_id === activeTruckId || r.assigned_driver_profile_id === profile?.id || r.assigned_truck_id === receiverId) || releases[0] || null;
         setRelease(currentRelease);
 
         const currentPackages = activePackagesRef.current;
@@ -1109,7 +1152,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           const remainingPackages = currentPackages.filter((pkg) => {
             const matchingReq = releases.find((r) => r.dr_number === pkg.drNumber);
             if (!matchingReq) return false;
-            const isAssignedToMe = matchingReq.assigned_truck_id === receiverId;
+            const isAssignedToMe = matchingReq.assigned_truck_id === activeTruckId || matchingReq.assigned_driver_profile_id === profile?.id || matchingReq.assigned_truck_id === receiverId;
             const isDone = ['Delivered', 'Accepted', 'Distributed'].includes(matchingReq.delivery_status ?? '');
             return isAssignedToMe && !isDone;
           });
@@ -1125,7 +1168,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             }
             const handoverNote = removedPackages.map((p) => {
               const req = releases.find((r) => r.dr_number === p.drNumber);
-              if (req?.assigned_truck_id && req.assigned_truck_id !== receiverId) {
+              if (req?.assigned_truck_id && req.assigned_truck_id !== activeTruckId && req.assigned_truck_id !== receiverId) {
                 return `DR #${p.drNumber} transferred to ${req.assigned_truck_id}`;
               }
               return `DR #${p.drNumber} delivered/accepted`;
@@ -1344,31 +1387,64 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         setConfirmedTxHash(proof.hash);
       }
 
-      await backendApi.assignTruckToRelease(payload.drNumber, receiverId, 'In Transit');
+      await backendApi.assignEscortAndTruckToRelease(payload.drNumber, activeTruckId, profile?.id, 'In Transit');
       if (activeProofHash) {
         await backendApi.updateOutgoing(payload.drNumber, {
           senderSignature: activeProofHash,
           txHash: activeProofHash,
           handoverContractId: resolvedContractId,
           walletAddress: activeWalletAddr,
-          deliveryStatus: 'In Transit'
+          deliveryStatus: 'In Transit',
+          assignedTruckId: activeTruckId,
+          assigned_truck_id: activeTruckId,
+          assignedEscortProfileId: profile?.id,
+          assignedDriverProfileId: profile?.id
         }).catch(() => {});
       }
+
+      // Record initial custody hop in database
+      await backendApi.recordCustodyHop({
+        outgoingRequestId: custody.matchingRelease?.id || payload.drNumber,
+        sequence: 1,
+        fromDriverProfileId: undefined,
+        toDriverProfileId: profile?.id,
+        fromTruckId: undefined,
+        toTruckId: activeTruckId,
+        gpsCoordinates: `${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`,
+        blockchainTxHash: activeProofHash,
+        notes: `Relief Escort Officer ${profile?.fullName || receiverId} took physical custody on convoy vehicle ${activeTruckId}.`
+      }).catch(() => {});
+
+      // Record CUSTODY_TRANSFER movement in stock_ledger
+      await backendApi.appendStockLedger({
+        movementType: 'CUSTODY_TRANSFER',
+        outgoingRequestId: custody.matchingRelease?.id,
+        drNumber: payload.drNumber,
+        destinationLguId: custody.matchingRelease?.destination_lgu_id,
+        quantityChange: payload.quantity,
+        referenceTable: 'custody_hops',
+        referenceId: payload.drNumber,
+        gpsCoordinates: `${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`,
+        blockchainTxHash: activeProofHash,
+        performedByProfileId: profile?.id,
+        notes: `Relief Escort custody accepted for ${payload.drNumber} on vehicle ${activeTruckId}.`
+      }).catch(() => {});
 
       // Log custody acceptance to activity_logs for audit trails and user trails
       await backendApi.logActivity({
         actorId: profile?.id,
         actorName: profile?.fullName || receiverId,
         actorEmail: profile?.email,
-        actorRole: profile?.role || 'receiver',
+        actorRole: 'escort',
         actorWallet: activeWalletAddr,
         action: 'CUSTODY_ACCEPTED',
         entityType: 'outgoing_request',
         entityId: payload.drNumber,
-        details: `Receiver custody confirmed for ${payload.drNumber}. Transferred to vehicle ${receiverId} at GPS ${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}.`,
+        details: `Relief Escort custody confirmed for ${payload.drNumber}. Transferred to convoy vehicle ${activeTruckId} at GPS ${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}.`,
         metadata: {
           drNumber: payload.drNumber,
-          truckId: receiverId,
+          truckId: activeTruckId,
+          escortProfileId: profile?.id,
           gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
           quantity: payload.quantity,
           category: payload.category,
@@ -1396,7 +1472,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       if (!isLguReceiver) {
         try {
           await backendApi.upsertTruckLiveLocation({
-            truck_id: receiverId,
+            truck_id: activeTruckId,
+            current_dr_number: payload.drNumber,
             latitude: nextLocation.latitude,
             longitude: nextLocation.longitude,
             gps_text: formatGps(nextLocation),
@@ -1437,28 +1514,50 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         }
         if (handoverId > 0n) {
           console.log(`On-chain recovery: handover ${handoverId} confirmed for ${payload.drNumber}.`);
-          await backendApi.assignTruckToRelease(payload.drNumber, receiverId, 'In Transit');
+          await backendApi.assignEscortAndTruckToRelease(payload.drNumber, activeTruckId, profile?.id, 'In Transit');
           await backendApi.updateOutgoing(payload.drNumber, {
             senderSignature: `on-chain-handover-${handoverId}`,
             txHash: `on-chain-handover-${handoverId}`,
             handoverContractId: resolvedContractId,
             walletAddress: activeWalletAddr,
-            deliveryStatus: 'In Transit'
+            deliveryStatus: 'In Transit',
+            assignedTruckId: activeTruckId,
+            assigned_truck_id: activeTruckId,
+            assignedEscortProfileId: profile?.id,
+            assignedDriverProfileId: profile?.id
+          }).catch(() => {});
+
+          await backendApi.recordCustodyHop({
+            outgoingRequestId: payload.drNumber,
+            sequence: 1,
+            toDriverProfileId: profile?.id,
+            toTruckId: activeTruckId,
+            notes: `Relief Escort on-chain recovery custody confirmed (handover ${handoverId}).`
+          }).catch(() => {});
+
+          await backendApi.appendStockLedger({
+            movementType: 'CUSTODY_TRANSFER',
+            drNumber: payload.drNumber,
+            quantityChange: payload.quantity,
+            referenceTable: 'custody_hops',
+            referenceId: payload.drNumber,
+            performedByProfileId: profile?.id,
+            notes: `On-chain custody recovery confirmed for ${payload.drNumber}.`
           }).catch(() => {});
 
           await backendApi.logActivity({
             actorId: profile?.id,
             actorName: profile?.fullName || receiverId,
             actorEmail: profile?.email,
-            actorRole: profile?.role || 'receiver',
+            actorRole: 'escort',
             actorWallet: activeWalletAddr,
             action: 'CUSTODY_ACCEPTED',
             entityType: 'outgoing_request',
             entityId: payload.drNumber,
-            details: `Receiver custody confirmed on-chain (handover ${handoverId}) for ${payload.drNumber}. Transferred to vehicle ${receiverId}.`,
+            details: `Relief Escort custody confirmed on-chain (handover ${handoverId}) for ${payload.drNumber}. Transferred to convoy vehicle ${activeTruckId}.`,
             metadata: {
               drNumber: payload.drNumber,
-              truckId: receiverId,
+              truckId: activeTruckId,
               handoverId: Number(handoverId),
               quantity: payload.quantity,
               category: payload.category
@@ -1497,6 +1596,86 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       isExecutingCustodyRef.current = false;
       setIsSubmittingProof(false);
       setSignStage('idle');
+    }
+  };
+
+  const handleTransferCustody = async () => {
+    if (!transferTargetPackage) return;
+    setIsTransferring(true);
+    try {
+      const pkg = transferTargetPackage;
+      const targetEscort = escortProfiles.find((e) => e.id === transferTargetEscortId);
+      const targetTruck = trucksList.find((t) => t.truckId === transferTargetTruckId);
+      const destTruckId = targetTruck?.truckId || transferTargetTruckId || activeTruckId;
+      const currentLoc = location || (await getBrowserLocation().catch(() => null));
+      const gpsCoords = currentLoc ? `${currentLoc.latitude.toFixed(6)}, ${currentLoc.longitude.toFixed(6)}` : undefined;
+
+      const existingHops = await backendApi.getCustodyHops(pkg.drNumber).catch(() => []);
+      const nextSeq = (existingHops.length || 0) + 1;
+
+      // 1. Record custody hop in database
+      await backendApi.recordCustodyHop({
+        outgoingRequestId: pkg.drNumber,
+        sequence: nextSeq,
+        fromDriverProfileId: profile?.id,
+        toDriverProfileId: transferTargetEscortId || undefined,
+        fromTruckId: activeTruckId,
+        toTruckId: destTruckId,
+        gpsCoordinates: gpsCoords,
+        notes: transferNotes.trim() || `Convoy relay from ${activeTruckId} to Escort ${targetEscort?.fullName || 'Officer'} on ${destTruckId}`
+      });
+
+      // 2. Reassign release in database
+      await backendApi.assignEscortAndTruckToRelease(pkg.drNumber, destTruckId, transferTargetEscortId || null, 'In Transit');
+
+      // 3. Append CUSTODY_TRANSFER movement to stock_ledger
+      await backendApi.appendStockLedger({
+        movementType: 'CUSTODY_TRANSFER',
+        drNumber: pkg.drNumber,
+        quantityChange: pkg.quantity,
+        referenceTable: 'custody_hops',
+        referenceId: pkg.drNumber,
+        gpsCoordinates: gpsCoords,
+        performedByProfileId: profile?.id,
+        notes: `Relief Escort handover: transferred cargo from vehicle ${activeTruckId} to vehicle ${destTruckId}. ${transferNotes.trim()}`
+      }).catch(() => {});
+
+      // 4. Activity log
+      await backendApi.logActivity({
+        actorId: profile?.id,
+        actorName: profile?.fullName || receiverId,
+        actorEmail: profile?.email,
+        actorRole: 'escort',
+        action: 'CUSTODY_TRANSFERRED',
+        entityType: 'outgoing_request',
+        entityId: pkg.drNumber,
+        details: `Relayed custody of shipment ${pkg.drNumber} from convoy vehicle ${activeTruckId} to Escort ${targetEscort?.fullName || 'Officer'} (${destTruckId}).`,
+        metadata: {
+          drNumber: pkg.drNumber,
+          fromTruckId: activeTruckId,
+          toTruckId: destTruckId,
+          fromEscortId: profile?.id,
+          toEscortId: transferTargetEscortId,
+          notes: transferNotes
+        }
+      }).catch(() => {});
+
+      // 5. Remove package locally from active cargo
+      const remaining = activePackages.filter((p) => p.drNumber !== pkg.drNumber);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(remaining));
+      } catch {}
+      setActivePackages(remaining);
+
+      setHandoverToast(`Custody transferred: DR #${pkg.drNumber} relayed to vehicle ${destTruckId} (${targetEscort?.fullName || 'Relief Escort'})`);
+      setTimeout(() => setHandoverToast(null), 7000);
+      setTransferTargetPackage(null);
+      setTransferNotes('');
+    } catch (err) {
+      console.error('Custody transfer error:', err);
+      alert('Failed to transfer custody. Please check connection.');
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -1616,11 +1795,11 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             </div>
             <div>
               <p className="text-[11px] font-semibold flex items-center gap-1.5">
-                <span>Receiver View</span>
-                <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Profile</span>
+                <span>Relief Escort Terminal</span>
+                <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Escort</span>
               </p>
               <p className="text-[10px] text-white/70 truncate max-w-[140px]">
-                {receiverId} • {profile?.fullName || 'Oton Warehouse'}
+                {activeTruckId} • {profile?.fullName || 'Relief Escort'}
               </p>
             </div>
           </div>
@@ -1897,6 +2076,20 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             </div>
                           );
                         })()}
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTransferTargetPackage(pkg);
+                            setTransferTargetTruckId(activeTruckId);
+                            setTransferTargetEscortId('');
+                          }}
+                          className="mt-2 w-full py-1.5 px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-800 font-bold text-[9.5px] flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                        >
+                          <ArrowRightLeft size={11} className="text-indigo-600" />
+                          <span>Transfer Convoy Custody</span>
+                        </button>
                       </div>
                     );
                   })}
@@ -2127,19 +2320,19 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             reportType: 'Outgoing',
                             drNumber: activeDr,
                             note: noteText,
-                            reportedByRole: 'Receiver',
+                            reportedByRole: 'Escort',
                             reportedByWallet: profile?.walletAddress || undefined
                           });
                           await backendApi.logActivity({
                             actorId: profile?.id,
                             actorName: profile?.fullName || receiverId,
                             actorEmail: profile?.email,
-                            actorRole: 'receiver',
+                            actorRole: 'escort',
                             actorWallet: profile?.walletAddress || undefined,
                             action: 'DISCREPANCY_REPORTED',
                             entityType: 'outgoing_request',
                             entityId: activeDr,
-                            details: `Driver reported discrepancy / transit remarks for ${activeDr}: ${noteText}`,
+                            details: `Relief Escort Officer reported discrepancy / transit remarks for ${activeDr}: ${noteText}`,
                             metadata: { drNumber: activeDr, truckId: receiverId, verifiedQuantity, origQty, note: noteText }
                           });
                         } catch (discErr) {
@@ -2166,6 +2359,104 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   <Check size={16} />
                   <span>Confirm Packages & Start Delivery</span>
                 </button>
+              </div>
+            </Modal>
+          )}
+
+          {/* Multi-Hop Custody Relay Modal */}
+          {transferTargetPackage && (
+            <Modal
+              title="Transfer Convoy Custody"
+              icon={<ArrowRightLeft size={22} className="text-[#2500ba]" />}
+              onClose={() => setTransferTargetPackage(null)}
+            >
+              <div className="text-left space-y-3 mt-2">
+                <div className="p-2.5 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-bold text-blue-950">Shipment DR #{transferTargetPackage.drNumber}</span>
+                    <span className="px-2 py-0.5 rounded bg-blue-200 text-blue-900 font-bold text-[10px]">
+                      {transferTargetPackage.quantity} {transferTargetPackage.category}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-blue-800">Destination: {transferTargetPackage.to}</p>
+                  <p className="text-[10px] text-gray-500">Current Truck: {activeTruckId} • Escort: {profile?.fullName || receiverId}</p>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                    New Relief Escort Officer <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={transferTargetEscortId}
+                    onChange={(e) => setTransferTargetEscortId(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-gray-300 bg-white text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                  >
+                    <option value="">Select relief escort officer...</option>
+                    {escortProfiles.map((escort) => (
+                      <option key={escort.id} value={escort.id}>
+                        {escort.fullName} ({escort.email || 'Relief Escort'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                    Relay Convoy Truck
+                  </label>
+                  <select
+                    value={transferTargetTruckId || activeTruckId}
+                    onChange={(e) => setTransferTargetTruckId(e.target.value)}
+                    className="w-full text-xs p-2.5 rounded-xl border border-gray-300 bg-white text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                  >
+                    {trucksList.map((truck) => (
+                      <option key={truck.truckId} value={truck.truckId}>
+                        {truck.truckId} • {truck.plateNumber} ({truck.model || 'Heavy Cargo'} - {truck.capacityKg}kg)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                    Transfer Notes / Relay Reason
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={transferNotes}
+                    onChange={(e) => setTransferNotes(e.target.value)}
+                    placeholder="e.g. Convoy handover at Passi junction, vehicle relay due to route re-assignment."
+                    className="w-full text-xs p-2 rounded-lg border border-gray-300 resize-none text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                  />
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTransferTargetPackage(null)}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isTransferring || !transferTargetEscortId}
+                    onClick={handleTransferCustody}
+                    className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                  >
+                    {isTransferring ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Recording Hop...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRightLeft size={13} />
+                        <span>Confirm Transfer</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </Modal>
           )}
@@ -2213,10 +2504,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     </div>
                     <div>
                       <h3 className="text-xs font-black text-gray-900 leading-tight truncate max-w-[150px]">
-                        {profile?.fullName || 'Driver / Receiver'}
+                        {profile?.fullName || 'Relief Escort Officer'}
                       </h3>
                       <p className="text-[10px] text-gray-500 font-mono">
-                        Plate: {receiverId}
+                        Convoy: {activeTruckId}
                       </p>
                     </div>
                   </div>
@@ -2227,6 +2518,24 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   >
                     <X size={18} />
                   </button>
+                </div>
+
+                {/* Assigned Convoy Truck Switcher */}
+                <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-left space-y-1">
+                  <label className="block text-[9.5px] font-bold text-gray-500 uppercase tracking-wide">
+                    Assigned Convoy Truck
+                  </label>
+                  <select
+                    value={activeTruckId}
+                    onChange={(e) => setActiveTruckId(e.target.value)}
+                    className="w-full text-xs font-bold py-1.5 px-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                  >
+                    {trucksList.map((t) => (
+                      <option key={t.truckId} value={t.truckId}>
+                        {t.truckId} • {t.plateNumber} ({t.model || 'Heavy Cargo'})
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Smart Account Card */}
@@ -2300,7 +2609,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   </div>
                   <div>
                     <h3 className="text-sm font-extrabold text-gray-900">Delivery History</h3>
-                    <p className="text-[10px] text-gray-500">Completed shipments for vehicle {receiverId}</p>
+                    <p className="text-[10px] text-gray-500">Completed shipments for convoy vehicle {activeTruckId}</p>
                   </div>
                 </div>
                 <button

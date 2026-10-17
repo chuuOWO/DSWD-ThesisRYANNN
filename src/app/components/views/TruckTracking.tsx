@@ -622,7 +622,7 @@ function RouteMap({
                     {route.status}
                   </span>
                 </div>
-                <p className="text-xs text-gray-600 mt-0.5">{route.driverName || route.driver}</p>
+                <p className="text-xs text-gray-600 mt-0.5">{route.driverName ? `Escort Officer: ${route.driverName}` : route.driver}</p>
                 <p className="mt-1.5 text-xs text-gray-700">Destination: <strong className="text-gray-900">{route.destination}</strong></p>
                 <p className="mt-1 text-xs text-gray-700">Cargo: <span className="font-medium">{route.cargo}</span></p>
                 <p className="mt-1 font-mono text-[10px] text-gray-500">
@@ -945,9 +945,9 @@ export function TruckTracking({
               <div className="w-14 h-14 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 mb-3 shadow-inner">
                 <Truck className="w-7 h-7" />
               </div>
-              <h2 className="text-lg font-bold text-gray-900">No Receivers Currently Streaming Live GPS</h2>
+              <h2 className="text-lg font-bold text-gray-900">No Escort Convoys Currently Streaming Live GPS</h2>
               <p className="text-sm text-gray-500 max-w-md mt-1">
-                When a receiver scans a package QR on their phone or clicks "Pick up and Scan", their live road route will appear here in real-time.
+                When a relief escort officer scans a package QR on their mobile terminal or initiates transit custody, their live convoy telemetry will appear here in real-time.
               </p>
             </div>
           </div>
@@ -994,7 +994,7 @@ export function TruckTracking({
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">
-                    Receiver Code
+                    Convoy / Escort Truck
                   </label>
                   <select
                     value={selectedTruckId}
@@ -1044,8 +1044,8 @@ export function TruckTracking({
                   <span className="font-bold text-gray-800 break-words text-left leading-relaxed">{selectedTruck.cargo}</span>
                 </div>
                 <div className="grid grid-cols-[85px_1fr] gap-2 py-1.5 items-start">
-                  <span className="text-gray-500 font-semibold">Receiver:</span>
-                  <span className="font-bold text-blue-900 break-words text-left leading-relaxed">{selectedTruck.driverName || selectedTruck.driver || 'Assigned Receiver'}</span>
+                  <span className="text-gray-500 font-semibold">Relief Escort:</span>
+                  <span className="font-bold text-blue-900 break-words text-left leading-relaxed">{selectedTruck.driverName || selectedTruck.driver || 'Assigned Relief Escort'}</span>
                 </div>
               </div>
 

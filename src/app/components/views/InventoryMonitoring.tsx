@@ -49,7 +49,7 @@ interface InventoryItem {
 }
 
 export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryMonitoringProps) {
-  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [] } = inventoryState;
+  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [], kitTypesList = [] } = inventoryState;
 
   // Primary facility scope filter: defaults to Main Warehouses (Oton & Pototan)
   const [facilityScope, setFacilityScope] = useState<'main' | 'oton' | 'pototan' | 'all' | 'lgu'>('main');
@@ -67,9 +67,14 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 8;
 
-  // Dynamic categories gathered from inventory, incoming, and outgoing releases without fallbacks
+  // Dynamic categories gathered from master kit_types, inventory, incoming, and outgoing releases without fallbacks
   const dynamicCategories = useMemo(() => {
     const set = new Set<string>();
+    kitTypesList.forEach((k) => {
+      const canonical = normalizeCategoryName(k.name);
+      if (canonical) set.add(canonical);
+      else if (k.name?.trim()) set.add(k.name.trim());
+    });
     inventory.forEach((i) => {
       const canonical = normalizeCategoryName(i.category);
       if (canonical) set.add(canonical);
@@ -93,7 +98,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
       });
     });
     return Array.from(set).sort();
-  }, [inventory, incomingGoodsList, outgoingReleasesList, lgusList]);
+  }, [inventory, incomingGoodsList, outgoingReleasesList, lgusList, kitTypesList]);
 
   // Dynamically compute live LGU warehouse stock from accepted deliveries and LGU reports
   const lguWarehouseData = useMemo(() => {

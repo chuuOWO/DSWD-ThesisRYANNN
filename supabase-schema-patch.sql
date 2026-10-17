@@ -81,6 +81,31 @@ alter table public.warehouses add column if not exists updated_at timestamptz de
 
 create unique index if not exists warehouses_name_key on public.warehouses (name);
 
+alter table public.warehouses add column if not exists province_id uuid;
+
+-- Backfill province_id from provinces table
+update public.warehouses w
+set province_id = p.id
+from public.provinces p
+where w.province_id is null
+  and lower(trim(w.province)) = lower(trim(p.name));
+
+update public.warehouses
+set province_id = null
+where province_id is not null
+  and province_id not in (select id from public.provinces);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_warehouses_province') then
+    alter table public.warehouses
+      add constraint fk_warehouses_province
+      foreign key (province_id) references public.provinces (id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists warehouses_province_id_idx on public.warehouses (province_id);
+
 -- Bootstrap regional warehouses with zero opening stock.
 -- NOTE FOR ADMINISTRATORS: Verified initial balances must NOT be hardcoded into migrations.
 -- Administrators should record verified physical inventory via the Incoming Goods module
@@ -228,6 +253,31 @@ alter table public.lgus add column if not exists updated_at timestamptz default 
 
 create index if not exists lgus_province_municipality_idx on public.lgus (province, municipality);
 create index if not exists lgus_is_active_idx on public.lgus (is_active);
+
+alter table public.lgus add column if not exists province_id uuid;
+
+-- Backfill province_id from provinces table
+update public.lgus l
+set province_id = p.id
+from public.provinces p
+where l.province_id is null
+  and lower(trim(l.province)) = lower(trim(p.name));
+
+update public.lgus
+set province_id = null
+where province_id is not null
+  and province_id not in (select id from public.provinces);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_lgus_province') then
+    alter table public.lgus
+      add constraint fk_lgus_province
+      foreign key (province_id) references public.provinces (id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists lgus_province_id_idx on public.lgus (province_id);
 
 alter table public.lgus alter column priority_color set default 'Green';
 update public.lgus
@@ -440,6 +490,89 @@ where incoming.id = numbered.id;
 create unique index if not exists incoming_manifests_manifest_number_key
   on public.incoming_manifests (manifest_number);
 
+alter table public.incoming_manifests add column if not exists supply_source_id uuid;
+alter table public.incoming_manifests add column if not exists destination_warehouse_id uuid;
+alter table public.incoming_manifests add column if not exists destination_lgu_id uuid;
+alter table public.incoming_manifests add column if not exists kit_type_id uuid;
+
+-- Backfill supply_source_id from supply_sources
+update public.incoming_manifests inc
+set supply_source_id = s.id
+from public.supply_sources s
+where inc.supply_source_id is null and (
+  lower(trim(coalesce(inc.source, ''))) = lower(trim(s.short_code)) or
+  lower(trim(coalesce(inc.source, ''))) = lower(trim(s.name)) or
+  lower(coalesce(inc.source, '')) like '%' || lower(s.short_code) || '%'
+);
+
+-- Backfill destination_warehouse_id from warehouses
+update public.incoming_manifests inc
+set destination_warehouse_id = w.id
+from public.warehouses w
+where inc.destination_warehouse_id is null
+  and lower(trim(coalesce(inc.destination_type, 'warehouse'))) = 'warehouse'
+  and (
+    lower(trim(coalesce(inc.destination, ''))) = lower(trim(w.name)) or
+    lower(trim(coalesce(inc.destination, ''))) = lower(trim(w.municipality)) or
+    lower(coalesce(inc.destination, '')) like '%' || lower(trim(w.municipality)) || '%'
+  );
+
+-- Backfill destination_lgu_id from lgus
+update public.incoming_manifests inc
+set destination_lgu_id = l.id
+from public.lgus l
+where inc.destination_lgu_id is null
+  and lower(trim(coalesce(inc.destination_type, ''))) = 'lgu'
+  and (
+    lower(trim(coalesce(inc.destination, ''))) = lower(trim(l.municipality)) or
+    lower(trim(coalesce(inc.destination, ''))) = lower(trim(l.lgu_name))
+  );
+
+-- Backfill kit_type_id from kit_types
+update public.incoming_manifests inc
+set kit_type_id = k.id
+from public.kit_types k
+where inc.kit_type_id is null
+  and (
+    lower(trim(coalesce(inc.category, ''))) = lower(trim(k.name)) or
+    lower(coalesce(inc.category, '')) like '%' || lower(trim(k.name)) || '%'
+  );
+
+-- Clean up invalid IDs before adding constraints
+update public.incoming_manifests set supply_source_id = null where supply_source_id is not null and supply_source_id not in (select id from public.supply_sources);
+update public.incoming_manifests set destination_warehouse_id = null where destination_warehouse_id is not null and destination_warehouse_id not in (select id from public.warehouses);
+update public.incoming_manifests set destination_lgu_id = null where destination_lgu_id is not null and destination_lgu_id not in (select id from public.lgus);
+update public.incoming_manifests set kit_type_id = null where kit_type_id is not null and kit_type_id not in (select id from public.kit_types);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_incoming_supply_source') then
+    alter table public.incoming_manifests
+      add constraint fk_incoming_supply_source
+      foreign key (supply_source_id) references public.supply_sources (id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'fk_incoming_dest_warehouse') then
+    alter table public.incoming_manifests
+      add constraint fk_incoming_dest_warehouse
+      foreign key (destination_warehouse_id) references public.warehouses (id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'fk_incoming_dest_lgu') then
+    alter table public.incoming_manifests
+      add constraint fk_incoming_dest_lgu
+      foreign key (destination_lgu_id) references public.lgus (id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'fk_incoming_kit_type') then
+    alter table public.incoming_manifests
+      add constraint fk_incoming_kit_type
+      foreign key (kit_type_id) references public.kit_types (id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists incoming_manifests_supply_source_idx on public.incoming_manifests (supply_source_id);
+create index if not exists incoming_manifests_dest_warehouse_idx on public.incoming_manifests (destination_warehouse_id);
+create index if not exists incoming_manifests_dest_lgu_idx on public.incoming_manifests (destination_lgu_id);
+create index if not exists incoming_manifests_kit_type_idx on public.incoming_manifests (kit_type_id);
+
 create index if not exists incoming_manifests_created_at_idx
   on public.incoming_manifests (created_at desc);
 
@@ -535,6 +668,71 @@ begin
       foreign key (lgu_id) references public.lgus (id) on delete set null;
   end if;
 end $$;
+
+alter table public.outgoing_requests add column if not exists source_warehouse_id uuid;
+alter table public.outgoing_requests add column if not exists source_lgu_id uuid;
+alter table public.outgoing_requests add column if not exists kit_type_id uuid;
+
+-- Backfill source_warehouse_id from warehouses
+update public.outgoing_requests req
+set source_warehouse_id = w.id
+from public.warehouses w
+where req.source_warehouse_id is null
+  and (req.source_type is null or lower(trim(req.source_type)) = 'warehouse')
+  and (
+    lower(trim(coalesce(req.warehouse_source, ''))) = lower(trim(w.name)) or
+    lower(trim(coalesce(req.warehouse_source, ''))) = lower(trim(w.municipality)) or
+    lower(coalesce(req.warehouse_source, '')) like '%' || lower(trim(w.municipality)) || '%'
+  );
+
+-- Backfill source_lgu_id from lgus (Inter-LGU Mutual Aid)
+update public.outgoing_requests req
+set source_lgu_id = l.id
+from public.lgus l
+where req.source_lgu_id is null
+  and lower(trim(coalesce(req.source_type, ''))) = 'lgu'
+  and (
+    lower(trim(coalesce(req.warehouse_source, ''))) = lower(trim(l.municipality)) or
+    lower(trim(coalesce(req.warehouse_source, ''))) = lower(trim(l.lgu_name))
+  );
+
+-- Backfill kit_type_id from kit_types
+update public.outgoing_requests req
+set kit_type_id = k.id
+from public.kit_types k
+where req.kit_type_id is null
+  and (
+    lower(trim(coalesce(req.category, ''))) = lower(trim(k.name)) or
+    lower(coalesce(req.category, '')) like '%' || lower(trim(k.name)) || '%'
+  );
+
+-- Clean up invalid IDs before adding constraints
+update public.outgoing_requests set source_warehouse_id = null where source_warehouse_id is not null and source_warehouse_id not in (select id from public.warehouses);
+update public.outgoing_requests set source_lgu_id = null where source_lgu_id is not null and source_lgu_id not in (select id from public.lgus);
+update public.outgoing_requests set kit_type_id = null where kit_type_id is not null and kit_type_id not in (select id from public.kit_types);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_outgoing_source_warehouse') then
+    alter table public.outgoing_requests
+      add constraint fk_outgoing_source_warehouse
+      foreign key (source_warehouse_id) references public.warehouses (id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'fk_outgoing_source_lgu') then
+    alter table public.outgoing_requests
+      add constraint fk_outgoing_source_lgu
+      foreign key (source_lgu_id) references public.lgus (id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'fk_outgoing_kit_type') then
+    alter table public.outgoing_requests
+      add constraint fk_outgoing_kit_type
+      foreign key (kit_type_id) references public.kit_types (id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists outgoing_requests_source_warehouse_idx on public.outgoing_requests (source_warehouse_id);
+create index if not exists outgoing_requests_source_lgu_idx on public.outgoing_requests (source_lgu_id);
+create index if not exists outgoing_requests_kit_type_idx on public.outgoing_requests (kit_type_id);
 
 create index if not exists outgoing_requests_lgu_id_idx on public.outgoing_requests (lgu_id);
 create index if not exists outgoing_requests_assigned_truck_id_idx on public.outgoing_requests (assigned_truck_id);
@@ -1066,6 +1264,61 @@ begin
       foreign key (lgu_id) references public.lgus (id) on delete set null;
   end if;
 end $$;
+
+-- Foreign key: truck_live_locations -> profiles (Driver Profile)
+alter table public.truck_live_locations add column if not exists driver_profile_id uuid;
+
+update public.truck_live_locations t
+set driver_profile_id = p.id
+from public.profiles p
+where t.driver_profile_id is null
+  and (
+    (p.truck_id is not null and trim(p.truck_id) <> '' and upper(trim(t.truck_id)) = upper(trim(p.truck_id))) or
+    (t.wallet_address is not null and p.wallet_address is not null and lower(trim(t.wallet_address)) = lower(trim(p.wallet_address)))
+  );
+
+update public.truck_live_locations
+set driver_profile_id = null
+where driver_profile_id is not null
+  and driver_profile_id not in (select id from public.profiles);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_truck_driver_profile') then
+    alter table public.truck_live_locations
+      add constraint fk_truck_driver_profile
+      foreign key (driver_profile_id) references public.profiles (id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists truck_live_locations_driver_idx on public.truck_live_locations (driver_profile_id);
+
+-- Foreign key: discrepancy_reports -> profiles (Reporter Profile)
+alter table public.discrepancy_reports add column if not exists reported_by_profile_id uuid;
+
+update public.discrepancy_reports d
+set reported_by_profile_id = p.id
+from public.profiles p
+where d.reported_by_profile_id is null
+  and d.reported_by_wallet is not null
+  and p.wallet_address is not null
+  and lower(trim(d.reported_by_wallet)) = lower(trim(p.wallet_address));
+
+update public.discrepancy_reports
+set reported_by_profile_id = null
+where reported_by_profile_id is not null
+  and reported_by_profile_id not in (select id from public.profiles);
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'fk_discrepancy_reported_by_profile') then
+    alter table public.discrepancy_reports
+      add constraint fk_discrepancy_reported_by_profile
+      foreign key (reported_by_profile_id) references public.profiles (id) on delete set null;
+  end if;
+end $$;
+
+create index if not exists discrepancy_reports_reporter_idx on public.discrepancy_reports (reported_by_profile_id);
 
 alter table public.profiles drop constraint if exists profiles_role_check;
 update public.profiles set role = 'receiver' where role in ('trucker', 'lgu');
@@ -2008,7 +2261,6 @@ create trigger on_profile_email_updated
 -- 17. CLEANUP: DROP REDUNDANT / UNUSED COLUMNS ON truck_live_locations
 -- ==============================================================================
 alter table public.truck_live_locations
-  drop column if exists destination_lgu_id cascade,
   drop column if exists destination_name,
   drop column if exists driver_name,
   drop column if exists driver_phone,

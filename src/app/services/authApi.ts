@@ -60,9 +60,9 @@ const normalizeStatus = (status: unknown): AccountStatus => {
 };
 
 const mapProfile = (row: Record<string, unknown>): UserProfile => {
-  const fName = row.first_name ? String(row.first_name) : null;
-  const lName = row.last_name ? String(row.last_name) : null;
-  const computedFullName = (fName || lName) ? `${fName || ''} ${lName || ''}`.trim() : '';
+  const fName = row.first_name ? String(row.first_name).trim() : '';
+  const lName = row.last_name ? String(row.last_name).trim() : '';
+  const computedFullName = (fName || lName) ? `${fName} ${lName}`.trim() : (row.full_name ? String(row.full_name).trim() : (row.email ? String(row.email) : 'DSWD Officer'));
   const resolvedRole = normalizeRole(row.role);
   const resolvedStatus = resolvedRole === 'dswd_admin' ? 'verified' : normalizeStatus(row.status);
 
@@ -72,7 +72,7 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
     email: String(row.email ?? ''),
     pendingEmail: row.pending_email ? String(row.pending_email) : null,
     emailChangeStatus: row.email_change_status ? (String(row.email_change_status) as 'pending' | 'approved' | 'rejected') : null,
-    fullName: String(row.full_name || computedFullName || ''),
+    fullName: computedFullName,
     firstName: fName,
     lastName: lName,
     phoneNumber: row.phone_number ? String(row.phone_number) : null,
@@ -179,16 +179,16 @@ export const authApi = {
         const metaRole = normalizeRole(meta.role);
         const metaStatus = metaRole === 'dswd_admin' ? 'verified' : normalizeStatus(meta.status);
         const targetEmail = (authUser.email || cleanEmail || '').trim().toLowerCase();
-        const fullName = meta.full_name || `${meta.first_name || ''} ${meta.last_name || ''}`.trim() || targetEmail;
+        const fName = String(meta.first_name || meta.full_name?.split(' ')[0] || '').trim();
+        const lName = String(meta.last_name || meta.full_name?.split(' ').slice(1).join(' ') || '').trim();
 
         const { data: created } = await supabase
           .from('profiles')
           .upsert({
             id: authUser.id,
             email: targetEmail,
-            full_name: fullName,
-            first_name: meta.first_name || '',
-            last_name: meta.last_name || '',
+            first_name: fName,
+            last_name: lName,
             phone_number: meta.phone_number || '',
             job_position: meta.job_position || '',
             work_id_url: meta.work_id_url || null,
@@ -357,7 +357,6 @@ export const authApi = {
         await supabase.from('profiles').upsert({
           id: data.user.id,
           email: normalizedEmail,
-          full_name: computedFullName,
           first_name: payload.firstName,
           last_name: payload.lastName,
           phone_number: payload.phoneNumber || null,
@@ -367,7 +366,7 @@ export const authApi = {
           truck_id: payload.role === 'receiver' ? payload.truckId || null : null,
           wallet_address: finalWallet,
           lgu_name: null,
-          status: 'pending'
+          status: payload.role === 'dswd_admin' ? 'verified' : 'pending'
         });
       } catch (profileError) {
         console.warn('Profile upsert warning:', profileError);
@@ -487,20 +486,24 @@ export const authApi = {
       if (user) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('full_name, role, wallet_address')
+          .select('first_name, last_name, role, wallet_address')
           .eq('id', user.id)
           .maybeSingle();
 
+        const resolvedName = profile
+          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim()
+          : (user.user_metadata?.first_name ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim() : (user.user_metadata?.full_name || user.email || 'User'));
+
         await backendApi.logActivity({
           actorId: user.id,
-          actorName: profile?.full_name || user.user_metadata?.full_name || user.email || 'User',
+          actorName: resolvedName,
           actorEmail: user.email || 'user@dswd.gov.ph',
           actorRole: profile?.role || user.user_metadata?.role || 'user',
           actorWallet: profile?.wallet_address || user.user_metadata?.wallet_address || undefined,
           action: 'USER_LOGOUT',
           entityType: 'User',
           entityId: user.id,
-          details: `User ${profile?.full_name || user.user_metadata?.full_name || user.email} signed out of the system.`
+          details: `User ${resolvedName} signed out of the system.`
         });
       }
     } catch (logErr) {
@@ -575,9 +578,18 @@ export const authApi = {
     // 2. Update public.profiles row
     try {
       const profileUpdates: Record<string, unknown> = {};
-      if (updates.fullName !== undefined) profileUpdates.full_name = updates.fullName;
-      if (updates.firstName !== undefined) profileUpdates.first_name = updates.firstName;
-      if (updates.lastName !== undefined) profileUpdates.last_name = updates.lastName;
+      if (updates.firstName !== undefined) {
+        profileUpdates.first_name = updates.firstName;
+      } else if (updates.fullName !== undefined) {
+        profileUpdates.first_name = updates.fullName.trim().split(' ')[0] || '';
+      }
+
+      if (updates.lastName !== undefined) {
+        profileUpdates.last_name = updates.lastName;
+      } else if (updates.fullName !== undefined) {
+        profileUpdates.last_name = updates.fullName.trim().split(' ').slice(1).join(' ') || '';
+      }
+
       if (updates.phoneNumber !== undefined) profileUpdates.phone_number = updates.phoneNumber;
       if (updates.jobPosition !== undefined) profileUpdates.job_position = updates.jobPosition;
       if (updates.avatarUrl !== undefined) profileUpdates.avatar_url = updates.avatarUrl;

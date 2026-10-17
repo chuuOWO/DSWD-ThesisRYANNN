@@ -14,6 +14,10 @@ export interface IncomingGoodsForm {
   destinationType: 'Warehouse' | 'LGU';
   destination: string;
   incidentCode: string;
+  supplySourceId?: string;
+  kitTypeId?: string;
+  destinationWarehouseId?: string;
+  destinationLguId?: string;
 }
 
 interface AddIncomingGoodsModalProps {
@@ -239,11 +243,28 @@ export function AddIncomingGoodsModal({
         ? customSourceText.trim()
         : formData.source.trim();
 
-      const submissionData = {
+      const matchedSource = supplySourcesList?.find(s =>
+        (s.shortCode && s.shortCode.toLowerCase() === finalSource.toLowerCase()) ||
+        (s.name && s.name.toLowerCase() === finalSource.toLowerCase())
+      );
+      const matchedKit = kitTypesList?.find(k => k.name.toLowerCase() === formData.fnfiCategory.toLowerCase());
+      let destWhId: string | undefined;
+      let destLguId: string | undefined;
+      if (formData.destinationType === 'Warehouse') {
+        destWhId = warehousesList?.find(w => w.name.toLowerCase() === formData.destination.toLowerCase())?.id;
+      } else {
+        destLguId = availableLgus.find(l => l.municipality.toLowerCase() === selectedMunicipality.toLowerCase())?.id;
+      }
+
+      const submissionData: IncomingGoodsForm = {
         ...formData,
         source: finalSource,
         destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination,
-        incidentCode: formData.incidentCode?.trim() || ''
+        incidentCode: formData.incidentCode?.trim() || '',
+        supplySourceId: matchedSource?.id,
+        kitTypeId: matchedKit?.id,
+        destinationWarehouseId: destWhId,
+        destinationLguId: destLguId
       };
       onSubmit(submissionData);
     }

@@ -6,7 +6,15 @@ import {
   type ProvinceRecord,
   type WarehouseRecord,
   type SupplySourceRecord,
-  type KitTypeRecord
+  type KitTypeRecord,
+  type TruckRecord,
+  type IncidentRecord,
+  type InventoryBatchRecord,
+  type WarehouseStockRecord,
+  type LguStockRecord,
+  type CustodyHopRecord,
+  DEFAULT_TRUCKS,
+  DEFAULT_INCIDENTS
 } from '../services/backendApi';
 import { blockchain, generateBatchTokenId } from '../services/blockchain';
 import { computeSynchronizedLgus, type SynchronizedLgu, normalizeCategoryName } from '../lib/lguSync';
@@ -66,6 +74,11 @@ export interface IncomingGoods {
   verifiedBy?: string;
   mintedAt?: string;
   auditTrail: AuditEvent[];
+  // v3 normalized relational keys
+  supplySourceId?: string;
+  kitTypeId?: string;
+  destinationWarehouseId?: string;
+  destinationLguId?: string;
 }
 
 export interface BatchAllocation {
@@ -102,6 +115,11 @@ export interface OutgoingRelease {
   correctionNote?: string;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
+  assignedEscortProfileId?: string | null;
+  assignedDriverProfileId?: string | null;
+  sourceWarehouseId?: string | null;
+  sourceLguId?: string | null;
+  kitTypeId?: string | null;
   auditTrail: AuditEvent[];
 }
 
@@ -207,6 +225,10 @@ type IncomingManifestRow = {
   wallet_address?: string | null;
   correction_note?: string | null;
   created_at?: string | null;
+  supply_source_id?: string | null;
+  kit_type_id?: string | null;
+  destination_warehouse_id?: string | null;
+  destination_lgu_id?: string | null;
 };
 
 type LGUInventoryReportRow = {
@@ -258,6 +280,11 @@ type OutgoingRequestRow = {
   receiver_gps?: string | null;
   destination_address?: string | null;
   assigned_truck_id?: string | null;
+  assigned_driver_profile_id?: string | null;
+  source_warehouse_id?: string | null;
+  source_lgu_id?: string | null;
+  kit_type_id?: string | null;
+  source_type?: 'Warehouse' | 'LGU' | null;
   tx_hash?: string | null;
   handover_contract_id?: string | null;
   admin_signature?: string | null;
@@ -284,7 +311,11 @@ const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
     batchTokenId: row.batch_token_id ?? undefined,
     blockchainTxHash: row.tx_hash ?? undefined,
     mintedAt: row.minted_at ?? undefined,
-    correctionNote: row.correction_note ?? undefined
+    correctionNote: row.correction_note ?? undefined,
+    supplySourceId: row.supply_source_id ?? undefined,
+    kitTypeId: row.kit_type_id ?? undefined,
+    destinationWarehouseId: row.destination_warehouse_id ?? undefined,
+    destinationLguId: row.destination_lgu_id ?? undefined
   } satisfies Omit<IncomingGoods, 'auditTrail'>;
 
   return {
@@ -401,6 +432,7 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
     amountRequested: Number(row.amount_requested ?? 0),
     amountApproved: Number(row.amount_approved ?? 0),
     warehouseSource: row.warehouse_source ?? '',
+    sourceType: row.source_type === 'LGU' ? 'LGU' : 'Warehouse',
     deliveryMode: row.delivery_mode ?? '',
     deliveryStatus: isOutgoingStatus(row.delivery_status) ? row.delivery_status : 'Allocating',
     incidentCode: row.incident_code ?? '',
@@ -415,6 +447,12 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
     receiverGps: row.receiver_gps ?? undefined,
     destinationAddress: row.destination_address ?? undefined,
     assignedTruckId: row.assigned_truck_id ?? undefined,
+    assigned_truck_id: row.assigned_truck_id ?? undefined,
+    assignedEscortProfileId: row.assigned_driver_profile_id ?? undefined,
+    assignedDriverProfileId: row.assigned_driver_profile_id ?? undefined,
+    sourceWarehouseId: row.source_warehouse_id ?? undefined,
+    sourceLguId: row.source_lgu_id ?? undefined,
+    kitTypeId: row.kit_type_id ?? undefined,
     blockchainTxHash: row.tx_hash ?? undefined,
     auditTrail: (() => {
       const trail: AuditEvent[] = [];
@@ -449,10 +487,10 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
         trail.push({
           id: `AUD-CUSTODY-${dr}`,
           timestamp: row.date_allocated || createdTime,
-          actor: row.assigned_truck_id ? `Receiver (${row.assigned_truck_id})` : 'Designated Receiver',
+          actor: row.assigned_truck_id ? `Escort Officer (${row.assigned_truck_id})` : 'Relief Escort Officer',
           role: 'Receiver',
-          action: 'Custody Accepted & In Transit',
-          details: `Receiver scanned QR payload and assumed physical custody for transit${row.sender_gps ? ` at GPS ${row.sender_gps}` : ''}. Tokens transferred to driver wallet.`,
+          action: 'Escort Custody Accepted & In Transit',
+          details: `Relief Escort Officer assumed physical convoy custody for transit${row.sender_gps ? ` at GPS ${row.sender_gps}` : ''}. Tokens transferred to escort custody.`,
           txHash: row.sender_signature || undefined
         });
       }
@@ -625,6 +663,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   const [supplySourcesList, setSupplySourcesList] = useState<SupplySourceRecord[]>(DEFAULT_SUPPLY_SOURCES);
   const [kitTypesList, setKitTypesList] = useState<KitTypeRecord[]>(DEFAULT_KIT_TYPES);
   const [lgusList, setLgusList] = useState<LguRecord[]>(DEFAULT_PANAY_LGUS);
+  const [trucksList, setTrucksList] = useState<TruckRecord[]>(DEFAULT_TRUCKS);
+  const [incidentsList, setIncidentsList] = useState<IncidentRecord[]>(DEFAULT_INCIDENTS);
+  const [warehouseStockList, setWarehouseStockList] = useState<WarehouseStockRecord[]>([]);
+  const [lguStockList, setLguStockList] = useState<LguStockRecord[]>([]);
+  const [inventoryBatchesList, setInventoryBatchesList] = useState<InventoryBatchRecord[]>([]);
 
   const [adminActionsEnabled, setAdminActionsEnabledState] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -697,6 +740,33 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       setKitTypesList(list);
     } catch (err) {
       console.warn('Failed to refresh kit types:', err);
+    }
+  };
+
+  const refreshTrucks = async () => {
+    try {
+      const list = await backendApi.getTrucks();
+      setTrucksList(list);
+    } catch (err) {
+      console.warn('Failed to refresh trucks:', err);
+    }
+  };
+
+  const refreshIncidents = async () => {
+    try {
+      const list = await backendApi.getIncidents();
+      setIncidentsList(list);
+    } catch (err) {
+      console.warn('Failed to refresh incidents:', err);
+    }
+  };
+
+  const refreshInventoryBatches = async () => {
+    try {
+      const list = await backendApi.getInventoryBatches();
+      setInventoryBatchesList(list);
+    } catch (err) {
+      console.warn('Failed to refresh inventory batches:', err);
     }
   };
 
@@ -1087,7 +1157,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       ...newGoods,
       manifestNumber: newId,
       status: initialStatus,
-      manifestHash: goodsWithId.manifestHash
+      manifestHash: goodsWithId.manifestHash,
+      supplySourceId: newGoods.supplySourceId,
+      kitTypeId: newGoods.kitTypeId,
+      destinationWarehouseId: newGoods.destinationWarehouseId,
+      destinationLguId: newGoods.destinationLguId
     }).then(() => {
       setIntegrationMode('backend');
     }).catch(error => {
@@ -1303,6 +1377,33 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       setIntegrationMode('mock');
     });
 
+    // Record into normalized inventory_batches & append to stock_ledger
+    backendApi.createInventoryBatch({
+      batchTokenId: tokenId,
+      incomingManifestId: item.id,
+      kitTypeId: item.kitTypeId || 'kit_food_pack',
+      initialQuantity: item.quantity,
+      remainingQuantity: item.quantity,
+      warehouseId: item.destinationWarehouseId,
+      lguId: item.destinationLguId,
+      expirationDate: item.expirationDate,
+      manifestHash: item.manifestHash,
+      mintedByProfileId: currentActor.id,
+      mintedAt: new Date().toISOString()
+    }).catch(err => console.warn('createInventoryBatch error:', err));
+
+    backendApi.appendStockLedger({
+      facilityType: item.destinationType,
+      warehouseId: item.destinationWarehouseId,
+      lguId: item.destinationLguId,
+      kitTypeId: item.kitTypeId || 'kit_food_pack',
+      deltaQuantity: item.quantity,
+      balanceAfter: item.quantity,
+      movementType: 'INTAKE_VERIFIED',
+      referenceManifestId: item.id,
+      actorProfileId: currentActor.id
+    }).catch(err => console.warn('appendStockLedger error:', err));
+
     backendApi.logActivity({
       action: 'MINT_BATCH_TOKEN',
       entityType: 'BatchToken',
@@ -1413,7 +1514,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       amountApproved: newRelease.amountApproved,
       deliveryStatus: status,
       receiverGps: newRelease.receiverGps,
-      destinationAddress: newRelease.destinationAddress
+      destinationAddress: newRelease.destinationAddress,
+      assignedTruckId: newRelease.assignedTruckId,
+      assignedEscortProfileId: newRelease.assignedEscortProfileId,
+      sourceWarehouseId: newRelease.sourceWarehouseId,
+      sourceLguId: newRelease.sourceLguId,
+      kitTypeId: newRelease.kitTypeId,
+      sourceType: newRelease.sourceType
     }).then(() => {
       setIntegrationMode('backend');
     }).catch(error => {
@@ -1534,6 +1641,20 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Approve outgoing allocation')(error);
       setIntegrationMode('mock');
     }
+
+    // Allocate batches in relational DB and append dispatch to stock ledger
+    backendApi.allocateBatchesToRequest(drNumber, allocations).catch(err => console.warn('allocateBatchesToRequest error:', err));
+    backendApi.appendStockLedger({
+      facilityType: (release.sourceType || 'Warehouse'),
+      warehouseId: release.sourceWarehouseId,
+      lguId: release.sourceLguId,
+      kitTypeId: release.kitTypeId || 'kit_food_pack',
+      deltaQuantity: -amountApproved,
+      balanceAfter: 0,
+      movementType: 'RELEASE_DISPATCHED',
+      referenceDrId: drNumber,
+      actorProfileId: currentActor.id
+    }).catch(err => console.warn('appendStockLedger error:', err));
 
     backendApi.logActivity({
       action: 'RELEASE_APPROVED',
@@ -1805,6 +1926,37 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.`, txHash: proof.hash };
   };
 
+  const assignEscortAndTruck = async (
+    drNumber: string,
+    truckId: string | null,
+    escortProfileId?: string | null,
+    deliveryStatus: string = 'In Transit'
+  ) => {
+    setOutgoingReleasesList(prev => prev.map(r => r.drNumber === drNumber
+      ? {
+          ...r,
+          assignedTruckId: truckId,
+          assigned_truck_id: truckId,
+          assignedEscortProfileId: escortProfileId,
+          assignedDriverProfileId: escortProfileId,
+          deliveryStatus: (deliveryStatus as OutgoingStatus) || r.deliveryStatus
+        }
+      : r));
+
+    await backendApi.assignEscortAndTruckToRelease(drNumber, truckId, escortProfileId, deliveryStatus);
+    backendApi.logActivity({
+      action: 'ESCORT_ASSIGNED',
+      entityType: 'OutgoingRelease',
+      entityId: drNumber,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorRole: currentActor.role,
+      details: `Assigned truck ${truckId || 'unassigned'} and relief escort officer to shipment ${drNumber}.`,
+      metadata: { drNumber, truckId, escortProfileId }
+    }).catch(() => {});
+    return { ok: true };
+  };
+
   const emergencyCorrectLguStock = async (
     lguId: string,
     newStock: Record<string, number>,
@@ -1965,9 +2117,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
     const loadDashboard = () => {
       backendApi.getDashboard()
-        .then(({ incoming, outgoing, discrepancyReports: discrepancyRows }) => {
+        .then(({ incoming, outgoing, discrepancyReports: discrepancyRows, trucks, incidents, warehouseStock, lguStock, batches }) => {
           const discList = (discrepancyRows ?? []).map(mapDiscrepancyReport);
           setDiscrepancyReports(discList);
+          if (trucks && trucks.length > 0) setTrucksList(trucks);
+          if (incidents && incidents.length > 0) setIncidentsList(incidents);
+          if (warehouseStock) setWarehouseStockList(warehouseStock);
+          if (lguStock) setLguStockList(lguStock);
+          if (batches) setInventoryBatchesList(batches);
           setIncomingGoodsList(incoming.map(row => {
             const mapped = mapIncomingManifest(row);
             if (!mapped.correctionNote) {
@@ -1993,14 +2150,18 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         backendApi.getProvinces(),
         backendApi.getWarehouses(),
         backendApi.getSupplySources(),
-        backendApi.getKitTypes()
-      ]).then(([lgus, provinces, warehouses, sources, kits]) => {
+        backendApi.getKitTypes(),
+        backendApi.getTrucks(),
+        backendApi.getIncidents()
+      ]).then(([lgus, provinces, warehouses, sources, kits, trucks, incidents]) => {
         const resolvedLgus = (lgus && lgus.length > 0) ? lgus : DEFAULT_PANAY_LGUS;
         setLgusList(resolvedLgus);
         if (provinces && provinces.length > 0) setProvincesList(provinces);
         if (warehouses && warehouses.length > 0) setWarehousesList(warehouses);
         if (sources && sources.length > 0) setSupplySourcesList(sources);
         if (kits && kits.length > 0) setKitTypesList(kits);
+        if (trucks && trucks.length > 0) setTrucksList(trucks);
+        if (incidents && incidents.length > 0) setIncidentsList(incidents);
 
         const reportsFromLgus: LGUPriorityReport[] = resolvedLgus.map(l => {
           const maxStock = Number(l.maxStock) > 0 ? Number(l.maxStock) : 3000;
@@ -2171,6 +2332,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     discrepancyReports,
     lgusList: synchronizedLgusList,
     synchronizedLgusList,
+    trucksList,
+    incidentsList,
+    warehouseStockList,
+    lguStockList,
+    inventoryBatchesList,
     addLgu,
     editLgu,
     provincesList,
@@ -2182,6 +2348,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     refreshWarehouses,
     refreshSupplySources,
     refreshKitTypes,
+    refreshTrucks,
+    refreshIncidents,
+    refreshInventoryBatches,
     addStock,
     addLguStock,
     emergencyCorrectLguStock,
@@ -2199,6 +2368,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,
+    assignEscortAndTruck,
+    recordCustodyHop: backendApi.recordCustodyHop.bind(backendApi),
+    getCustodyHops: backendApi.getCustodyHops.bind(backendApi),
+    getEscortProfiles: backendApi.getEscortProfiles.bind(backendApi),
     requestOutgoingCorrection,
     submitLGUInventoryReport,
     integrationMode,
