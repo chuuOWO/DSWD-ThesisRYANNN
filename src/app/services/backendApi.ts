@@ -344,6 +344,7 @@ export interface DiscrepancyReportPayload {
   note: string;
   reportedByRole?: string;
   reportedByWallet?: string;
+  reportedByProfileId?: string;
 }
 
 export interface ActivityLogRecord {
@@ -456,6 +457,7 @@ export interface ReceiverReleaseRecord {
   wallet_address?: string | null;
   receiver_gps?: string | null;
   destination_address?: string | null;
+  source_type?: string | null;
   delivery_priority?: number | null;
   is_held?: boolean | null;
 }
@@ -2351,13 +2353,12 @@ export const backendApi = {
   async getReceiverReleases(receiverId?: string | null) {
     let query = supabase
       .from('outgoing_requests')
-      .select('dr_number,date_allocated,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,tx_hash,wallet_address,receiver_gps,destination_address')
-      .or('delivery_mode.ilike.truck,delivery_mode.eq.Direct Delivery')
+      .select('id,dr_number,date_allocated,created_at,lgu_id,destination_lgu_id,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,assigned_driver_profile_id,tx_hash,wallet_address,receiver_gps,destination_address,delivery_priority,is_held')
       .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
       .order('created_at', { ascending: false });
 
     if (receiverId) {
-      query = query.or(`assigned_truck_id.eq.${receiverId},assigned_truck_id.is.null`);
+      query = query.or(`assigned_truck_id.eq.${receiverId},assigned_truck_id.is.null,assigned_truck_id.eq.`);
     }
 
     const { data, error } = await query;

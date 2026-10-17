@@ -811,6 +811,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         outgoingRequestId: matchingRelease?.id || canonicalDrNumber,
         sequence: 99,
         fromDriverProfileId: matchingRelease?.assignedDriverProfileId || undefined,
+        toDriverProfileId: profile.id,
         fromTruckId: matchingRelease?.assignedTruckId || undefined,
         gpsCoordinates: receiverGps,
         blockchainTxHash: receiptTxHash,
@@ -1641,7 +1642,8 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                         drNumber: discrepancyTargetDr,
                         note: discrepancyNote.trim(),
                         reportedByRole: 'LGU Receiver',
-                        reportedByWallet: profile?.walletAddress || undefined
+                        reportedByWallet: profile?.walletAddress || undefined,
+                        reportedByProfileId: profile?.id
                       });
                       await backendApi.logActivity({
                         action: 'DISCREPANCY_REPORTED',

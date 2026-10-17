@@ -641,6 +641,7 @@ export const authApi = {
     phoneNumber?: string;
     jobPosition?: string;
     avatarUrl?: string | null;
+    truckId?: string;
   }) {
     // 1. Update Supabase Auth user metadata
     try {
@@ -651,6 +652,7 @@ export const authApi = {
       if (updates.phoneNumber !== undefined) metaUpdates.phone_number = updates.phoneNumber;
       if (updates.jobPosition !== undefined) metaUpdates.job_position = updates.jobPosition;
       if (updates.avatarUrl !== undefined) metaUpdates.avatar_url = updates.avatarUrl;
+      if (updates.truckId !== undefined) metaUpdates.truck_id = updates.truckId;
       if (Object.keys(metaUpdates).length > 0) {
         await supabase.auth.updateUser({ data: metaUpdates });
       }
@@ -676,6 +678,7 @@ export const authApi = {
       if (updates.phoneNumber !== undefined) profileUpdates.phone_number = updates.phoneNumber;
       if (updates.jobPosition !== undefined) profileUpdates.job_position = updates.jobPosition;
       if (updates.avatarUrl !== undefined) profileUpdates.avatar_url = updates.avatarUrl;
+      if (updates.truckId !== undefined) profileUpdates.truck_id = updates.truckId;
       if (Object.keys(profileUpdates).length > 0) {
         await supabase.from('profiles').update(profileUpdates).eq('id', userId);
       }
