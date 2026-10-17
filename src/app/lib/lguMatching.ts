@@ -283,6 +283,8 @@ const createDefaultLgu = (
   priorityColor: 'Green',
   recommendation: 'Stable baseline stock',
   maxStock: 3000,
+  affectedFamilies: 0,
+  damageIndex: 0,
   lastReportedAt: new Date().toISOString()
 });
 

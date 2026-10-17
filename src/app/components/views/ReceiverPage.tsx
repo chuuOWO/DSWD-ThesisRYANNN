@@ -752,7 +752,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const [trucksList, setTrucksList] = useState<TruckRecord[]>(DEFAULT_TRUCKS);
   const [activeTruckId, setActiveTruckId] = useState<string>(() => {
     if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim();
-    return 'TRK-001';
+    return 'TRUCK-01';
   });
 
   // Escort profiles for multi-hop convoy relay
@@ -1100,8 +1100,12 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         const isLguReceiver = Boolean(profile?.lguName && profile.lguName.trim());
         if (currentPackages && currentPackages.length > 0 && !isLguReceiver) {
           const activeDr = currentPackages[0]?.drNumber || null;
+          const validTruckId = (activeTruckId && activeTruckId.startsWith('TRUCK-'))
+            ? activeTruckId
+            : (profile?.truckId && profile.truckId.startsWith('TRUCK-') ? profile.truckId : 'TRUCK-01');
+
           void backendApi.upsertTruckLiveLocation({
-            truck_id: activeTruckId || receiverId,
+            truck_id: validTruckId,
             current_dr_number: activeDr,
             latitude: updatedLoc.latitude,
             longitude: updatedLoc.longitude,

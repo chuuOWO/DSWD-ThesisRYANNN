@@ -376,6 +376,15 @@ export interface ActivityLogInput {
   txHash?: string;
 }
 
+export interface EscortProfile {
+  id: string;
+  fullName: string;
+  role: string;
+  email?: string;
+  phone?: string;
+  truckId?: string;
+}
+
 export interface OutgoingUpdatePayload {
   amountApproved?: number;
   amountRequested?: number;
@@ -395,6 +404,9 @@ export interface OutgoingUpdatePayload {
   walletAddress?: string;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
+  assignedEscortProfileId?: string | null;
+  assignedDriverProfileId?: string | null;
+  assigned_driver_profile_id?: string | null;
   deliveryPriority?: number;
   delivery_priority?: number;
   isHeld?: boolean;
@@ -420,9 +432,12 @@ export interface TruckLiveLocation {
 }
 
 export interface ReceiverReleaseRecord {
+  id?: string | null;
   dr_number: string;
   date_allocated?: string | null;
   created_at?: string | null;
+  lgu_id?: string | null;
+  destination_lgu_id?: string | null;
   lgu_name?: string | null;
   province?: string | null;
   municipality?: string | null;
@@ -436,6 +451,7 @@ export interface ReceiverReleaseRecord {
   allocated_batches?: { batchTokenId?: string | null; quantity?: number | null }[] | null;
   handover_contract_id?: string | null;
   assigned_truck_id?: string | null;
+  assigned_driver_profile_id?: string | null;
   tx_hash?: string | null;
   wallet_address?: string | null;
   receiver_gps?: string | null;
@@ -1108,7 +1124,7 @@ export const backendApi = {
 
       const evalRes = evaluatePriorityIndicator({
         targetQuota: Number(lgu.max_stock ?? 3000),
-        currentStock: foodPacks,
+        foodPacks,
         affectedFamilies: Number(lgu.affected_families ?? 0),
         damageIndex: Number(lgu.damage_index ?? 0)
       });
@@ -1261,7 +1277,7 @@ export const backendApi = {
 
       const evalRes = evaluatePriorityIndicator({
         targetQuota: Number(lgu.max_stock ?? 3000),
-        currentStock: foodPacks,
+        foodPacks,
         affectedFamilies: Number(lgu.affected_families ?? 0),
         damageIndex: Number(lgu.damage_index ?? 0)
       });
@@ -2408,8 +2424,13 @@ export const backendApi = {
 
   async upsertTruckLiveLocation(payload: TruckLiveLocation) {
     try {
-      const cleanTruck = String(payload.truck_id || '').trim();
-      if (!cleanTruck) return { ok: false };
+      let cleanTruck = String(payload.truck_id || '').trim().toUpperCase();
+      if (!cleanTruck || cleanTruck.startsWith('RCVR-') || cleanTruck.includes('HANDLER')) return { ok: false };
+      const trkMatch = cleanTruck.match(/^TRK-?0*(\d+)$/i);
+      if (trkMatch) {
+        cleanTruck = `TRUCK-${trkMatch[1].padStart(2, '0')}`;
+      }
+      if (!cleanTruck.startsWith('TRUCK-')) return { ok: false };
 
       let cleanDr = payload.current_dr_number?.trim() || null;
       if (cleanDr) {
@@ -2908,6 +2929,56 @@ export const backendApi = {
     }
   },
 
+  async getStockLedgerForLgu(lguId: string): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('stock_ledger')
+        .select(`
+          id,
+          facility_type,
+          lgu_id,
+          kit_type_id,
+          delta_quantity,
+          balance_after,
+          movement_type,
+          created_at,
+          reference_manifest_id,
+          reference_dr_id,
+          kit_types:kit_type_id(name)
+        `)
+        .eq('lgu_id', lguId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('getStockLedgerForLgu error:', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (e) {
+      console.warn('getStockLedgerForLgu exception:', e);
+      return [];
+    }
+  },
+
+  async getLguInventoryReports(lguId: string): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('lgu_inventory_reports')
+        .select('*')
+        .eq('lgu_id', lguId)
+        .order('reported_at', { ascending: false });
+
+      if (error) {
+        console.warn('getLguInventoryReports error:', error.message);
+        return [];
+      }
+      return data || [];
+    } catch (e) {
+      console.warn('getLguInventoryReports exception:', e);
+      return [];
+    }
+  },
+
   async getInventoryBatches(filters?: { warehouseId?: string; lguId?: string; kitTypeId?: string }): Promise<InventoryBatchRecord[]> {
     try {
       let query = supabase.from('inventory_batches').select('*').order('minted_at', { ascending: false });
@@ -3154,7 +3225,7 @@ export const backendApi = {
     }
   },
 
-  async getEscortProfiles(): Promise<{ id: string; fullName: string; role: string; email?: string; phone?: string; truckId?: string }[]> {
+  async getEscortProfiles(): Promise<EscortProfile[]> {
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -3211,6 +3282,18 @@ export const backendApi = {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outgoing_batch_allocations' }, onChange)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'custody_hops' }, onChange)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, onChange)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  },
+
+  subscribeActivityLogs(onChange: () => void) {
+    const channelName = `activity-logs-${crypto.randomUUID().slice(0, 8)}`;
+    const channel = supabase
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_logs' }, onChange)
       .subscribe();
 

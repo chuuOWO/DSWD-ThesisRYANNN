@@ -10,13 +10,15 @@ import { sepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { supabase } from '../lib/supabase';
 
-const RPC_URL = import.meta.env.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/demo';
-const BUNDLER_URL = import.meta.env.VITE_BUNDLER_RPC_URL;
-const PAYMASTER_URL = import.meta.env.VITE_PAYMASTER_RPC_URL;
-const PAYMASTER_POLICY_ID = import.meta.env.VITE_PAYMASTER_POLICY_ID;
-const CONTRACT_ADDRESS = (import.meta.env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
+const env: any = (typeof import.meta !== 'undefined' && (import.meta as any).env) || (typeof process !== 'undefined' && process.env) || {};
+
+const RPC_URL = env.VITE_BLOCKCHAIN_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/demo';
+const BUNDLER_URL = env.VITE_BUNDLER_RPC_URL;
+const PAYMASTER_URL = env.VITE_PAYMASTER_RPC_URL;
+const PAYMASTER_POLICY_ID = env.VITE_PAYMASTER_POLICY_ID;
+const CONTRACT_ADDRESS = (env.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS ||
   '0x4ca82b943107a32a3e3fe05a2ad057f602d496e5') as Address;
-const ENTRYPOINT_ADDRESS = (import.meta.env.VITE_ENTRYPOINT_ADDRESS ||
+const ENTRYPOINT_ADDRESS = (env.VITE_ENTRYPOINT_ADDRESS ||
   '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789') as Address;
 
 export const RELIEF_TRACKER_ABI = parseAbi([

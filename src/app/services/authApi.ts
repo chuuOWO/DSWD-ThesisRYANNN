@@ -571,6 +571,16 @@ export const authApi = {
     return { ok: true };
   },
 
+  async assignProfileTruck(userId: string, truckId: string | null) {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ truck_id: truckId || null })
+      .eq('id', userId);
+
+    if (error) throw new Error(`Failed to assign Truck: ${error.message}`);
+    return { ok: true };
+  },
+
   async updateProfileRole(userId: string, role: UserRole) {
     const { error } = await supabase
       .from('profiles')

@@ -399,7 +399,7 @@ export function LocationPickerMap({
   const applyCoordinatesAndReverseGeocode = async (lat: number, lng: number) => {
     // 1. Check boundary within Panay
     let activeProv = selectedProvince;
-    const panayProvinces: PanayProvince[] = ['Iloilo', 'Capiz', 'Aklan', 'Antique', 'Guimaras'];
+    const panayProvinces: PanayProvince[] = ['Iloilo', 'Capiz', 'Aklan', 'Antique'];
     if (!isPointInProvince(lat, lng, selectedProvince)) {
       const matchedOther = panayProvinces.find(p => isPointInProvince(lat, lng, p));
       if (matchedOther) {

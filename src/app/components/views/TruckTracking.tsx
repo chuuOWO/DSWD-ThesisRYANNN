@@ -371,14 +371,16 @@ const toTruckRoute = (
     position: [location.latitude, location.longitude],
     destinationPosition,
     assignedPackagesList,
-    isLive: true,
+    isLive: location.accuracy !== null,
     accuracy: location.accuracy,
     progress,
     checkpoints: [
       {
-        label: 'Live phone GPS',
+        label: location.accuracy !== null ? 'Live phone GPS' : 'Warehouse Origin Bay',
         time: formatDateTime(location.updated_at),
-        note: `Captured at ${location.gps_text}${location.accuracy ? `, accuracy ±${Math.round(location.accuracy)}m` : ''}`,
+        note: location.accuracy !== null
+          ? `Captured at ${location.gps_text}${location.accuracy ? `, accuracy ±${Math.round(location.accuracy)}m` : ''}`
+          : `Stationed at ${location.gps_text} awaiting convoy mobile GPS stream`,
         completed: true
       },
       {
@@ -411,6 +413,9 @@ function RoadSnappedRoute({ route, onRouteDataChange }: { route: TruckRoute; onR
       return;
     }
 
+    let isMounted = true;
+    let fallbackPolyline: L.Polyline | null = null;
+
     const control = L.Routing.control({
       waypoints: [L.latLng(route.position), L.latLng(route.destinationPosition)],
       router: L.Routing.osrmv1({
@@ -434,6 +439,11 @@ function RoadSnappedRoute({ route, onRouteDataChange }: { route: TruckRoute; onR
     } as L.Routing.RoutingControlOptions).addTo(map) as RoutingControlWithEvents;
 
     control.on('routesfound', (event) => {
+      if (!isMounted) return;
+      if (fallbackPolyline) {
+        map.removeLayer(fallbackPolyline);
+        fallbackPolyline = null;
+      }
       const osrmRoute = event.routes?.[0];
       const summary = osrmRoute?.summary;
       if (!summary?.totalDistance || !summary?.totalTime) return;
@@ -444,10 +454,33 @@ function RoadSnappedRoute({ route, onRouteDataChange }: { route: TruckRoute; onR
       });
     });
 
-    control.on('routingerror', () => onRouteDataChange(null));
+    control.on('routingerror', () => {
+      if (!isMounted) return;
+      // Draw dashed fallback polyline directly connecting origin/truck to destination
+      if (!fallbackPolyline && route.destinationPosition) {
+        fallbackPolyline = L.polyline([route.position, route.destinationPosition], {
+          color: statusColors[route.status] || '#2500ba',
+          weight: 4,
+          dashArray: '8, 8',
+          opacity: 0.85
+        }).addTo(map);
+
+        const distMeters = L.latLng(route.position).distanceTo(L.latLng(route.destinationPosition));
+        const distKm = distMeters / 1000;
+        const estMinutes = Math.max(1, Math.round((distKm / 40) * 60));
+        onRouteDataChange({
+          distanceKm: Math.round(distKm * 10) / 10,
+          durationMinutes: estMinutes
+        });
+      }
+    });
 
     return () => {
+      isMounted = false;
       map.removeControl(control);
+      if (fallbackPolyline) {
+        map.removeLayer(fallbackPolyline);
+      }
     };
   }, [map, onRouteDataChange, route.position[0], route.position[1], route.destinationPosition?.[0], route.destinationPosition?.[1], route.status]);
 
@@ -628,9 +661,13 @@ function RouteMap({
                 <p className="mt-1 font-mono text-[10px] text-gray-500">
                   GPS: {route.position[0].toFixed(6)}, {route.position[1].toFixed(6)}
                 </p>
-                {route.accuracy != null && (
+                {route.accuracy != null ? (
                   <p className="text-[10px] font-semibold text-emerald-600">
                     Accuracy: &plusmn;{Math.round(route.accuracy)}m (Phone GNSS)
+                  </p>
+                ) : (
+                  <p className="text-[10px] font-semibold text-amber-600">
+                    Warehouse Departure Position
                   </p>
                 )}
               </div>
@@ -827,16 +864,52 @@ export function TruckTracking({
     };
   }, []);
 
-  const liveTruckRoutes = useMemo(() => Object.values(liveLocations)
-    .filter(isActiveReceiverLocation)
-    .filter((loc) => !isLguReceiverId(loc.truck_id))
-    .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
-    .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles, dbLgus))
-    .filter((route) => {
-      // Only display trucks that currently have active packages assigned and in transit
-      return Boolean(route.assignedPackagesList && route.assignedPackagesList.length > 0);
-    }),
-    [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles, dbLgus]);
+  const liveTruckRoutes = useMemo(() => {
+    const knownLocations: Record<string, TruckLiveLocation> = { ...liveLocations };
+
+    // Synthesize warehouse origin positions for assigned trucks with active shipments that haven't streamed phone GPS yet
+    const activeDispatches = [
+      ...releases.map((r) => ({
+        truckId: r.assigned_truck_id,
+        warehouse: r.warehouse_source,
+        status: r.delivery_status
+      })),
+      ...outgoingReleasesList.map((r) => ({
+        truckId: r.assignedTruckId || r.assigned_truck_id,
+        warehouse: r.warehouseSource,
+        status: r.deliveryStatus
+      }))
+    ];
+
+    activeDispatches.forEach((dispatch) => {
+      const tid = dispatch.truckId?.trim().toUpperCase();
+      if (!tid) return;
+      if (['Delivered', 'Accepted', 'Distributed', 'Cancelled'].includes(dispatch.status ?? '')) return;
+      if (isLguReceiverId(tid)) return;
+
+      if (!knownLocations[tid]) {
+        const originCoords = findCoords(WAREHOUSE_COORDS, dispatch.warehouse) ?? WAREHOUSE_COORDS['dswd oton warehouse'];
+        knownLocations[tid] = {
+          truck_id: tid,
+          latitude: originCoords[0],
+          longitude: originCoords[1],
+          gps_text: `${dispatch.warehouse || 'DSWD Regional Hub'} (Origin Warehouse)`,
+          updated_at: new Date().toISOString(),
+          accuracy: null,
+          wallet_address: null
+        };
+      }
+    });
+
+    return Object.values(knownLocations)
+      .filter(isActiveReceiverLocation)
+      .filter((loc) => !isLguReceiverId(loc.truck_id))
+      .sort((a, b) => new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime())
+      .map((location) => toTruckRoute(location, releases, outgoingReleasesList, packagePriorities, heldPackages, profiles, dbLgus))
+      .filter((route) => {
+        return Boolean(route.assignedPackagesList && route.assignedPackagesList.length > 0);
+      });
+  }, [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles, dbLgus]);
 
   // Opportunistic cleanup of trucks with no active packages
   useEffect(() => {

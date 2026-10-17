@@ -192,13 +192,8 @@ export function computeSynchronizedLgus(params: {
     canonicalStock['Laminated Sack'] = Math.max(canonicalStock['Laminated Sack'] || 0, Number(lgu.laminatedSacks) || 0);
     canonicalStock['RTEF'] = Math.max(canonicalStock['RTEF'] || 0, Number(lgu.rtef) || 0);
 
-    // 6. Direct incoming goods to LGU (if any pending direct incoming manifests)
-    lguIncomingDirect.forEach((inc) => {
-      if (inc.fnfiCategory && Number(inc.quantity) > 0) {
-        const canonical = normalizeCategoryName(inc.fnfiCategory);
-        canonicalStock[canonical] = (canonicalStock[canonical] || 0) + Number(inc.quantity);
-      }
-    });
+    // 6. Verified direct incoming goods are already credited in lgu.foodPacks and lgu_stock
+    // via backendApi.addLguStock during physical verification, so no in-memory addition is needed.
 
     // 7. Deduct outbound dispatches immediately where this LGU is the source
     outboundReleases.forEach((r) => {

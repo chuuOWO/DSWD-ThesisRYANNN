@@ -822,7 +822,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         movementType: 'LGU_RECEIVED',
         outgoingRequestId: matchingRelease?.id,
         drNumber: canonicalDrNumber,
-        destinationLguId: matchingRelease?.destinationLguId,
+        destinationLguId: matchingRelease?.destinationLguId || matchingRelease?.lguId,
         quantityChange: quantity,
         referenceTable: 'lgu_inventory_reports',
         referenceId: canonicalDrNumber,
@@ -833,6 +833,12 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       }).catch(() => {});
 
       await loadLguStock();
+
+      // Clean up truck live location since delivery is finalized
+      const deliveredTruckId = matchingRelease?.assignedTruckId || (matchingRelease as any)?.assigned_truck_id;
+      if (deliveredTruckId) {
+        await backendApi.markTruckLiveLocationDone(deliveredTruckId, canonicalDrNumber).catch(() => {});
+      }
 
       // Smooth 5-dot modal completes into "Done!"
       setTimeout(() => {

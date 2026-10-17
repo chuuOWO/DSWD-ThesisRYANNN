@@ -57,6 +57,7 @@ export interface AuditEvent {
 
 export interface IncomingGoods {
   id: string;
+  manifestNumber?: string;
   dateReceived: string;
   fnfiCategory: string;
   quantity: number;
@@ -87,12 +88,16 @@ export interface BatchAllocation {
 }
 
 export interface OutgoingRelease {
+  id?: string;
   drNumber: string;
   dateAllocated: string;
+  dateRequested?: string;
   lguId?: string;
+  destinationLguId?: string;
   lguName: string;
   province: string;
   municipality: string;
+  destination?: string;
   fnfiCategory: string;
   amountRequested: number;
   amountApproved: number;
@@ -113,6 +118,8 @@ export interface OutgoingRelease {
   destinationAddress?: string;
   blockchainTxHash?: string;
   correctionNote?: string;
+  truckId?: string | null;
+  plateNumber?: string | null;
   assignedTruckId?: string | null;
   assigned_truck_id?: string | null;
   assignedEscortProfileId?: string | null;
@@ -422,12 +429,16 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
   });
 
   return {
+    id: row.id,
     drNumber: row.dr_number ?? row.id,
     dateAllocated: row.date_allocated ?? '',
+    dateRequested: row.date_allocated ?? '',
     lguId: row.lgu_id ?? undefined,
+    destinationLguId: row.lgu_id ?? undefined,
     lguName: row.lgu_name ?? '',
     province: row.province ?? '',
     municipality: row.municipality ?? '',
+    destination: row.municipality ?? row.lgu_name ?? '',
     fnfiCategory: row.category ?? '',
     amountRequested: Number(row.amount_requested ?? 0),
     amountApproved: Number(row.amount_approved ?? 0),

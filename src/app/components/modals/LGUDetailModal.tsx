@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import type { OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
+import { backendApi } from '../../services/backendApi';
+import { supabase } from '../../lib/supabase';
 
 export interface LGUTransaction {
   id: string;
@@ -57,6 +59,58 @@ export function LGUDetailModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 6;
+
+  const [dbLedgerEntries, setDbLedgerEntries] = useState<any[]>([]);
+  const [isLoadingLedger, setIsLoadingLedger] = useState(false);
+
+  // Load and subscribe to live database stock ledger movements for this LGU
+  useEffect(() => {
+    if (!isOpen || !lgu?.id) {
+      setDbLedgerEntries([]);
+      return;
+    }
+
+    let isSubscribed = true;
+    setIsLoadingLedger(true);
+
+    const fetchLedger = async () => {
+      try {
+        const rows = await backendApi.getStockLedgerForLgu(lgu.id);
+        if (isSubscribed) {
+          setDbLedgerEntries(rows || []);
+        }
+      } catch (err) {
+        console.warn('Failed to load database stock ledger for LGU:', err);
+      } finally {
+        if (isSubscribed) {
+          setIsLoadingLedger(false);
+        }
+      }
+    };
+
+    fetchLedger();
+
+    const channel = supabase
+      .channel(`lgu-ledger-${lgu.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'stock_ledger',
+          filter: `lgu_id=eq.${lgu.id}`
+        },
+        () => {
+          fetchLedger();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isSubscribed = false;
+      supabase.removeChannel(channel);
+    };
+  }, [isOpen, lgu?.id]);
 
   // Reset pagination and filters when opening modal with a new LGU
   useEffect(() => {
@@ -161,6 +215,55 @@ export function LGUDetailModal({
       }
     });
 
+    // 4. Incorporate database stock ledger movements (audits, recounts, mutual aid, receipts)
+    dbLedgerEntries.forEach((row) => {
+      if (!row) return;
+      const refCode =
+        row.reference_dr_id ||
+        row.reference_manifest_id ||
+        (row.id ? `LEDGER-${String(row.id).slice(0, 8).toUpperCase()}` : 'STOCK-AUDIT');
+
+      // Deduplicate if already present in list
+      const alreadyLogged = list.some((item) =>
+        item.referenceCode === refCode ||
+        item.id.includes(refCode) ||
+        (row.reference_dr_id && item.referenceCode.includes(row.reference_dr_id))
+      );
+      if (alreadyLogged) return;
+
+      const delta = Number(row.delta_quantity) || 0;
+      const isIncoming = delta >= 0;
+      const kitName = (row.kit_types && typeof row.kit_types === 'object' && 'name' in row.kit_types)
+        ? String((row.kit_types as any).name)
+        : (row.kit_type_id || 'Relief Goods');
+
+      const mvType = String(row.movement_type || '').toUpperCase();
+      let sourceName = `${lgu.municipality} LGU`;
+      let destName = 'Local Relief Distribution';
+
+      if (isIncoming) {
+        sourceName = mvType === 'AID_RECEIVED' ? 'DSWD Regional Relief Hub' : 'Local Stock / Intake';
+        destName = `${lgu.municipality} LGU`;
+      } else {
+        sourceName = `${lgu.municipality} LGU`;
+        destName = mvType === 'MUTUAL_AID_OUT' ? 'Inter-LGU Mutual Aid Transfer' : 'Community Distribution';
+      }
+
+      list.push({
+        id: `DB-LEDGER-${row.id}`,
+        type: isIncoming ? 'Incoming' : 'Outgoing',
+        referenceCode: refCode,
+        category: normalizeCategoryName(kitName) || kitName,
+        quantity: Math.abs(delta),
+        unit: 'kits',
+        source: sourceName,
+        destination: destName,
+        date: row.created_at || '',
+        status: 'Recorded',
+        deliveryMode: mvType ? mvType.replace(/_/g, ' ') : 'Database Ledger'
+      });
+    });
+
     // Sort transactions by date descending (newest first)
     list.sort((a, b) => {
       const dateA = new Date(a.date || 0).getTime();
@@ -169,7 +272,7 @@ export function LGUDetailModal({
     });
 
     return list;
-  }, [lgu, outgoingReleases, incomingGoods]);
+  }, [lgu, outgoingReleases, incomingGoods, dbLedgerEntries]);
 
   // Calculate On-Hand Inventory Category ledger with latest dates
   const inventoryDates = useMemo(() => {
@@ -458,7 +561,12 @@ export function LGUDetailModal({
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-base font-bold text-gray-900">Incoming &amp; Outgoing Transactions</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-gray-900">Incoming &amp; Outgoing Transactions</h3>
+                  <span className="inline-flex items-center gap-1 text-[10px] text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-medium">
+                    {isLoadingLedger ? 'Syncing...' : 'Realtime DB Sync'}
+                  </span>
+                </div>
                 <p className="text-xs text-gray-500">
                   Complete audit trail of relief shipments arriving at and releasing from {lgu.municipality}
                 </p>

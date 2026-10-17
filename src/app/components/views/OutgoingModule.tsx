@@ -7,7 +7,7 @@ import { SuccessModal } from '../modals/SuccessModal';
 import { blockchain } from '../../services/blockchain';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
-import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord } from '../../services/backendApi';
+import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord, TruckRecord } from '../../services/backendApi';
 
 interface InventoryState {
   inventory: InventoryItem[];
@@ -18,6 +18,7 @@ interface InventoryState {
   warehousesList?: WarehouseRecord[];
   supplySourcesList?: SupplySourceRecord[];
   kitTypesList?: KitTypeRecord[];
+  trucksList?: TruckRecord[];
   addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'>) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => Promise<{ ok: boolean; message: string }>;

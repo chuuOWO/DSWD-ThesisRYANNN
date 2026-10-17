@@ -85,21 +85,24 @@ export interface PriorityEvaluation {
   priorityColor: PriorityColor;
   priorityLevel: PriorityLevel;
   systemResponse: string;
+  recommendation: string;
   config: PriorityIndicatorConfig;
   urgencyScore: number;
 }
 
 export function evaluatePriorityIndicator(params: {
   foodPacks?: number;
+  currentStock?: number;
   totalStock?: number;
   targetQuota?: number;
   completedDeliveries?: number;
   pendingDeliveries?: number;
   totalDeliveries?: number;
   affectedFamilies?: number;
+  damageIndex?: number;
 }): PriorityEvaluation {
   const target = params.targetQuota && params.targetQuota > 0 ? params.targetQuota : TARGET_BASELINE_STOCK;
-  const fp = Math.max(0, params.foodPacks ?? 0);
+  const fp = Math.max(0, params.foodPacks ?? params.currentStock ?? 0);
 
   // 1. Stock Rate vs Target Buffer
   const stockRate = Math.min(100, Math.max(0, Math.round((fp / target) * 100)));
@@ -144,6 +147,7 @@ export function evaluatePriorityIndicator(params: {
     priorityColor: matchedConfig.color,
     priorityLevel: matchedConfig.priorityLevel,
     systemResponse: matchedConfig.systemResponse,
+    recommendation: matchedConfig.systemResponse,
     config: matchedConfig,
     urgencyScore
   };

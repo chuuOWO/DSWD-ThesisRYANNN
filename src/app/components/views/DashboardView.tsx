@@ -575,7 +575,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
     return filteredReleases.reduce((sum, r) => sum + (Number(r.amountRequested) || 0), 0);
   }, [filteredReleases]);
 
-  const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || item.status === 'Minted').length;
+  const postedBatchCount = incomingGoodsList.filter(item => item.status === 'Verified' || (item.status as string) === 'Minted').length;
   const releaseRecordCount = outgoingReleasesList.filter(item => item.handoverContractId).length;
   const gpsAcceptedCount = outgoingReleasesList.filter(item => item.receiverGps).length;
   const severeLGUs = effectiveLguPriorities.filter(report => report.priorityColor === 'Red');

@@ -131,7 +131,7 @@ export function AnalyticsReportPdfModal({
   }, [filteredReleases]);
 
   const completedCount = useMemo(() => {
-    return filteredReleases.filter(r => r.deliveryStatus === 'Received').length;
+    return filteredReleases.filter(r => r.deliveryStatus === 'Delivered' || (r.deliveryStatus as any) === 'Received').length;
   }, [filteredReleases]);
 
   // Warehouse Inventory Reserve Readiness

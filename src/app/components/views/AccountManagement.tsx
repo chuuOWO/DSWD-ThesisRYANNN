@@ -40,7 +40,7 @@ import {
   X
 } from 'lucide-react';
 import { authApi, type UserProfile } from '../../services/authApi';
-import { backendApi, type LguRecord, type ActivityLogRecord } from '../../services/backendApi';
+import { backendApi, DEFAULT_TRUCKS, type TruckRecord, type LguRecord, type ActivityLogRecord } from '../../services/backendApi';
 import { blockchain } from '../../services/blockchain';
 import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
@@ -359,6 +359,9 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 5;
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [trucksList, setTrucksList] = useState<TruckRecord[]>(DEFAULT_TRUCKS);
+  const [truckAssignments, setTruckAssignments] = useState<Record<string, string>>({});
+  const [savingTruckUserId, setSavingTruckUserId] = useState<string | null>(null);
 
   // Top-level Navigation Switcher: 'directory' | 'logs' | 'user_trails'
   const [activeMainTab, setActiveMainTab] = useState<'directory' | 'logs' | 'user_trails'>('directory');
@@ -471,10 +474,13 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
       const data = await authApi.getAllProfiles();
       setProfiles(data);
       const map: Record<string, string> = {};
+      const truckMap: Record<string, string> = {};
       data.forEach((p) => {
         map[p.id] = extractCleanMunicipality(p.lguName);
+        if (p.truckId) truckMap[p.id] = p.truckId;
       });
       setAssignments(map);
+      setTruckAssignments(truckMap);
 
       // Keep selectedProfile in sync if open
       if (selectedProfile) {
@@ -490,6 +496,10 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
 
   useEffect(() => {
     loadProfiles();
+    backendApi.getTrucks().then((data) => {
+      if (data && data.length > 0) setTrucksList(data);
+    }).catch(() => {});
+
     const unsub = authApi.subscribeProfiles(() => {
       loadProfiles();
     });
@@ -682,6 +692,53 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
           text: err instanceof Error ? err.message : 'Failed to update account assignment.'
         });
       }, 1000);
+    }
+  };
+
+  const handleTruckAssignmentChange = (userId: string, truckId: string) => {
+    setTruckAssignments((prev) => ({ ...prev, [userId]: truckId }));
+  };
+
+  const handleSaveTruckAssignment = async (profile: UserProfile) => {
+    const targetTruckId = truckAssignments[profile.id] ?? profile.truckId ?? '';
+    setSavingTruckUserId(profile.id);
+    try {
+      await authApi.assignProfileTruck(profile.id, targetTruckId || null);
+      await backendApi.logActivity({
+        action: targetTruckId ? 'ASSIGN_TRUCK' : 'UNASSIGN_TRUCK',
+        entityType: 'User',
+        entityId: profile.id,
+        details: targetTruckId
+          ? `Assigned vehicle ${targetTruckId} to escort officer ${profile.fullName || profile.email}.`
+          : `Removed vehicle assignment from escort officer ${profile.fullName || profile.email}.`,
+        metadata: {
+          userId: profile.id,
+          targetTruckId: targetTruckId || null,
+          previousTruckId: profile.truckId
+        }
+      }).catch(() => {});
+
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.id === profile.id ? { ...p, truckId: targetTruckId || null } : p
+        )
+      );
+      if (selectedProfile && selectedProfile.id === profile.id) {
+        setSelectedProfile((prev) => prev ? { ...prev, truckId: targetTruckId || null } : null);
+      }
+      setToastMessage({
+        type: 'success',
+        text: targetTruckId
+          ? `Vehicle ${targetTruckId} successfully assigned to ${profile.fullName || profile.email}.`
+          : `Vehicle assignment removed for ${profile.fullName || profile.email}.`
+      });
+    } catch (err: any) {
+      setToastMessage({
+        type: 'error',
+        text: err?.message || 'Failed to update truck assignment.'
+      });
+    } finally {
+      setSavingTruckUserId(null);
     }
   };
 
@@ -2983,6 +3040,53 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                 </div>
               );
             })()}
+
+            {/* Convoy Truck Assignment (for Field Escort Receivers) */}
+            {selectedProfile.role === 'receiver' && (
+              <div className="space-y-3 p-4 rounded-2xl border border-purple-100 bg-purple-50/40">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-purple-950 flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-purple-700" />
+                    Assigned Convoy Vehicle / Fleet Truck
+                  </label>
+                  {selectedProfile.truckId && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
+                      Current: {selectedProfile.truckId}
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-purple-700/80">
+                  Select a registered DSWD relief truck for this escort officer. Mobile GPS telemetries and relief manifest custody transfers will be mapped to this vehicle.
+                </p>
+
+                <div className="flex items-center gap-3 flex-wrap pt-1">
+                  <select
+                    value={truckAssignments[selectedProfile.id] ?? (selectedProfile.truckId || '')}
+                    onChange={(e) => handleTruckAssignmentChange(selectedProfile.id, e.target.value)}
+                    disabled={savingTruckUserId === selectedProfile.id}
+                    className="flex-1 min-w-[240px] px-3 py-2 text-xs border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
+                  >
+                    <option value="">No Truck Assigned (Unassigned Escort)</option>
+                    {trucksList.map((t) => (
+                      <option key={t.truckId} value={t.truckId}>
+                        {t.truckId} - {t.plateNumber} ({t.model})
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    type="button"
+                    disabled={savingTruckUserId === selectedProfile.id}
+                    onClick={() => handleSaveTruckAssignment(selectedProfile)}
+                    className="px-4 py-2 rounded-xl bg-purple-700 text-white hover:bg-purple-800 text-xs font-bold transition shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    {savingTruckUserId === selectedProfile.id ? 'Saving...' : 'Save Truck'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Verification / Approval / Deletion Actions */}
             <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">

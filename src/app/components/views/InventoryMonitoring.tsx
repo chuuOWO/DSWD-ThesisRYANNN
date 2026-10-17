@@ -16,18 +16,19 @@ import {
   FileText
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import type { LguRecord } from '../../services/backendApi';
+import type { LguRecord, KitTypeRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
 import { normalizeCategoryName } from '../../lib/lguSync';
 import type { UserProfile } from '../../services/authApi';
 import { InventoryReportPdfModal } from '../modals/InventoryReportPdfModal';
 
 interface InventoryState {
-  inventory: { category: string; warehouseA: number; warehouseB: number }[];
+  inventory: { category: string; warehouseA: number; warehouseB: number; warehouseBreakdown?: Record<string, number> }[];
   incomingGoodsList: IncomingGoods[];
   outgoingReleasesList: OutgoingRelease[];
   lguPriorityReports: LGUPriorityReport[];
   lgusList?: LguRecord[];
+  kitTypesList?: KitTypeRecord[];
   addStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => void;
   deductStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => boolean;
   getAvailableStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse') => number;
@@ -210,11 +211,12 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
         })
         .reduce((sum, incoming) => sum + (incoming.quantity || 0), 0);
 
-      const totalWarehouseStock = matchingItems.reduce((sum, i) => {
+      const totalWarehouseStock = matchingItems.reduce((sum: number, i: any) => {
         if (i.warehouseBreakdown && Object.keys(i.warehouseBreakdown).length > 0) {
-          return sum + Object.values(i.warehouseBreakdown).reduce((wSum, q) => wSum + (Number(q) || 0), 0);
+          const breakdownSum = Number((Object.values(i.warehouseBreakdown) as (number | string)[]).reduce((wSum: number, q) => wSum + (Number(q) || 0), 0));
+          return sum + breakdownSum;
         }
-        return sum + (i.warehouseA || 0) + (i.warehouseB || 0);
+        return sum + (Number(i.warehouseA) || 0) + (Number(i.warehouseB) || 0);
       }, 0);
 
       return {
