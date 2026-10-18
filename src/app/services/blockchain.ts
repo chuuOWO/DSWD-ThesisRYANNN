@@ -766,22 +766,40 @@ export const blockchain = {
   },
 
   async transferDriverCustody(input: { drNumber: string; newDriverWallet: string; gps: string; note?: string }, onStage?: TxStageCallback): Promise<BlockchainProof> {
-    const signer = await getSigner();
-    const contract = new Contract(handoverContractAddress, handoverAbi, signer);
-    onStage?.('mining');
-    const tx = await contract.transferDriverCustody(
-      input.drNumber,
-      input.newDriverWallet,
-      input.gps,
-      input.note || 'Transshipment Relay'
-    );
-    onStage?.('mining', tx.hash);
-    const receipt = await tx.wait(1);
-    return {
-      hash: receipt?.hash || tx.hash,
-      walletAddress: input.newDriverWallet,
-      mode: 'contract'
-    };
+    const lockKey = `transferDriverCustody:${input.drNumber}`;
+    const existing = activeTxPromises.get(lockKey);
+    if (existing) {
+      console.warn(`transferDriverCustody for ${input.drNumber} is already in-flight.`);
+      return existing;
+    }
+
+    const task = (async () => {
+      const signer = await getSigner();
+      const contract = new Contract(handoverContractAddress, handoverAbi, signer);
+      onStage?.('mining');
+      console.log(`[Blockchain] Relaying transferDriverCustody on Sepolia for ${input.drNumber} -> new driver: ${input.newDriverWallet}...`);
+      const tx = await contract.transferDriverCustody(
+        input.drNumber,
+        input.newDriverWallet,
+        input.gps,
+        input.note || 'Transshipment Relay'
+      );
+      onStage?.('mining', tx.hash);
+      const receipt = await tx.wait(1);
+      console.log(`[Blockchain] transferDriverCustody confirmed on Sepolia: ${receipt?.hash || tx.hash}`);
+      return {
+        hash: receipt?.hash || tx.hash,
+        walletAddress: input.newDriverWallet,
+        mode: 'contract'
+      };
+    })();
+
+    activeTxPromises.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      activeTxPromises.delete(lockKey);
+    }
   },
 
   async confirmReceipt(input: ConfirmReceiptInput, onStage?: TxStageCallback): Promise<BlockchainProof> {
