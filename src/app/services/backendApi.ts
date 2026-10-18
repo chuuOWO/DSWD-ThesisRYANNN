@@ -23,7 +23,7 @@ export interface IncomingPayload {
   source: string;
   destinationType: 'Warehouse' | 'LGU';
   destination: string;
-  incidentCode: string;
+  incidentCode?: string;
   supplySourceId?: string;
   kitTypeId?: string;
   destinationWarehouseId?: string;

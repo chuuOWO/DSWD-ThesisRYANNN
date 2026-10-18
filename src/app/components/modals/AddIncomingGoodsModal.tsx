@@ -15,7 +15,7 @@ export interface IncomingGoodsForm {
   transportMode?: 'Delivery' | 'Pick up';
   destinationType: 'Warehouse' | 'LGU';
   destination: string;
-  incidentCode: string;
+  incidentCode?: string;
   supplySourceId?: string;
   kitTypeId?: string;
   destinationWarehouseId?: string;
@@ -147,8 +147,7 @@ export function AddIncomingGoodsModal({
     source: sourceOptions[0] || 'VDRC',
     transportMode: 'Delivery',
     destinationType: 'Warehouse',
-    destination: warehouseOptions[0] || 'Oton Main Warehouse',
-    incidentCode: 'INC-2026-PREPOSITION'
+    destination: warehouseOptions[0] || 'Oton Main Warehouse'
   };
 
   const [formData, setFormData] = useState<IncomingGoodsForm>(
@@ -265,7 +264,6 @@ export function AddIncomingGoodsModal({
         manifestNumber: formData.manifestNumber?.trim().toUpperCase(),
         source: finalSource,
         destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination,
-        incidentCode: formData.incidentCode?.trim().toUpperCase() || 'INC-2026-PREPOSITION',
         supplySourceId: matchedSource?.id,
         kitTypeId: matchedKit?.id,
         destinationWarehouseId: destWhId,
@@ -332,23 +330,6 @@ export function AddIncomingGoodsModal({
                 Official physical Requisition and Issue Slip control number from warehouse intake documentation.
               </p>
             )}
-          </div>
-
-          {/* Incident / Operation Code - Calamity / Prepositioning */}
-          <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              Disaster Incident / Operation Code
-            </label>
-            <input
-              type="text"
-              value={formData.incidentCode || ''}
-              onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value.toUpperCase()))}
-              placeholder="e.g., INC-2026-PREPOSITION, INC-2026-TY-01"
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Associated calamity, disaster, or buffer prepositioning code (e.g. INC-2026-PREPOSITION).
-            </p>
           </div>
 
           {/* Date Received */}

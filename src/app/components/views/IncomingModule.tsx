@@ -151,8 +151,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       expirationDate: updatedGoods.expirationDate,
       source: updatedGoods.source,
       destinationType: updatedGoods.destinationType,
-      destination: updatedGoods.destination,
-      incidentCode: updatedGoods.incidentCode
+      destination: updatedGoods.destination
     });
     setEditingIncoming(null);
     showResult(`Incoming record ${itemTarget.id} updated successfully.`);
@@ -424,7 +423,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">RIS Number</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Incident Code</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
@@ -441,12 +439,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
                       <Calendar className="w-3 h-3 text-gray-400" /> {item.dateReceived}
                     </div>
-                  </td>
-                  {/* Incident / Operation Code */}
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <span className="font-mono text-xs font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 inline-block shadow-2xs">
-                      {item.incidentCode || '—'}
-                    </span>
                   </td>
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-gray-900">{item.fnfiCategory}</p>
@@ -810,8 +802,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             expirationDate: editingIncoming.expirationDate,
             source: editingIncoming.source,
             destinationType: editingIncoming.destinationType,
-            destination: editingIncoming.destination,
-            incidentCode: editingIncoming.incidentCode
+            destination: editingIncoming.destination
           }}
         />
       )}

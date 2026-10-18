@@ -66,7 +66,7 @@ export interface IncomingGoods {
   source: string;
   destinationType: 'Warehouse' | 'LGU';
   destination: string;
-  incidentCode: string;
+  incidentCode?: string;
   status: IncomingStatus;
   manifestHash: string;
   batchTokenId?: string;
@@ -1151,7 +1151,6 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       ...newGoods,
       id: cleanId,
       manifestNumber: cleanId,
-      incidentCode: newGoods.incidentCode?.trim().toUpperCase() || 'INC-2026-PREPOSITION',
       status: initialStatus,
       manifestHash: makeManifestHash(newGoods),
       verifiedBy: undefined,
@@ -1163,7 +1162,6 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     backendApi.createIncoming({
       ...newGoods,
       manifestNumber: cleanId,
-      incidentCode: goodsWithId.incidentCode,
       status: initialStatus,
       manifestHash: goodsWithId.manifestHash,
       supplySourceId: newGoods.supplySourceId,
@@ -1193,8 +1191,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         quantity: newGoods.quantity,
         unitType: newGoods.unitType,
         source: newGoods.source,
-        destination: newGoods.destination,
-        incidentCode: goodsWithId.incidentCode
+        destination: newGoods.destination
       }
     }).catch(() => {});
   };
