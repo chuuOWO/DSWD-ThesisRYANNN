@@ -300,6 +300,8 @@ export interface OutgoingPayload {
   dateAllocated: string;
   lguId?: string;
   lgu_id?: string;
+  destinationLguId?: string;
+  destination_lgu_id?: string;
   lguName: string;
   province: string;
   municipality: string;
@@ -2041,7 +2043,7 @@ export const backendApi = {
     }
 
     // 2. Resolve destination LGU (required NOT NULL in outgoing_requests)
-    let destLguId = payload.lguId ?? payload.lgu_id ?? null;
+    let destLguId = payload.destinationLguId ?? payload.destination_lgu_id ?? payload.lguId ?? payload.lgu_id ?? null;
     if (!isUuid(destLguId)) {
       destLguId = await this.resolveLguId(payload.municipality || payload.lguName || destLguId);
     }
@@ -2095,8 +2097,6 @@ export const backendApi = {
       province: payload.province || '',
       municipality: payload.municipality || '',
       category: payload.fnfiCategory || payload.category || 'Family Food Pack',
-      source_name_snapshot: payload.warehouseSource || 'DSWD Logistics Hub',
-      item_name_snapshot: payload.fnfiCategory || payload.category || 'Family Food Pack',
       delivery_priority: Number(payload.deliveryPriority ?? 0),
       is_held: Boolean(payload.isHeld ?? false),
       correction_note: payload.correctionNote || ''

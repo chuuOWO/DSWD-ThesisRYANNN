@@ -272,6 +272,7 @@ type OutgoingRequestRow = {
   dr_number?: string | null;
   date_allocated?: string | null;
   lgu_id?: string | null;
+  destination_lgu_id?: string | null;
   lgu_name?: string | null;
   province?: string | null;
   municipality?: string | null;
@@ -434,7 +435,7 @@ const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
     dateAllocated: row.date_allocated ?? '',
     dateRequested: row.date_allocated ?? '',
     lguId: row.lgu_id ?? undefined,
-    destinationLguId: row.lgu_id ?? undefined,
+    destinationLguId: row.destination_lgu_id ?? row.lgu_id ?? undefined,
     lguName: row.lgu_name ?? '',
     province: row.province ?? '',
     municipality: row.municipality ?? '',
@@ -1424,6 +1425,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     backendApi.createOutgoing({
       ...newRelease,
       lguId: resolvedLguId,
+      destinationLguId: resolvedLguId,
       drNumber: newDR,
       amountApproved: newRelease.amountApproved,
       deliveryStatus: status,
