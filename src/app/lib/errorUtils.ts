@@ -48,6 +48,10 @@ export function formatUserErrorMessage(error: unknown, fallback = 'Unable to com
     return 'Inventory batch synchronization with blockchain is in progress. Please retry.';
   }
 
+  if (lower.includes('out of gas') || lower.includes('gas required exceeds')) {
+    return 'Smart contract notice: transaction gas limit recalibrated. Please tap retry.';
+  }
+
   if (lower.includes('action="estimategas"') || lower.includes('call_exception') || lower.includes('execution reverted')) {
     const match = raw.match(/reason="([^"]+)"/i) || raw.match(/execution reverted: "([^"]+)"/i);
     if (match && match[1]) {

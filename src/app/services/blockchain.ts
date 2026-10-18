@@ -777,14 +777,28 @@ export const blockchain = {
       onStage?.('wallet');
       const signer = await getSigner();
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
+
+      let gasLimit = 1600000n;
+      try {
+        const estimated = await contract.transferDriverCustody.estimateGas(
+          input.drNumber,
+          input.newDriverWallet,
+          input.gps,
+          input.note || 'Transshipment Relay'
+        );
+        gasLimit = (estimated * 130n) / 100n;
+      } catch (estErr) {
+        console.warn('[Blockchain] Dynamic gas estimation fallback for transferDriverCustody:', estErr);
+      }
+
       onStage?.('mining');
-      console.log(`[Blockchain] Relaying transferDriverCustody on Sepolia for ${input.drNumber} -> new driver: ${input.newDriverWallet}...`);
+      console.log(`[Blockchain] Relaying transferDriverCustody on Sepolia for ${input.drNumber} -> new driver: ${input.newDriverWallet} (gasLimit: ${gasLimit})...`);
       const tx = await contract.transferDriverCustody(
         input.drNumber,
         input.newDriverWallet,
         input.gps,
         input.note || 'Transshipment Relay',
-        { gasLimit: 950000n }
+        { gasLimit }
       );
       onStage?.('mining', tx.hash);
       const receipt = await tx.wait(1);
