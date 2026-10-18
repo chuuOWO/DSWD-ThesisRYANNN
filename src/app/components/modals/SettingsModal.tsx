@@ -1580,7 +1580,7 @@ export function SettingsModal({
                     <span>Network: <strong className="text-blue-300">Ethereum Sepolia</strong></span>
                   </div>
                   <div className="flex items-center justify-between pt-1">
-                    <span>Contract: <a href="https://sepolia.etherscan.io/address/0xd2e957dda5a5099980a66ecc736b541590892588" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline font-mono">0xd2e9...2588</a></span>
+                    <span>Contract: <a href={`https://sepolia.etherscan.io/address/${blockchain.getContractAddress() || '0xCde64aBedE22F9842F5678Fe4cd84781960863eC'}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline font-mono">{(blockchain.getContractAddress() || '0xCde64aBedE22F9842F5678Fe4cd84781960863eC').slice(0, 6)}...{(blockchain.getContractAddress() || '0xCde64aBedE22F9842F5678Fe4cd84781960863eC').slice(-4)}</a></span>
                     <span className="text-slate-400">Zero real money (Free testnet ETH)</span>
                   </div>
                 </div>

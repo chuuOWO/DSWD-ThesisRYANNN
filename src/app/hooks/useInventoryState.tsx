@@ -1522,9 +1522,21 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return { ok: false, message: 'Insufficient available warehouse stock.' };
     }
 
+    const cleanDr = release.drNumber.replace(/[^a-zA-Z0-9]/g, '');
     const allocations: BatchAllocation[] = (release.allocatedBatches && release.allocatedBatches.length > 0)
-      ? release.allocatedBatches
-      : [{ batchTokenId: generateBatchTokenId(), quantity: amountApproved }];
+      ? release.allocatedBatches.map(b => {
+          const rawToken = b.batchTokenId || generateBatchTokenId();
+          const uniqueTokenId = rawToken.includes(cleanDr) || rawToken.includes(release.drNumber)
+            ? rawToken
+            : `${rawToken}-${cleanDr}`;
+          return {
+            ...b,
+            batchNumber: b.batchNumber || rawToken.replace(/^BATCH-/, ''),
+            batchTokenId: uniqueTokenId,
+            quantity: Number(b.quantity) || amountApproved
+          };
+        })
+      : [{ batchTokenId: `BATCH-${cleanDr}`, batchNumber: release.drNumber, quantity: amountApproved }];
 
     let proof: any;
 
