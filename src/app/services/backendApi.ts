@@ -2181,7 +2181,7 @@ export const backendApi = {
     return { ok: true };
   },
 
-  async cancelOutgoingApproval(drNumber: string): Promise<{ ok: boolean; message?: string }> {
+  async cancelOutgoingRequest(drNumber: string): Promise<{ ok: boolean; message?: string }> {
     try {
       const canonicalDr = drNumber.trim();
       const { data: releaseRow, error: fetchErr } = await supabase
@@ -2194,7 +2194,10 @@ export const backendApi = {
         return { ok: false, message: 'Outgoing release not found.' };
       }
 
-      const approvedQty = Number(releaseRow.amount_approved || releaseRow.amount_requested || 0);
+      if (!['Draft', 'Allocating'].includes(releaseRow.delivery_status)) {
+        return { ok: false, message: 'Only pre-approval releases (Draft or Allocating) can be cancelled.' };
+      }
+
       const category = releaseRow.category || 'Family Food Pack';
       const sourceType = releaseRow.source_type || 'Warehouse';
       const sourceName = releaseRow.warehouse_source || releaseRow.lgu_name;
@@ -2206,9 +2209,11 @@ export const backendApi = {
         quantity?: number;
       }>;
 
+      let totalAllocQty = 0;
       for (const alloc of allocations) {
         const allocQty = Number(alloc.quantity || 0);
         if (allocQty <= 0) continue;
+        totalAllocQty += allocQty;
 
         let batchRow: { batch_token_id: string; remaining_quantity: number } | null = null;
         if (alloc.batchTokenId) {
@@ -2244,20 +2249,22 @@ export const backendApi = {
         .delete()
         .eq('outgoing_request_id', releaseRow.dr_number);
 
-      // 3. Restore warehouse or LGU stock
-      if (sourceName && approvedQty > 0) {
+      // 3. Restore warehouse or LGU stock if stock was deducted upon creation
+      const qtyToRestore = totalAllocQty > 0 ? totalAllocQty : Number(releaseRow.amount_requested || 0);
+      if (sourceName && qtyToRestore > 0) {
         if (sourceType === 'Warehouse') {
-          await this.addWarehouseStock(sourceName, category, approvedQty);
+          await this.addWarehouseStock(sourceName, category, qtyToRestore);
         } else {
-          await this.addLguStock(sourceName, category, approvedQty);
+          await this.addLguStock(sourceName, category, qtyToRestore);
         }
       }
 
-      // 4. Update outgoing_requests back to Allocating
+      // 4. Update outgoing_requests to Cancelled
       const { error: updateErr } = await supabase
         .from('outgoing_requests')
         .update({
-          delivery_status: 'Allocating',
+          delivery_status: 'Cancelled',
+          allocated_batches: [],
           amount_approved: null,
           admin_signature: '',
           tx_hash: ''
@@ -2274,17 +2281,17 @@ export const backendApi = {
         warehouseId: releaseRow.source_warehouse_id,
         lguId: releaseRow.source_lgu_id,
         kitTypeId: releaseRow.kit_type_id || category,
-        deltaQuantity: approvedQty,
+        deltaQuantity: qtyToRestore,
         balanceAfter: 0,
-        movementType: 'APPROVAL_CANCELLED',
+        movementType: 'RELEASE_CANCELLED',
         referenceDrId: releaseRow.dr_number,
         drNumber: releaseRow.dr_number
-      }).catch(err => console.warn('appendStockLedger error on cancel approval:', err));
+      }).catch(err => console.warn('appendStockLedger error on cancel release:', err));
 
       return { ok: true };
     } catch (err: any) {
-      console.error('cancelOutgoingApproval error:', err);
-      return { ok: false, message: err?.message || 'Failed to cancel approval' };
+      console.error('cancelOutgoingRequest error:', err);
+      return { ok: false, message: err?.message || 'Failed to cancel outgoing request' };
     }
   },
 

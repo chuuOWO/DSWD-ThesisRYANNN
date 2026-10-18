@@ -1721,42 +1721,43 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     return { ok: true, message: `Release approved! Batch token ${batchTokenId} minted on blockchain with Admin signature.` };
   };
 
-  const cancelApproval = async (drNumber: string): Promise<{ ok: boolean; message?: string }> => {
+  const cancelOutgoingRelease = async (drNumber: string): Promise<{ ok: boolean; message?: string }> => {
     const release = outgoingReleasesList.find(r => r.drNumber === drNumber);
     if (!release) return { ok: false, message: 'Release not found.' };
-    if (!['Approved', 'Packed'].includes(release.deliveryStatus)) {
-      return { ok: false, message: 'Only Approved or Packed releases can have approval cancelled.' };
+    if (!['Draft', 'Allocating'].includes(release.deliveryStatus)) {
+      return { ok: false, message: 'Only pre-approval releases (Draft or Allocating) can be cancelled.' };
     }
 
-    const approvedQty = release.amountApproved || release.amountRequested || 0;
+    const totalAllocQty = (release.allocatedBatches || []).reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+    const qtyToRestore = totalAllocQty > 0 ? totalAllocQty : Number(release.amountRequested || 0);
 
     try {
-      // 1. Call backendApi to rollback in Supabase
-      const res = await backendApi.cancelOutgoingApproval(drNumber);
+      // 1. Call backendApi to cancel and rollback in Supabase
+      const res = await backendApi.cancelOutgoingRequest(drNumber);
       if (!res.ok) {
-        return { ok: false, message: res.message || 'Failed to cancel approval in database.' };
+        return { ok: false, message: res.message || 'Failed to cancel outgoing request in database.' };
       }
 
       // 2. Restore warehouse stock in local state
-      if (isMainWarehouse(release.warehouseSource) && approvedQty > 0) {
+      if (isMainWarehouse(release.warehouseSource) && qtyToRestore > 0) {
         setWarehousesList(prev => {
           const updated = prev.map(wh => {
             const matchName = release.warehouseSource.replace(/main|warehouse/gi, '').trim().toLowerCase();
             if (!wh.name.toLowerCase().includes(matchName)) return wh;
             const catLower = release.fnfiCategory.toLowerCase();
             const newWh = { ...wh };
-            if (catLower.includes('food pack')) newWh.foodPacks = (wh.foodPacks || 0) + approvedQty;
-            else if (catLower.includes('hygiene')) newWh.hygieneKits = (wh.hygieneKits || 0) + approvedQty;
-            else if (catLower.includes('sleeping')) newWh.sleepingKits = (wh.sleepingKits || 0) + approvedQty;
-            else if (catLower.includes('kitchen')) newWh.kitchenKits = (wh.kitchenKits || 0) + approvedQty;
-            else if (catLower.includes('family kit')) newWh.familyKits = (wh.familyKits || 0) + approvedQty;
-            else if (catLower.includes('sack')) newWh.laminatedSacks = (wh.laminatedSacks || 0) + approvedQty;
-            else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) newWh.rtef = (wh.rtef || 0) + approvedQty;
+            if (catLower.includes('food pack')) newWh.foodPacks = (wh.foodPacks || 0) + qtyToRestore;
+            else if (catLower.includes('hygiene')) newWh.hygieneKits = (wh.hygieneKits || 0) + qtyToRestore;
+            else if (catLower.includes('sleeping')) newWh.sleepingKits = (wh.sleepingKits || 0) + qtyToRestore;
+            else if (catLower.includes('kitchen')) newWh.kitchenKits = (wh.kitchenKits || 0) + qtyToRestore;
+            else if (catLower.includes('family kit')) newWh.familyKits = (wh.familyKits || 0) + qtyToRestore;
+            else if (catLower.includes('sack')) newWh.laminatedSacks = (wh.laminatedSacks || 0) + qtyToRestore;
+            else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) newWh.rtef = (wh.rtef || 0) + qtyToRestore;
 
             if (newWh.currentStock && newWh.currentStock[release.fnfiCategory] !== undefined) {
               newWh.currentStock = {
                 ...newWh.currentStock,
-                [release.fnfiCategory]: (newWh.currentStock[release.fnfiCategory] || 0) + approvedQty
+                [release.fnfiCategory]: (newWh.currentStock[release.fnfiCategory] || 0) + qtyToRestore
               };
             }
             return newWh;
@@ -1783,25 +1784,24 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         }));
       }
 
-      // 4. Update outgoing releases list: revert to Allocating
+      // 4. Update outgoing releases list: mark as Cancelled
       setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
         ? {
             ...item,
-            deliveryStatus: 'Allocating',
+            deliveryStatus: 'Cancelled',
+            allocatedBatches: [],
             amountApproved: undefined,
-            adminSignature: '',
-            blockchainTxHash: '',
             auditTrail: [
-              audit('Approval Cancelled', `Admin cancelled release approval. Allocated stock restored to tables.`),
+              audit('Release Cancelled', `Outgoing request cancelled before approval. Allocated stock restored to warehouse and FEFO lots.`),
               ...item.auditTrail
             ]
           }
         : item));
 
-      return { ok: true, message: `Approval cancelled for ${drNumber}. Allocated stock has been restored to tables.` };
+      return { ok: true, message: `Release ${drNumber} has been cancelled. Allocated stock has been restored to tables.` };
     } catch (err: any) {
-      logBackendError('Cancel outgoing approval')(err);
-      return { ok: false, message: err?.message || 'Failed to cancel approval.' };
+      logBackendError('Cancel outgoing release')(err);
+      return { ok: false, message: err?.message || 'Failed to cancel release.' };
     }
   };
 
@@ -2464,7 +2464,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     addOutgoingRelease,
     updateOutgoingRelease,
     approveAllocation,
-    cancelApproval,
+    cancelOutgoingRelease,
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,
