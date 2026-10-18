@@ -39,6 +39,10 @@ export function formatUserErrorMessage(error: unknown, fallback = 'Unable to com
     return 'Incorrect email or password. Please try again.';
   }
 
+  if (lower.includes('database error saving new user') || lower.includes('database error saving login')) {
+    return 'Unable to register account. Please check your details and try again, or contact the DSWD administrator.';
+  }
+
   // Blockchain smart contract & EVM reverts
   if (lower.includes('batch not found')) {
     return 'Inventory batch synchronization with blockchain is in progress. Please retry.';

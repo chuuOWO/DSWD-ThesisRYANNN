@@ -142,6 +142,14 @@ export interface TruckRecord {
   updatedAt?: string;
 }
 
+export interface TruckInput {
+  truckId: string;
+  plateNumber: string;
+  model: string;
+  capacityKg: number;
+  isActive?: boolean;
+}
+
 export interface IncidentRecord {
   incidentCode: string;
   disasterName: string;
@@ -2814,6 +2822,87 @@ export const backendApi = {
     } catch {
       return DEFAULT_TRUCKS.filter(t => includeInactive || t.isActive);
     }
+  },
+
+  async createTruck(payload: TruckInput): Promise<TruckRecord> {
+    const cleanId = payload.truckId.trim().toUpperCase();
+    const cleanPlate = payload.plateNumber.trim().toUpperCase();
+    const cleanModel = payload.model.trim();
+    const cleanCapacity = Math.max(1, Math.round(Number(payload.capacityKg) || 5000));
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('trucks')
+      .insert({
+        truck_id: cleanId,
+        plate_number: cleanPlate,
+        model: cleanModel,
+        capacity_kg: cleanCapacity,
+        is_active: payload.isActive ?? true,
+        created_at: now,
+        updated_at: now
+      })
+      .select('*')
+      .single();
+
+    throwIfError(error, 'Failed to register vehicle in convoy fleet registry');
+
+    return {
+      truckId: data.truck_id || cleanId,
+      plateNumber: data.plate_number || cleanPlate,
+      model: data.model || cleanModel,
+      capacityKg: Number(data.capacity_kg || cleanCapacity),
+      isActive: Boolean(data.is_active ?? true),
+      createdAt: data.created_at || now,
+      updatedAt: data.updated_at || now
+    };
+  },
+
+  async updateTruck(truckId: string, payload: Partial<Omit<TruckInput, 'truckId'>>): Promise<{ ok: boolean }> {
+    const cleanId = truckId.trim().toUpperCase();
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString()
+    };
+    if (payload.plateNumber !== undefined) updates.plate_number = payload.plateNumber.trim().toUpperCase();
+    if (payload.model !== undefined) updates.model = payload.model.trim();
+    if (payload.capacityKg !== undefined) updates.capacity_kg = Math.max(1, Math.round(Number(payload.capacityKg) || 5000));
+    if (payload.isActive !== undefined) updates.is_active = Boolean(payload.isActive);
+
+    const { error } = await supabase
+      .from('trucks')
+      .update(updates)
+      .eq('truck_id', cleanId);
+
+    throwIfError(error, 'Failed to update convoy vehicle details');
+    return { ok: true };
+  },
+
+  async archiveTruck(truckId: string): Promise<{ ok: boolean }> {
+    const cleanId = truckId.trim().toUpperCase();
+    const { error } = await supabase
+      .from('trucks')
+      .update({
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('truck_id', cleanId);
+
+    throwIfError(error, 'Failed to archive convoy vehicle');
+    return { ok: true };
+  },
+
+  async restoreTruck(truckId: string): Promise<{ ok: boolean }> {
+    const cleanId = truckId.trim().toUpperCase();
+    const { error } = await supabase
+      .from('trucks')
+      .update({
+        is_active: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq('truck_id', cleanId);
+
+    throwIfError(error, 'Failed to restore convoy vehicle');
+    return { ok: true };
   },
 
   async getIncidents(includeClosed: boolean = false): Promise<IncidentRecord[]> {

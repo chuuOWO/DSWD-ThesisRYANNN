@@ -22,12 +22,6 @@ import { formatUserErrorMessage } from '../../lib/errorUtils';
 import dswdLogo from '../../../imports/dswdlogo.png';
 import dswdBuilding from '../../../imports/dswd_building.png';
 
-const generateTruckId = () => {
-  const array = new Uint32Array(1);
-  crypto.getRandomValues(array);
-  const number = Math.floor(1 + (array[0] / 0xffffffff) * 9999);
-  return `RCVR-${String(number).padStart(4, '0')}`;
-};
 
 // Moving watercolor gradient styling for mobile views
 const mobileWatercolorStyle: React.CSSProperties = {
@@ -59,7 +53,7 @@ export function AuthPage() {
   const [workIdUrl, setWorkIdUrl] = useState<string | null>(null);
   const [workIdFileName, setWorkIdFileName] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState('');
-  const [truckId] = useState(generateTruckId);
+  const [truckId] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -218,7 +212,7 @@ export function AuthPage() {
         jobPosition: jobPosition.trim(),
         workIdUrl: workIdUrl || undefined,
         role,
-        truckId: role === 'receiver' ? truckId.trim() : undefined,
+        truckId: (role === 'receiver' && truckId) ? truckId.trim() : undefined,
         walletAddress: autoSmartWallet
       });
 

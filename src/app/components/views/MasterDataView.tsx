@@ -15,7 +15,8 @@ import {
   Pencil,
   Search,
   Archive,
-  RotateCcw
+  RotateCcw,
+  Truck
 } from 'lucide-react';
 import {
   backendApi,
@@ -23,10 +24,12 @@ import {
   type ProvinceRecord,
   type WarehouseRecord,
   type SupplySourceRecord,
-  type KitTypeRecord
+  type KitTypeRecord,
+  type TruckRecord,
+  type TruckInput
 } from '../../services/backendApi';
 
-type MasterTab = 'kits' | 'sources' | 'lgus' | 'warehouses';
+type MasterTab = 'kits' | 'sources' | 'lgus' | 'warehouses' | 'trucks';
 
 export interface MasterDataViewProps {
   inventoryState?: {
@@ -35,6 +38,7 @@ export interface MasterDataViewProps {
     refreshWarehouses?: () => Promise<any> | void;
     refreshProvinces?: () => Promise<any> | void;
     refreshLgus?: () => Promise<any> | void;
+    refreshTrucks?: () => Promise<any> | void;
   };
 }
 
@@ -46,6 +50,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [warehouses, setWarehouses] = useState<WarehouseRecord[]>([]);
   const [provinces, setProvinces] = useState<ProvinceRecord[]>([]);
   const [dbLgus, setDbLgus] = useState<LguRecord[]>([]);
+  const [trucks, setTrucks] = useState<TruckRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedProvinceFilter, setSelectedProvinceFilter] = useState('All');
   const [lguStatusFilter, setLguStatusFilter] = useState<'active' | 'archived'>('active');
@@ -54,6 +59,8 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [kitSearch, setKitSearch] = useState('');
   const [kitCategoryFilter, setKitCategoryFilter] = useState<'All' | 'Food Item' | 'Non-Food Item'>('All');
   const [sourceSearch, setSourceSearch] = useState('');
+  const [truckSearch, setTruckSearch] = useState('');
+  const [truckStatusFilter, setTruckStatusFilter] = useState<'all' | 'active' | 'archived'>('all');
 
   // Modals state
   const [isAddKitOpen, setIsAddKitOpen] = useState(false);
@@ -61,6 +68,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [isAddLguOpen, setIsAddLguOpen] = useState(false);
   const [isAddProvinceOpen, setIsAddProvinceOpen] = useState(false);
   const [isAddWarehouseOpen, setIsAddWarehouseOpen] = useState(false);
+  const [isAddTruckOpen, setIsAddTruckOpen] = useState(false);
 
   // Edit Kit Modal state
   const [editingKit, setEditingKit] = useState<KitTypeRecord | null>(null);
@@ -68,6 +76,12 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [editKitCategory, setEditKitCategory] = useState<'Food Item' | 'Non-Food Item'>('Non-Food Item');
   const [editKitUnit, setEditKitUnit] = useState('kits');
   const [editKitDesc, setEditKitDesc] = useState('');
+
+  // Edit Truck Modal state
+  const [editingTruck, setEditingTruck] = useState<TruckRecord | null>(null);
+  const [editTruckPlate, setEditTruckPlate] = useState('');
+  const [editTruckModel, setEditTruckModel] = useState('');
+  const [editTruckCapacity, setEditTruckCapacity] = useState('5000');
 
   // Form states
   const [newKitName, setNewKitName] = useState('');
@@ -96,6 +110,11 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [newWhLat, setNewWhLat] = useState('10.7000');
   const [newWhLng, setNewWhLng] = useState('122.5000');
 
+  const [newTruckId, setNewTruckId] = useState('');
+  const [newTruckPlate, setNewTruckPlate] = useState('');
+  const [newTruckModel, setNewTruckModel] = useState('Isuzu Forward 6-Wheeler (5-Ton)');
+  const [newTruckCapacity, setNewTruckCapacity] = useState('5000');
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -106,18 +125,20 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const loadAllData = async () => {
     setIsLoading(true);
     try {
-      const [kits, srcs, whs, provs, lgus] = await Promise.all([
+      const [kits, srcs, whs, provs, lgus, trks] = await Promise.all([
         backendApi.getKitTypes(),
         backendApi.getSupplySources(),
         backendApi.getWarehouses(),
         backendApi.getProvinces(true),
-        backendApi.getLgus(undefined, true)
+        backendApi.getLgus(undefined, true),
+        backendApi.getTrucks(true)
       ]);
       setKitTypes(kits);
       setSources(srcs);
       setWarehouses(whs);
       setProvinces(provs);
       setDbLgus(lgus);
+      setTrucks(trks);
       if (provs.length > 0) {
         setNewLguProvince(prev => prev || provs[0].name);
         setNewWhProvince(prev => prev || provs[0].name);
@@ -420,6 +441,145 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     return l.province.toLowerCase() === selectedProvinceFilter.toLowerCase();
   });
 
+  const suggestNextTruckId = () => {
+    let maxNum = 0;
+    for (const t of trucks) {
+      const match = t.truckId.match(/^TRUCK-(\d+)$/i);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+    const nextNum = maxNum + 1;
+    return `TRUCK-${nextNum.toString().padStart(2, '0')}`;
+  };
+
+  const openAddTruckModal = () => {
+    setNewTruckId(suggestNextTruckId());
+    setNewTruckPlate('');
+    setNewTruckModel('Isuzu Forward 6-Wheeler (5-Ton)');
+    setNewTruckCapacity('5000');
+    setIsAddTruckOpen(true);
+  };
+
+  const handleAddTruck = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTruckId.trim() || !newTruckPlate.trim()) return;
+
+    try {
+      const created = await backendApi.createTruck({
+        truckId: newTruckId.trim().toUpperCase(),
+        plateNumber: newTruckPlate.trim().toUpperCase(),
+        model: newTruckModel.trim() || 'Generic Transport Truck (5-Ton)',
+        capacityKg: Number(newTruckCapacity) || 5000,
+        isActive: true
+      });
+
+      await backendApi.logActivity({
+        action: 'TRUCK_CREATED',
+        entityType: 'Truck',
+        entityId: created.truckId,
+        details: `Registered convoy transport vehicle: ${created.truckId} (${created.plateNumber}) - ${created.model} [${created.capacityKg} kg payload]`,
+        metadata: { truckId: created.truckId, plateNumber: created.plateNumber, capacityKg: created.capacityKg }
+      }).catch(() => {});
+
+      const updated = await backendApi.getTrucks(true);
+      setTrucks(updated);
+      setIsAddTruckOpen(false);
+      await inventoryState?.refreshTrucks?.();
+      showToast(`Registered vehicle ${created.truckId} (${created.plateNumber})`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to register vehicle');
+    }
+  };
+
+  const handleEditTruck = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTruck || !editTruckPlate.trim()) return;
+
+    try {
+      await backendApi.updateTruck(editingTruck.truckId, {
+        plateNumber: editTruckPlate.trim().toUpperCase(),
+        model: editTruckModel.trim() || 'Generic Transport Truck (5-Ton)',
+        capacityKg: Number(editTruckCapacity) || 5000
+      });
+
+      await backendApi.logActivity({
+        action: 'TRUCK_UPDATED',
+        entityType: 'Truck',
+        entityId: editingTruck.truckId,
+        details: `Updated convoy transport vehicle: ${editingTruck.truckId} (${editTruckPlate.trim().toUpperCase()}) - ${editTruckModel.trim()}`,
+        metadata: { truckId: editingTruck.truckId, plateNumber: editTruckPlate.trim().toUpperCase() }
+      }).catch(() => {});
+
+      const updated = await backendApi.getTrucks(true);
+      setTrucks(updated);
+      setEditingTruck(null);
+      await inventoryState?.refreshTrucks?.();
+      showToast(`Updated vehicle details for ${editingTruck.truckId}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update vehicle');
+    }
+  };
+
+  const handleArchiveTruck = async (truckId: string) => {
+    try {
+      await backendApi.archiveTruck(truckId);
+      await backendApi.logActivity({
+        action: 'TRUCK_ARCHIVED',
+        entityType: 'Truck',
+        entityId: truckId,
+        details: `Archived convoy transport vehicle ${truckId}`
+      }).catch(() => {});
+
+      const updated = await backendApi.getTrucks(true);
+      setTrucks(updated);
+      await inventoryState?.refreshTrucks?.();
+      showToast(`Archived vehicle ${truckId}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to archive vehicle');
+    }
+  };
+
+  const handleRestoreTruck = async (truckId: string) => {
+    try {
+      await backendApi.restoreTruck(truckId);
+      await backendApi.logActivity({
+        action: 'TRUCK_RESTORED',
+        entityType: 'Truck',
+        entityId: truckId,
+        details: `Restored convoy transport vehicle ${truckId}`
+      }).catch(() => {});
+
+      const updated = await backendApi.getTrucks(true);
+      setTrucks(updated);
+      await inventoryState?.refreshTrucks?.();
+      showToast(`Restored vehicle ${truckId} to active fleet`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to restore vehicle');
+    }
+  };
+
+  const filteredTrucks = trucks.filter((t) => {
+    const matchesStatus =
+      truckStatusFilter === 'all'
+        ? true
+        : truckStatusFilter === 'active'
+        ? t.isActive !== false
+        : t.isActive === false;
+    if (!matchesStatus) return false;
+
+    if (truckSearch.trim()) {
+      const q = truckSearch.toLowerCase();
+      return (
+        t.truckId.toLowerCase().includes(q) ||
+        t.plateNumber.toLowerCase().includes(q) ||
+        (t.model || '').toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Toast Notification */}
@@ -435,7 +595,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Master Data & Directory</h1>
           <p className="text-sm text-gray-600 mt-1">
-            Centralized scalability hub: register relief kit commodities, regional supply sources, municipal LGUs, and warehouse facilities.
+            Centralized scalability hub: register relief kit commodities, regional supply sources, municipal LGUs, warehouse facilities, and convoy transport fleet.
           </p>
         </div>
       </div>
@@ -492,6 +652,19 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         >
           <Warehouse size={15} />
           <span>Warehouses & Facilities ({warehouses.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('trucks')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeTab === 'trucks'
+              ? 'bg-[#2500ba] text-white shadow-sm'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+          }`}
+        >
+          <Truck size={15} />
+          <span>Convoy Fleet ({trucks.length})</span>
         </button>
       </div>
 
@@ -834,6 +1007,158 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: CONVOY FLEET */}
+      {activeTab === 'trucks' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Convoy Transport Fleet</h2>
+              <p className="text-xs text-gray-500">
+                Registered logistics haulers, relief cargo trucks, and heavy transport vehicles across Western Visayas
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={openAddTruckModal}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition shadow-xs cursor-pointer self-start sm:self-auto"
+            >
+              <Plus size={15} />
+              <span>Register Vehicle</span>
+            </button>
+          </div>
+
+          {/* Search & Status Filters */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search convoy fleet by Truck ID, Plate Number, or Model..."
+                value={truckSearch}
+                onChange={(e) => setTruckSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 focus:border-[#2500ba]"
+              />
+            </div>
+            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setTruckStatusFilter('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  truckStatusFilter === 'all' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                All ({trucks.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTruckStatusFilter('active')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  truckStatusFilter === 'active' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Active ({trucks.filter(t => t.isActive !== false).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTruckStatusFilter('archived')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  truckStatusFilter === 'archived' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Archived ({trucks.filter(t => t.isActive === false).length})
+              </button>
+            </div>
+          </div>
+
+          {/* Vehicles Grid */}
+          <div className="max-h-[460px] overflow-y-auto pr-1">
+            {filteredTrucks.length === 0 ? (
+              <div className="text-center py-12 text-xs text-gray-500 border border-dashed border-gray-200 rounded-2xl">
+                No convoy vehicles found matching your criteria.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredTrucks.map((truck) => (
+                  <div
+                    key={truck.truckId}
+                    className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-3 transition hover:border-gray-300"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-extrabold px-2.5 py-1 rounded-lg bg-blue-50 text-[#2500ba] border border-blue-200">
+                            {truck.truckId}
+                          </span>
+                          {truck.isActive === false ? (
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                              Archived
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                              <ShieldCheck size={11} /> Active
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <span className="text-[11px] font-mono font-bold tracking-wider px-2 py-0.5 bg-slate-100 text-slate-800 rounded border border-slate-300">
+                            {truck.plateNumber}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTruck(truck);
+                            setEditTruckPlate(truck.plateNumber);
+                            setEditTruckModel(truck.model);
+                            setEditTruckCapacity(String(truck.capacityKg || 5000));
+                          }}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-[#2500ba] hover:bg-blue-50 transition cursor-pointer"
+                          title="Edit vehicle specifications"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        {truck.isActive === false ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreTruck(truck.truckId)}
+                            className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 transition cursor-pointer"
+                            title="Restore vehicle to active fleet"
+                          >
+                            <RotateCcw size={14} />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleArchiveTruck(truck.truckId)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition cursor-pointer"
+                            title="Archive vehicle"
+                          >
+                            <Archive size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs text-gray-600 border-t border-gray-100 pt-2.5">
+                      <p className="font-semibold text-gray-900">{truck.model || 'Standard Transport Truck'}</p>
+                      <div className="flex items-center justify-between text-[11px] text-gray-500">
+                        <span>Max Payload:</span>
+                        <span className="font-bold text-gray-800">
+                          {Number(truck.capacityKg || 5000).toLocaleString()} kg
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1298,6 +1623,224 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                   className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800"
                 >
                   Save Warehouse
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REGISTER CONVOY VEHICLE */}
+      {isAddTruckOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-blue-50 text-[#2500ba]">
+                  <Truck size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Register Convoy Vehicle</h3>
+                  <p className="text-[11px] text-gray-500">Add a transport truck to the regional relief fleet</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddTruckOpen(false)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddTruck} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    Truck ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newTruckId}
+                    onChange={(e) => setNewTruckId(e.target.value.toUpperCase())}
+                    placeholder="e.g. TRUCK-11"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 uppercase"
+                  />
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">Format: TRUCK-XX</span>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-1">
+                    Plate Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newTruckPlate}
+                    onChange={(e) => setNewTruckPlate(e.target.value.toUpperCase())}
+                    placeholder="e.g. SAA-1011"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 uppercase"
+                  />
+                  <span className="text-[10px] text-gray-400 mt-0.5 block">Official LTO Plate</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Vehicle Model & Specifications <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    required
+                    value={newTruckModel}
+                    onChange={(e) => setNewTruckModel(e.target.value)}
+                    placeholder="e.g. Isuzu Forward 6-Wheeler (5-Ton)"
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      'Isuzu Forward 6-Wheeler (5-Ton)',
+                      'Hino 500 Series (6-Ton)',
+                      'Fuso Fighter (7-Ton Heavy)',
+                      'Isuzu Elf Light Cargo (3-Ton)',
+                      'Mitsubishi Canter (3-Ton)'
+                    ].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setNewTruckModel(preset)}
+                        className={`text-[10px] px-2 py-0.5 rounded border transition cursor-pointer ${
+                          newTruckModel === preset
+                            ? 'bg-blue-100 border-blue-400 text-blue-900 font-bold'
+                            : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Max Payload Capacity (kg) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="100"
+                  max="50000"
+                  value={newTruckCapacity}
+                  onChange={(e) => setNewTruckCapacity(e.target.value)}
+                  placeholder="5000"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500"
+                />
+                <span className="text-[10px] text-gray-400 mt-0.5 block">Standard 5-ton = 5000 kg (~830 Family Food Packs)</span>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddTruckOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition shadow-xs cursor-pointer"
+                >
+                  Register Vehicle
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT CONVOY VEHICLE */}
+      {editingTruck && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-blue-50 text-[#2500ba]">
+                  <Truck size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Edit Vehicle: {editingTruck.truckId}</h3>
+                  <p className="text-[11px] text-gray-500">Update convoy fleet specifications</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingTruck(null)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditTruck} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Plate Number <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editTruckPlate}
+                  onChange={(e) => setEditTruckPlate(e.target.value.toUpperCase())}
+                  placeholder="e.g. SAA-1001"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 uppercase"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Vehicle Model & Specifications <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editTruckModel}
+                  onChange={(e) => setEditTruckModel(e.target.value)}
+                  placeholder="e.g. Isuzu Forward 6-Wheeler (5-Ton)"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Max Payload Capacity (kg) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="100"
+                  max="50000"
+                  value={editTruckCapacity}
+                  onChange={(e) => setEditTruckCapacity(e.target.value)}
+                  placeholder="5000"
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingTruck(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition shadow-xs cursor-pointer"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>
