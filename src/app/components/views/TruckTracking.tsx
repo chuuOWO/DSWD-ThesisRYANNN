@@ -17,7 +17,7 @@ import {
   ListOrdered
 } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
-import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord, type LguRecord } from '../../services/backendApi';
+import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord, type LguRecord, type CustodyHopRecord } from '../../services/backendApi';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { findMatchingLgu } from '../../lib/lguMatching';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
@@ -225,6 +225,7 @@ const toTruckRoute = (
       tx_hash: r.blockchainTxHash,
       wallet_address: undefined,
       receiver_gps: r.receiverGps,
+      sender_gps: r.senderGps,
       destination_address: r.destinationAddress,
       delivery_priority: undefined,
       is_held: undefined
@@ -241,6 +242,7 @@ const toTruckRoute = (
       uniqueMap.set(r.drNumber, {
         ...mapped,
         ...existing,
+        sender_gps: existing.sender_gps || mapped.sender_gps,
         receiver_gps: existing.receiver_gps || mapped.receiver_gps,
         destination_address: existing.destination_address || mapped.destination_address,
         municipality: existing.municipality || mapped.municipality,
@@ -388,13 +390,13 @@ const toTruckRoute = (
     lastActiveText,
     checkpoints: [
       {
-        label: isStale ? 'Stale GPS Telemetry' : (location.accuracy !== null ? 'Live phone GPS' : 'Warehouse Origin Bay'),
+        label: isStale ? 'Stale GPS Telemetry' : (location.accuracy !== null ? 'Live phone GPS' : 'Last Confirmed GPS Fix'),
         time: formatDateTime(location.updated_at),
         note: isStale
-          ? `Weak signal / telemetry stale (last active: ${lastActiveText}). Pinned to last confirmed fix at ${location.gps_text}`
+          ? `Weak signal / telemetry offline (last active: ${lastActiveText}). Pinned to last confirmed fix at ${location.gps_text}`
           : (location.accuracy !== null
             ? `Captured at ${location.gps_text}${location.accuracy ? `, accuracy ±${Math.round(location.accuracy)}m` : ''}`
-            : `Stationed at ${location.gps_text} awaiting convoy mobile GPS stream`),
+            : `Pinned to last tracked physical custody location at ${location.gps_text}`),
         completed: true
       },
       {
@@ -707,7 +709,7 @@ function RouteMap({
                   </p>
                 ) : (
                   <p className="text-[10px] font-semibold text-amber-600">
-                    Warehouse Departure Position
+                    Last Confirmed Telemetry Position
                   </p>
                 )}
               </div>
@@ -791,6 +793,7 @@ export function TruckTracking({
 }) {
   const [liveLocations, setLiveLocations] = useState<Record<string, TruckLiveLocation>>({});
   const [releases, setReleases] = useState<ReceiverReleaseRecord[]>([]);
+  const [custodyHops, setCustodyHops] = useState<CustodyHopRecord[]>([]);
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [selectedTruckId, setSelectedTruckId] = useState('');
   const [routeMetrics, setRouteMetrics] = useState<RouteMetrics | null>(null);
@@ -869,8 +872,15 @@ export function TruckTracking({
         .catch((err) => console.error('Failed to load initial truck locations', err));
     };
 
+    const refreshHops = () => {
+      backendApi.getCustodyHops()
+        .then(setCustodyHops)
+        .catch((err) => console.warn('Failed to load custody hops:', err));
+    };
+
     refreshReleases();
     refreshTrucks();
+    refreshHops();
 
     const unsubTrucks = backendApi.subscribeTruckLiveLocations(
       (location) => {
@@ -895,6 +905,7 @@ export function TruckTracking({
     const pollTimer = setInterval(() => {
       refreshReleases();
       refreshTrucks();
+      refreshHops();
     }, 3500);
 
     return () => {
@@ -907,17 +918,19 @@ export function TruckTracking({
   const liveTruckRoutes = useMemo(() => {
     const knownLocations: Record<string, TruckLiveLocation> = { ...liveLocations };
 
-    // Synthesize warehouse origin positions for assigned trucks with active shipments that haven't streamed phone GPS yet
+    // Resolve last tracked location for assigned trucks with active shipments that haven't streamed live phone GPS yet
     const activeDispatches = [
       ...releases.map((r) => ({
         truckId: r.assigned_truck_id,
         warehouse: r.warehouse_source,
-        status: r.delivery_status
+        status: r.delivery_status,
+        senderGps: r.sender_gps
       })),
       ...outgoingReleasesList.map((r) => ({
         truckId: r.assignedTruckId || r.assigned_truck_id,
         warehouse: r.warehouseSource,
-        status: r.deliveryStatus
+        status: r.deliveryStatus,
+        senderGps: r.senderGps
       }))
     ];
 
@@ -928,16 +941,45 @@ export function TruckTracking({
       if (isLguReceiverId(tid)) return;
 
       if (!knownLocations[tid]) {
-        const originCoords = findCoords(WAREHOUSE_COORDS, dispatch.warehouse) ?? WAREHOUSE_COORDS['dswd oton warehouse'];
-        knownLocations[tid] = {
-          truck_id: tid,
-          latitude: originCoords[0],
-          longitude: originCoords[1],
-          gps_text: `${dispatch.warehouse || 'DSWD Regional Hub'} (Origin Warehouse)`,
-          updated_at: new Date().toISOString(),
-          accuracy: null,
-          wallet_address: null
-        };
+        // Fallback strictly to the vehicle's last tracked physical custody coordinates
+        const latestHop = custodyHops
+          .filter((h) => h.toTruckId && h.toTruckId.trim().toUpperCase() === tid && h.gpsCoordinates)
+          .sort((a, b) => new Date(b.transferredAt || 0).getTime() - new Date(a.transferredAt || 0).getTime())[0];
+
+        let lastGps: [number, number] | null = null;
+        let lastUpdatedAt: string = '';
+        let lastGpsText: string = '';
+
+        if (latestHop && latestHop.gpsCoordinates) {
+          const parts = latestHop.gpsCoordinates.split(',').map((s) => parseFloat(s.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            lastGps = [parts[0], parts[1]];
+            lastUpdatedAt = latestHop.transferredAt || new Date().toISOString();
+            lastGpsText = latestHop.gpsCoordinates;
+          }
+        }
+
+        if (!lastGps && dispatch.senderGps) {
+          const parts = dispatch.senderGps.split(',').map((s) => parseFloat(s.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            lastGps = [parts[0], parts[1]];
+            lastUpdatedAt = new Date().toISOString();
+            lastGpsText = dispatch.senderGps;
+          }
+        }
+
+        if (lastGps) {
+          knownLocations[tid] = {
+            truck_id: tid,
+            latitude: lastGps[0],
+            longitude: lastGps[1],
+            gps_text: lastGpsText,
+            updated_at: lastUpdatedAt,
+            accuracy: null,
+            wallet_address: null
+          };
+        }
+        // If a truck has no live GPS and no historical tracked GPS, DO NOT manufacture a fake warehouse origin marker.
       }
     });
 
@@ -949,7 +991,7 @@ export function TruckTracking({
       .filter((route) => {
         return Boolean(route.assignedPackagesList && route.assignedPackagesList.length > 0);
       });
-  }, [liveLocations, releases, outgoingReleasesList, isLguReceiverId, packagePriorities, heldPackages, profiles, dbLgus]);
+  }, [liveLocations, releases, outgoingReleasesList, custodyHops, isLguReceiverId, packagePriorities, heldPackages, profiles, dbLgus]);
 
   // Opportunistic cleanup of trucks with no active packages
   useEffect(() => {
@@ -971,9 +1013,6 @@ export function TruckTracking({
     });
 
     if (orphanTruckIds.length > 0) {
-      orphanTruckIds.forEach((truckId) => {
-        backendApi.deleteTruckLiveLocation(truckId).catch(() => {});
-      });
       setLiveLocations((current) => {
         let changed = false;
         const next = { ...current };

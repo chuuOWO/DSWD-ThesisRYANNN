@@ -488,6 +488,7 @@ export interface ReceiverReleaseRecord {
   tx_hash?: string | null;
   wallet_address?: string | null;
   receiver_gps?: string | null;
+  sender_gps?: string | null;
   destination_address?: string | null;
   source_type?: string | null;
   delivery_priority?: number | null;
@@ -2435,7 +2436,7 @@ export const backendApi = {
   async getReceiverReleases(receiverId?: string | null) {
     let query = supabase
       .from('outgoing_requests')
-      .select('id,dr_number,date_allocated,created_at,lgu_id,destination_lgu_id,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,assigned_driver_profile_id,tx_hash,wallet_address,receiver_gps,destination_address,delivery_priority,is_held')
+      .select('id,dr_number,date_allocated,created_at,lgu_id,destination_lgu_id,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,assigned_driver_profile_id,tx_hash,wallet_address,sender_gps,receiver_gps,destination_address,delivery_priority,is_held')
       .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
       .order('created_at', { ascending: false });
 
