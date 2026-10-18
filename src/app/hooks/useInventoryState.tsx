@@ -1318,7 +1318,11 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Pending Verification'
       ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified', `Physical count and manifest details verified by ${currentActor.name}.`), ...item.auditTrail] }
       : item));
-    backendApi.updateIncoming(id, { status: 'Verified' }).catch(error => {
+    backendApi.updateIncoming(id, {
+      status: 'Verified',
+      verifiedBy: currentActor.name,
+      verifiedByProfileId: currentActor.id
+    }).catch(error => {
       logBackendError('Verify incoming manifest')(error);
       setIntegrationMode('mock');
     });
@@ -1361,7 +1365,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     backendApi.createDiscrepancyReport({
       reportType: 'Incoming',
       manifestNumber: id,
-      note
+      note,
+      reportedByProfileId: currentActor.id,
+      reportedByRole: currentActor.role,
+      reportedByWallet: currentActor.wallet
     }).catch(error => {
       logBackendError('Create incoming discrepancy report')(error);
       setIntegrationMode('mock');
@@ -1554,7 +1561,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         allocatedBatches: allocations,
         txHash: proof.hash,
         adminSignature: proof.hash,
-        walletAddress: proof.walletAddress
+        walletAddress: proof.walletAddress,
+        approvedByProfileId: currentActor.id
       });
       setIntegrationMode('backend');
     } catch (error) {
@@ -1688,7 +1696,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       txHash: proof.hash,
       handoverContractId,
       senderSignature: proof.hash,
-      walletAddress: proof.walletAddress
+      walletAddress: proof.walletAddress,
+      dispatchedByProfileId: currentActor.id
     }).catch(error => {
       logBackendError('Sign outgoing release')(error);
       setIntegrationMode('mock');
@@ -1821,7 +1830,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       txHash: proof.hash,
       handoverContractId,
       receiverSignature: proof.hash,
-      walletAddress: proof.walletAddress
+      walletAddress: proof.walletAddress,
+      receivedByProfileId: currentActor.id
     }).then(() => {
       backendApi.markTruckLiveLocationDoneByDr(canonicalDr).catch(() => {});
     }).catch(error => {
@@ -1998,7 +2008,12 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     setLguPriorityReports(prev => deduplicateLguPriorityReports([optimistic, ...prev]));
 
     try {
-      await backendApi.createLGUInventoryReport({ ...input, ...computed });
+      await backendApi.createLGUInventoryReport({
+        ...input,
+        ...computed,
+        lguId: input.lguId || (currentActor as any).lguId,
+        reportedByProfileId: currentActor.id
+      });
       setIntegrationMode('backend');
 
       backendApi.logActivity({
@@ -2216,7 +2231,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     backendApi.createDiscrepancyReport({
       reportType: 'Outgoing',
       drNumber,
-      note
+      note,
+      reportedByProfileId: currentActor.id,
+      reportedByRole: currentActor.role,
+      reportedByWallet: currentActor.wallet
     }).catch(error => {
       logBackendError('Create outgoing discrepancy report')(error);
       setIntegrationMode('mock');

@@ -883,6 +883,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDeliveryHistoryOpen, setIsDeliveryHistoryOpen] = useState(false);
   const [transitRemarks, setTransitRemarks] = useState('');
+  const [isGpsWeak, setIsGpsWeak] = useState(false);
 
   const completedReleases = useMemo(() => {
     return allReleases.filter(
@@ -1075,6 +1076,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
     const id = navigator.geolocation.watchPosition(
       (nextPos) => {
+        setIsGpsWeak(false);
         const rawLat = nextPos.coords.latitude;
         const rawLng = nextPos.coords.longitude;
         const accuracy = nextPos.coords.accuracy;
@@ -1112,6 +1114,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           void backendApi.upsertTruckLiveLocation({
             truck_id: validTruckId,
             current_dr_number: activeDr,
+            driver_profile_id: profile?.id || null,
+            destination_lgu_id: release?.destination_lgu_id || release?.lgu_id || null,
             latitude: updatedLoc.latitude,
             longitude: updatedLoc.longitude,
             gps_text: formatGps(updatedLoc),
@@ -1121,7 +1125,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           }).catch(() => {});
         }
       },
-      (err) => console.warn('Continuous GPS Watch:', err),
+      (err) => {
+        console.warn('Continuous GPS Watch:', err);
+        setIsGpsWeak(true);
+      },
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 12000 }
     );
 
@@ -1856,7 +1863,17 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         )}
 
         {/* GPS Satellite Signal Status HUD Bar */}
-        {!location ? (
+        {isGpsWeak || ((location?.accuracy ?? 0) > 45) ? (
+          <div className="bg-amber-600 text-white px-3 py-1.5 text-[9.5px] font-semibold flex items-center justify-between z-10 shadow-inner">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <AlertTriangle size={13} className="text-yellow-200 flex-shrink-0" />
+              <span className="truncate">Weak GPS Signal - Showing last confirmed coordinates{location?.accuracy ? ` (±${Math.round(location.accuracy)}m)` : ''}</span>
+            </div>
+            <span className="text-[8.5px] bg-amber-700/80 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider flex-shrink-0 ml-1">
+              Weak Signal
+            </span>
+          </div>
+        ) : !location ? (
           <div className="bg-amber-500 text-white px-3 py-1.5 text-[9.5px] font-semibold flex items-center justify-between z-10 shadow-inner">
             <div className="flex items-center gap-1.5">
               <Loader2 size={13} className="animate-spin flex-shrink-0" />
@@ -1864,16 +1881,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             </div>
             <span className="text-[8.5px] bg-amber-600/80 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">
               No Fix
-            </span>
-          </div>
-        ) : (location.accuracy ?? 0) > 45 ? (
-          <div className="bg-amber-600 text-white px-3 py-1.5 text-[9.5px] font-semibold flex items-center justify-between z-10 shadow-inner">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <AlertTriangle size={13} className="text-yellow-200 flex-shrink-0" />
-              <span className="truncate">Weak GPS Signal (±{Math.round(location.accuracy!)}m). Inaccurate tracking.</span>
-            </div>
-            <span className="text-[8.5px] bg-amber-700/80 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider flex-shrink-0 ml-1">
-              Weak
             </span>
           </div>
         ) : (

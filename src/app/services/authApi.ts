@@ -21,6 +21,8 @@ export interface UserProfile {
   workIdUrl?: string | null;
   role: UserRole;
   truckId?: string | null;
+  lguId?: string | null;
+  warehouseId?: string | null;
   lguName?: string | null;
   walletAddress?: string | null;
   avatarUrl?: string | null;
@@ -81,6 +83,8 @@ const mapProfile = (row: Record<string, unknown>): UserProfile => {
     workIdUrl: row.work_id_url ? String(row.work_id_url) : null,
     role: resolvedRole,
     truckId: row.truck_id ? String(row.truck_id) : null,
+    lguId: row.lgu_id ? String(row.lgu_id) : null,
+    warehouseId: row.warehouse_id ? String(row.warehouse_id) : null,
     lguName: row.lgu_name ? String(row.lgu_name) : null,
     walletAddress: row.wallet_address ? String(row.wallet_address) : null,
     avatarUrl: row.avatar_url ? String(row.avatar_url) : null,

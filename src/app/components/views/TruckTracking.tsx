@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
-import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Popup, TileLayer, Tooltip, useMap } from 'react-leaflet';
 import {
   CheckCircle,
   Clock,
@@ -53,6 +53,8 @@ interface TruckRoute {
   isLive: boolean;
   accuracy?: number | null;
   progress: number;
+  isStale?: boolean;
+  lastActiveText?: string;
   checkpoints: {
     label: string;
     time: string;
@@ -355,6 +357,14 @@ const toTruckRoute = (
 
   const latestTx = activeAssigned.find((r) => r.tx_hash)?.tx_hash;
 
+  const ageMs = location.updated_at ? Date.now() - new Date(location.updated_at).getTime() : Infinity;
+  const isStale = ageMs > 45000;
+  const lastActiveText = !isFinite(ageMs)
+    ? 'Unknown'
+    : ageMs < 60000
+    ? `${Math.max(1, Math.round(ageMs / 1000))}s ago`
+    : `${Math.round(ageMs / 60000)}m ago`;
+
   return {
     id: location.truck_id,
     truckName: location.truck_id,
@@ -374,13 +384,17 @@ const toTruckRoute = (
     isLive: location.accuracy !== null,
     accuracy: location.accuracy,
     progress,
+    isStale,
+    lastActiveText,
     checkpoints: [
       {
-        label: location.accuracy !== null ? 'Live phone GPS' : 'Warehouse Origin Bay',
+        label: isStale ? 'Stale GPS Telemetry' : (location.accuracy !== null ? 'Live phone GPS' : 'Warehouse Origin Bay'),
         time: formatDateTime(location.updated_at),
-        note: location.accuracy !== null
-          ? `Captured at ${location.gps_text}${location.accuracy ? `, accuracy ±${Math.round(location.accuracy)}m` : ''}`
-          : `Stationed at ${location.gps_text} awaiting convoy mobile GPS stream`,
+        note: isStale
+          ? `Weak signal / telemetry stale (last active: ${lastActiveText}). Pinned to last confirmed fix at ${location.gps_text}`
+          : (location.accuracy !== null
+            ? `Captured at ${location.gps_text}${location.accuracy ? `, accuracy ±${Math.round(location.accuracy)}m` : ''}`
+            : `Stationed at ${location.gps_text} awaiting convoy mobile GPS stream`),
         completed: true
       },
       {
@@ -519,36 +533,42 @@ function MapResizeWatcher() {
 }
 
 
-const createTruckIcon = (status: TruckStatus, isSelected: boolean) => L.divIcon({
-  className: 'truck-marker-clean',
-  html: `
-    <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer; transform: translate(-50%, -100%);">
-      ${status === 'In Transit' ? '<div style="position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 44px; height: 44px; border-radius: 50%; background: #2500ba; opacity: 0.22; animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>' : ''}
-      <div style="
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        background: #2500ba;
-        border: ${isSelected ? '3px solid #38bdf8' : '2.5px solid #ffffff'};
-        box-shadow: 0 6px 16px rgba(37,0,186,0.4), 0 2px 4px rgba(0,0,0,0.15);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        position: relative;
-        z-index: 2;
-      ">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
-        </svg>
+const createTruckIcon = (status: TruckStatus, isSelected: boolean, isStale: boolean = false) => {
+  const mainColor = isStale ? '#dc2626' : '#2500ba';
+  const pingColor = isStale ? 'rgba(220,38,38,0.3)' : 'rgba(37,0,186,0.22)';
+  const shadowColor = isStale ? 'rgba(220,38,38,0.45)' : 'rgba(37,0,186,0.4)';
+
+  return L.divIcon({
+    className: 'truck-marker-clean',
+    html: `
+      <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer; transform: translate(-50%, -100%);">
+        ${status === 'In Transit' ? `<div style="position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 44px; height: 44px; border-radius: 50%; background: ${pingColor}; animation: ping 2s cubic-bezier(0,0,0.2,1) infinite;"></div>` : ''}
+        <div style="
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: ${mainColor};
+          border: ${isSelected ? '3px solid #38bdf8' : '2.5px solid #ffffff'};
+          box-shadow: 0 6px 16px ${shadowColor}, 0 2px 4px rgba(0,0,0,0.15);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+          z-index: 2;
+        ">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+          </svg>
+        </div>
+        <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid ${mainColor}; margin-top: -1px; z-index: 1;"></div>
+        <div style="width: 10px; height: 3px; background: rgba(15,23,42,0.25); border-radius: 50%; margin-top: 1px;"></div>
       </div>
-      <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #2500ba; margin-top: -1px; z-index: 1;"></div>
-      <div style="width: 10px; height: 3px; background: rgba(15,23,42,0.25); border-radius: 50%; margin-top: 1px;"></div>
-    </div>
-  `,
-  iconSize: [0, 0],
-  iconAnchor: [0, 0],
-  popupAnchor: [0, -42]
-});
+    `,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+    popupAnchor: [0, -42]
+  });
+};
 
 const createDestPinIcon = (isPrimary: boolean) => L.divIcon({
   className: 'dest-marker-clean',
@@ -645,16 +665,36 @@ function RouteMap({
           <Marker
             key={route.id}
             position={route.position}
-            icon={createTruckIcon(route.status, selectedRoute?.id === route.id)}
+            icon={createTruckIcon(route.status, selectedRoute?.id === route.id, route.isStale)}
           >
+            <Tooltip direction="top" offset={[0, -42]} opacity={0.95}>
+              <div className="font-sans text-xs">
+                {route.isStale ? (
+                  <span className="font-semibold text-red-600">
+                    Weak Signal / Telemetry Stale (Last active: {route.lastActiveText})
+                  </span>
+                ) : (
+                  <span className="font-medium text-gray-800">
+                    {route.truckName} - {route.status}
+                  </span>
+                )}
+              </div>
+            </Tooltip>
             <Popup>
               <div className="min-w-44 font-sans p-0.5">
                 <div className="flex items-center justify-between">
                   <p className="font-bold text-gray-900">{route.truckName}</p>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800">
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                    route.isStale ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                  }`}>
                     {route.status}
                   </span>
                 </div>
+                {route.isStale && (
+                  <div className="mt-1 px-1.5 py-1 rounded bg-amber-50 border border-amber-200 text-[10px] text-amber-900 font-medium leading-tight">
+                    Weak Signal / Telemetry Stale (Last active: {route.lastActiveText}). Showing last confirmed coordinates.
+                  </div>
+                )}
                 <p className="text-xs text-gray-600 mt-0.5">{route.driverName ? `Escort Officer: ${route.driverName}` : route.driver}</p>
                 <p className="mt-1.5 text-xs text-gray-700">Destination: <strong className="text-gray-900">{route.destination}</strong></p>
                 <p className="mt-1 text-xs text-gray-700">Cargo: <span className="font-medium">{route.cargo}</span></p>

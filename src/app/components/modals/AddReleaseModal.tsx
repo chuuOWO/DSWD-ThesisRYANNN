@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2, Clock, Sparkles, CheckCircle2, Layers } from 'lucide-react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { X, Calendar, MapPin, TruckIcon, AlertCircle, Package, ShieldAlert, Building2, Clock, Sparkles, CheckCircle2, Layers, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { OutgoingStatus } from '../../hooks/useInventoryState';
 import {
   backendApi,
@@ -420,9 +420,32 @@ export function AddReleaseModal({
     return availableDateBatches.find(b => b.batchTokenId === selectedBatchId) || availableDateBatches[0] || null;
   }, [selectedBatchId, availableDateBatches]);
 
+  const carouselRef = useRef<HTMLDivElement>(null);
+
+  const scrollCarousel = (direction: 'left' | 'right') => {
+    if (carouselRef.current) {
+      const offset = direction === 'left' ? -220 : 220;
+      carouselRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+  };
+
   const totalAllocatedFromDates = useMemo(() => {
     return Object.values(dateAllocations).reduce((sum, q) => sum + (Number(q) || 0), 0);
   }, [dateAllocations]);
+
+  // Synchronize amountRequested and amountApproved from date allocations
+  useEffect(() => {
+    if (availableDateBatches.length > 0) {
+      setFormData(prev => ({
+        ...prev,
+        amountRequested: totalAllocatedFromDates,
+        amountApproved: totalAllocatedFromDates
+      }));
+      if (totalAllocatedFromDates > 0 && errors.amountRequested) {
+        setErrors(prev => ({ ...prev, amountRequested: '' }));
+      }
+    }
+  }, [totalAllocatedFromDates, availableDateBatches.length]);
 
   const handleDateAllocationChange = (batchTokenId: string, val: number) => {
     const batch = availableDateBatches.find(b => b.batchTokenId === batchTokenId);
@@ -436,29 +459,15 @@ export function AddReleaseModal({
   };
 
   const handleMaxForDate = (batch: ExpiryDateBatch) => {
-    const currentAllocatedWithoutThis = Object.entries(dateAllocations)
-      .filter(([id]) => id !== batch.batchTokenId)
-      .reduce((sum, [, q]) => sum + q, 0);
-    const needed = Math.max(0, (formData.amountRequested || 0) - currentAllocatedWithoutThis);
-    const take = needed > 0 ? Math.min(batch.quantityAvailable, needed) : batch.quantityAvailable;
-    handleDateAllocationChange(batch.batchTokenId, take);
+    handleDateAllocationChange(batch.batchTokenId, batch.quantityAvailable);
   };
 
   const handleAutoPickFefo = () => {
-    let remainingNeeded = formData.amountRequested || 0;
-    if (remainingNeeded <= 0 && availableDateBatches.length > 0) {
-      remainingNeeded = Math.min(availableDateBatches[0].quantityAvailable, 100);
-      setFormData(prev => ({ ...prev, amountRequested: remainingNeeded }));
-    }
-
-    const newAllocations: Record<string, number> = {};
-    for (const batch of availableDateBatches) {
-      if (remainingNeeded <= 0) break;
-      const take = Math.min(batch.quantityAvailable, remainingNeeded);
-      newAllocations[batch.batchTokenId] = take;
-      remainingNeeded -= take;
-    }
-    setDateAllocations(newAllocations);
+    if (availableDateBatches.length === 0) return;
+    const earliest = availableDateBatches[0];
+    const initialPick = Math.min(earliest.quantityAvailable, 100);
+    setDateAllocations({ [earliest.batchTokenId]: initialPick });
+    setSelectedBatchId(earliest.batchTokenId);
   };
 
   const handleChange = (field: keyof ReleaseForm, value: string | number) => {
@@ -501,11 +510,22 @@ export function AddReleaseModal({
       newErrors.fnfiCategory = 'FNFI category is required';
     }
 
-    if (!formData.amountRequested || formData.amountRequested <= 0) {
-      newErrors.amountRequested = 'Quantity requested must be greater than 0';
-    } else if (formData.amountRequested > availableQty) {
-      const sourceLabel = formData.sourceType === 'Warehouse' ? formData.warehouseSource : (sourceMunicipality || 'Source LGU');
-      newErrors.amountRequested = `Insufficient stock in ${sourceLabel} (${availableQty.toLocaleString()} available).`;
+    const effectiveQty = totalAllocatedFromDates > 0 ? totalAllocatedFromDates : (Number(formData.amountRequested) || 0);
+
+    if (availableDateBatches.length > 0) {
+      if (effectiveQty <= 0) {
+        newErrors.amountRequested = 'Please specify a quantity requested from at least one expiration date lot.';
+      } else if (effectiveQty > availableQty) {
+        const sourceLabel = formData.sourceType === 'Warehouse' ? formData.warehouseSource : (sourceMunicipality || 'Source LGU');
+        newErrors.amountRequested = `Insufficient stock in ${sourceLabel} (${availableQty.toLocaleString()} available).`;
+      }
+    } else {
+      if (effectiveQty <= 0) {
+        newErrors.amountRequested = 'Quantity requested must be greater than 0';
+      } else if (effectiveQty > availableQty) {
+        const sourceLabel = formData.sourceType === 'Warehouse' ? formData.warehouseSource : (sourceMunicipality || 'Source LGU');
+        newErrors.amountRequested = `Insufficient stock in ${sourceLabel} (${availableQty.toLocaleString()} available).`;
+      }
     }
 
     // 5. Destination Selection
@@ -559,6 +579,8 @@ export function AddReleaseModal({
       const destLgu = availableLgus.find(l => l.municipality.toLowerCase() === formData.municipality.toLowerCase());
       const destLguId = destLgu?.id;
 
+      const effectiveQty = totalAllocatedFromDates > 0 ? totalAllocatedFromDates : (Number(formData.amountRequested) || 0);
+
       const allocatedBatchesPayload = Object.entries(dateAllocations)
         .filter(([, qty]) => qty > 0)
         .map(([batchTokenId, qty]) => {
@@ -573,6 +595,8 @@ export function AddReleaseModal({
 
       const submissionData: ReleaseForm = {
         ...formData,
+        amountRequested: effectiveQty,
+        amountApproved: effectiveQty,
         incidentCode: formattedIncident,
         reportReason: finalReason,
         lguName: buildingFinal,
@@ -975,70 +999,42 @@ export function AddReleaseModal({
               )}
             </div>
 
-            {/* Quantity Requested & Transportation Mode */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                  Quantity Requested <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={formData.amountRequested || ''}
-                  onChange={(e) => {
-                    const cleaned = sanitizeNumbersOnly(e.target.value);
-                    handleChange('amountRequested', cleaned ? parseInt(cleaned, 10) : 0);
-                  }}
-                  placeholder="Enter quantity (units)"
-                  className={`w-full px-4 py-2.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.amountRequested ? 'border-red-500' : 'border-gray-300'
+            {/* Transportation Mode */}
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1.5">
+                Transportation Mode <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2 max-w-md">
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, deliveryMode: 'Delivery' }))}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    formData.deliveryMode !== 'Pick up'
+                      ? 'bg-[#2500ba] text-white shadow-xs'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
-                />
-                {errors.amountRequested && (
-                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1 font-medium">
-                    <AlertCircle className="w-3.5 h-3.5" />
-                    {errors.amountRequested}
-                  </p>
-                )}
+                >
+                  <TruckIcon className="w-3.5 h-3.5" />
+                  <span>Delivery (DSWD)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, deliveryMode: 'Pick up' }))}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    formData.deliveryMode === 'Pick up'
+                      ? 'bg-[#2500ba] text-white shadow-xs'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Pick up (LGU)</span>
+                </button>
               </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                  Transportation Mode <span className="text-red-500">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, deliveryMode: 'Delivery' }))}
-                    className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      formData.deliveryMode !== 'Pick up'
-                        ? 'bg-[#2500ba] text-white shadow-xs'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <TruckIcon className="w-3.5 h-3.5" />
-                    <span>Delivery (DSWD)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, deliveryMode: 'Pick up' }))}
-                    className={`px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      formData.deliveryMode === 'Pick up'
-                        ? 'bg-[#2500ba] text-white shadow-xs'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Package className="w-3.5 h-3.5" />
-                    <span>Pick up (LGU)</span>
-                  </button>
-                </div>
-                <p className="text-[11px] text-gray-500 mt-1">
-                  {formData.deliveryMode === 'Pick up'
-                    ? 'Consignee / LGU dispatches their own vehicle for pickup at facility.'
-                    : 'DSWD logistics fleet transports relief consignment to destination.'}
-                </p>
-              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {formData.deliveryMode === 'Pick up'
+                  ? 'Consignee / LGU dispatches their own vehicle for pickup at facility.'
+                  : 'DSWD logistics fleet transports relief consignment to destination.'}
+              </p>
             </div>
 
             {/* FEFO Expiration Date Stock Picker */}
@@ -1052,7 +1048,7 @@ export function AddReleaseModal({
                         FEFO Stock by Expiration Date
                       </span>
                       <p className="text-[11px] text-blue-800">
-                        Pick a date to view available quantity and allocate relief stock
+                        Pick an expiration date lot to view available quantity and specify dispatch quantity
                       </p>
                     </div>
                   </div>
@@ -1080,12 +1076,38 @@ export function AddReleaseModal({
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {/* Expiration Date Selector Tabs */}
+                    {/* Expiration Date Carousel Strip */}
                     <div>
-                      <label className="block text-[11px] font-bold text-gray-700 mb-1.5 uppercase">
-                        Available Expiration Dates (Earliest First):
-                      </label>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-[11px] font-bold text-gray-700 uppercase">
+                          Available Expiration Dates (Earliest First):
+                        </label>
+                        {availableDateBatches.length > 2 && (
+                          <div className="flex items-center gap-1 text-gray-500">
+                            <button
+                              type="button"
+                              onClick={() => scrollCarousel('left')}
+                              className="p-1 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-gray-600 transition cursor-pointer"
+                              title="Scroll left"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => scrollCarousel('right')}
+                              className="p-1 rounded-md border border-gray-200 bg-white hover:bg-gray-100 text-gray-600 transition cursor-pointer"
+                              title="Scroll right"
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div
+                        ref={carouselRef}
+                        className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-thin scroll-smooth no-scrollbar"
+                        style={{ scrollSnapType: 'x mandatory' }}
+                      >
                         {availableDateBatches.map(batch => {
                           const isSelected = selectedBatch?.batchTokenId === batch.batchTokenId;
                           const allocatedFromThis = dateAllocations[batch.batchTokenId] || 0;
@@ -1097,7 +1119,8 @@ export function AddReleaseModal({
                               key={batch.batchTokenId}
                               type="button"
                               onClick={() => setSelectedBatchId(batch.batchTokenId)}
-                              className={`px-3 py-2 rounded-xl text-left border transition cursor-pointer flex flex-col gap-0.5 ${
+                              style={{ scrollSnapAlign: 'start' }}
+                              className={`flex-shrink-0 min-w-[170px] px-3 py-2 rounded-xl text-left border transition cursor-pointer flex flex-col gap-0.5 ${
                                 isSelected
                                   ? 'bg-blue-600 text-white border-blue-700 shadow-sm ring-2 ring-blue-400/50'
                                   : 'bg-white text-gray-800 border-gray-300 hover:border-blue-400 hover:bg-blue-50/50'
@@ -1172,11 +1195,16 @@ export function AddReleaseModal({
                           </div>
                         </div>
 
-                        {/* Deduct Input for this Specific Date */}
+                        {/* Quantity Requested for this Date */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                          <label className="text-xs font-bold text-gray-700">
-                            Quantity to Allocate from this Date:
-                          </label>
+                          <div>
+                            <label className="text-xs font-bold text-gray-700 block">
+                              Quantity Requested:
+                            </label>
+                            <span className="text-[11px] text-gray-500">
+                              Units allocated from lot {selectedBatch.expirationDate}
+                            </span>
+                          </div>
                           <div className="flex items-center gap-2">
                             <input
                               type="text"
@@ -1194,7 +1222,7 @@ export function AddReleaseModal({
                               type="button"
                               onClick={() => handleMaxForDate(selectedBatch)}
                               className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-lg transition cursor-pointer"
-                              title="Allocate all remaining available units from this date"
+                              title="Allocate all available units from this date"
                             >
                               Max
                             </button>
@@ -1208,30 +1236,33 @@ export function AddReleaseModal({
                       <div className="flex items-center gap-2">
                         <Layers className="w-4 h-4 text-blue-600" />
                         <span className="font-semibold text-gray-700">
-                          Total Allocated from Dates:
+                          Total Quantity Requested:
                         </span>
-                        <strong className="font-mono text-blue-900 font-bold">
-                          {totalAllocatedFromDates.toLocaleString()} / {(formData.amountRequested || 0).toLocaleString()} units
+                        <strong className="font-mono text-blue-900 font-bold text-sm">
+                          {totalAllocatedFromDates.toLocaleString()} units
                         </strong>
                       </div>
 
                       <div>
-                        {totalAllocatedFromDates === (formData.amountRequested || 0) && (formData.amountRequested || 0) > 0 ? (
+                        {totalAllocatedFromDates > 0 ? (
                           <span className="inline-flex items-center gap-1 font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Allocation Balanced</span>
-                          </span>
-                        ) : totalAllocatedFromDates < (formData.amountRequested || 0) ? (
-                          <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px]">
-                            Need {((formData.amountRequested || 0) - totalAllocatedFromDates).toLocaleString()} more units
+                            <span>Ready for Dispatch ({Object.keys(dateAllocations).length} lot{Object.keys(dateAllocations).length > 1 ? 's' : ''} allocated)</span>
                           </span>
                         ) : (
-                          <span className="font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded border border-red-200 text-[11px]">
-                            Exceeds requested by {(totalAllocatedFromDates - (formData.amountRequested || 0)).toLocaleString()} units
+                          <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px]">
+                            Select an expiration date lot above and enter quantity
                           </span>
                         )}
                       </div>
                     </div>
+
+                    {errors.amountRequested && (
+                      <p className="text-red-500 text-xs flex items-center gap-1 font-medium mt-1">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        {errors.amountRequested}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

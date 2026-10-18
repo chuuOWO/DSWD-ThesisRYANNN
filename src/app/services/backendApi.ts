@@ -50,6 +50,8 @@ export interface IncomingUpdatePayload {
   destinationType?: string;
   destination?: string;
   correctionNote?: string;
+  verifiedBy?: string;
+  verifiedByProfileId?: string;
 }
 
 export interface ProvinceRecord {
@@ -350,6 +352,8 @@ export interface LGUInventoryReportPayload {
   urgencyScore: number;
   priorityColor: 'Red' | 'Orange' | 'Yellow' | 'Green';
   recommendation: string;
+  lguId?: string;
+  reportedByProfileId?: string;
 }
 
 export interface DiscrepancyReportPayload {
@@ -429,6 +433,9 @@ export interface OutgoingUpdatePayload {
   is_held?: boolean;
   correctionNote?: string;
   correction_note?: string;
+  approvedByProfileId?: string | null;
+  dispatchedByProfileId?: string | null;
+  receivedByProfileId?: string | null;
 }
 
 export interface TruckLiveLocation {
@@ -2001,7 +2008,9 @@ export const backendApi = {
       source: payload.source,
       destination_type: payload.destinationType,
       destination: payload.destination,
-      correction_note: payload.correctionNote
+      correction_note: payload.correctionNote,
+      verified_by: payload.verifiedBy,
+      verified_by_profile_id: isUuid(payload.verifiedByProfileId) ? payload.verifiedByProfileId : undefined
     });
 
     const { error } = await supabase
@@ -2066,6 +2075,7 @@ export const backendApi = {
       source_warehouse_id: srcWhId || null,
       source_lgu_id: srcLguId || null,
       lgu_id: destLguId,
+      destination_lgu_id: destLguId || null,
       kit_type_id: kitId || null,
       amount_requested: Number(payload.amountRequested) || 1,
       amount_approved: Number(payload.amountApproved ?? payload.amountRequested ?? 0),
@@ -2085,6 +2095,8 @@ export const backendApi = {
       province: payload.province || '',
       municipality: payload.municipality || '',
       category: payload.fnfiCategory || payload.category || 'Family Food Pack',
+      source_name_snapshot: payload.warehouseSource || 'DSWD Logistics Hub',
+      item_name_snapshot: payload.fnfiCategory || payload.category || 'Family Food Pack',
       delivery_priority: Number(payload.deliveryPriority ?? 0),
       is_held: Boolean(payload.isHeld ?? false),
       correction_note: payload.correctionNote || ''
@@ -2118,7 +2130,10 @@ export const backendApi = {
       receiver_signature: payload.receiverSignature,
       wallet_address: payload.walletAddress,
       assigned_truck_id: cleanTruck,
-      correction_note: payload.correctionNote
+      correction_note: payload.correctionNote,
+      approved_by_profile_id: isUuid(payload.approvedByProfileId) ? payload.approvedByProfileId : undefined,
+      dispatched_by_profile_id: isUuid(payload.dispatchedByProfileId) ? payload.dispatchedByProfileId : undefined,
+      received_by_profile_id: isUuid(payload.receivedByProfileId) ? payload.receivedByProfileId : undefined
     });
 
     const { error } = await supabase
@@ -2132,9 +2147,17 @@ export const backendApi = {
 
 
   async createLGUInventoryReport(payload: LGUInventoryReportPayload) {
+    let resolvedLguId = isUuid(payload.lguId) ? payload.lguId : null;
+    if (!resolvedLguId) {
+      resolvedLguId = await this.resolveLguId(payload.municipality || payload.lguName);
+    }
+    const reportedByProfileId = isUuid(payload.reportedByProfileId) ? payload.reportedByProfileId : null;
+
     const { data, error } = await supabase
       .from('lgu_inventory_reports')
       .insert({
+        lgu_id: resolvedLguId || null,
+        reported_by_profile_id: reportedByProfileId || null,
         municipality: payload.municipality,
         province: payload.province,
         lgu_name: payload.lguName,
