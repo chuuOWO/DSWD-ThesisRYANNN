@@ -82,8 +82,45 @@ export function QrCodeGeneratorModal({
     }
     const qty = rawQty;
 
-    const batchIds = currentRelease.allocatedBatches?.map(b => b.batchTokenId) || [`BATCH-${currentRelease.drNumber}`];
-    const batchQtys = currentRelease.allocatedBatches?.map(b => b.quantity).filter(q => q > 0) || [qty];
+    const cleanDr = currentRelease.drNumber.replace(/[^a-zA-Z0-9]/g, '');
+    let batchIds: string[];
+    let batchQtys: number[];
+
+    if (currentRelease.allocatedBatches && currentRelease.allocatedBatches.length > 0) {
+      const validBatches = currentRelease.allocatedBatches.filter(b => b && b.batchTokenId);
+      if (validBatches.length === 1) {
+        batchIds = [validBatches[0].batchTokenId];
+        batchQtys = [qty];
+      } else if (validBatches.length > 1) {
+        let remaining = qty;
+        batchIds = [];
+        batchQtys = [];
+        for (let i = 0; i < validBatches.length; i++) {
+          if (remaining <= 0) break;
+          const b = validBatches[i];
+          batchIds.push(b.batchTokenId);
+          if (i === validBatches.length - 1) {
+            batchQtys.push(remaining);
+            remaining = 0;
+          } else {
+            const rawQ = Number(b.quantity) || 0;
+            const takeQ = Math.min(rawQ > 0 ? rawQ : Math.floor(qty / validBatches.length), remaining);
+            const finalQ = takeQ > 0 ? takeQ : 1;
+            batchQtys.push(finalQ);
+            remaining -= finalQ;
+          }
+        }
+        if (remaining > 0 && batchQtys.length > 0) {
+          batchQtys[batchQtys.length - 1] += remaining;
+        }
+      } else {
+        batchIds = [`BATCH-${cleanDr}`];
+        batchQtys = [qty];
+      }
+    } else {
+      batchIds = [`BATCH-${cleanDr}`];
+      batchQtys = [qty];
+    }
     let releaseCoords: [number, number] | undefined = undefined;
     if (currentRelease.receiverGps) {
       const parts = currentRelease.receiverGps.split(',').map((s) => Number(s.trim()));

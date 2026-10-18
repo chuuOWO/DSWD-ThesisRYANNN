@@ -643,9 +643,34 @@ export const blockchain = {
       }
 
       const normalizedBatchTokenIds = rawBatchIds;
-      const normalizedBatchQuantities = (rawQuantities.length === normalizedBatchTokenIds.length)
-        ? rawQuantities
-        : normalizedBatchTokenIds.map(() => BigInt(input.quantity));
+      const targetQty = BigInt(input.quantity);
+      let normalizedBatchQuantities: bigint[];
+
+      if (normalizedBatchTokenIds.length <= 1) {
+        normalizedBatchQuantities = [targetQty];
+      } else {
+        const rawSum = rawQuantities.reduce((a, b) => a + b, 0n);
+        if (rawSum === targetQty && rawQuantities.length === normalizedBatchTokenIds.length && rawQuantities.every(q => q > 0n)) {
+          normalizedBatchQuantities = rawQuantities;
+        } else {
+          let remaining = targetQty;
+          normalizedBatchQuantities = [];
+          for (let i = 0; i < normalizedBatchTokenIds.length; i++) {
+            if (i === normalizedBatchTokenIds.length - 1) {
+              normalizedBatchQuantities.push(remaining);
+              remaining = 0n;
+            } else {
+              const currentRaw = rawQuantities[i] ?? 0n;
+              const allocated = (currentRaw > 0n && currentRaw < remaining)
+                ? currentRaw
+                : (remaining / BigInt(normalizedBatchTokenIds.length - i));
+              const finalAlloc = allocated > 0n ? allocated : 1n;
+              normalizedBatchQuantities.push(finalAlloc);
+              remaining -= finalAlloc;
+            }
+          }
+        }
+      }
 
       for (let i = 0; i < normalizedBatchTokenIds.length; i++) {
         const tokenId = normalizedBatchTokenIds[i];

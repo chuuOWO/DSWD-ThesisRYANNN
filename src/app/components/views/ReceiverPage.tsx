@@ -1305,11 +1305,37 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       // Ensure on-chain batch tokens from database are used if available
       if (matchingDbRelease?.allocated_batches && matchingDbRelease.allocated_batches.length > 0) {
         const validBatches = matchingDbRelease.allocated_batches.filter(b => b.batchTokenId);
-        if (validBatches.length > 0) {
+        if (validBatches.length === 1) {
           payload = {
             ...payload,
-            batchTokenIds: validBatches.map(b => b.batchTokenId),
-            batchQuantities: validBatches.map(b => Number(b.quantity) || 1)
+            batchTokenIds: [validBatches[0].batchTokenId],
+            batchQuantities: [payload.quantity]
+          };
+        } else if (validBatches.length > 1) {
+          let rem = payload.quantity;
+          const bIds: string[] = [];
+          const bQtys: number[] = [];
+          for (let i = 0; i < validBatches.length; i++) {
+            if (rem <= 0) break;
+            bIds.push(validBatches[i].batchTokenId);
+            if (i === validBatches.length - 1) {
+              bQtys.push(rem);
+              rem = 0;
+            } else {
+              const rawQ = Number(validBatches[i].quantity) || 0;
+              const takeQ = Math.min(rawQ > 0 ? rawQ : Math.floor(payload.quantity / validBatches.length), rem);
+              const finalQ = takeQ > 0 ? takeQ : 1;
+              bQtys.push(finalQ);
+              rem -= finalQ;
+            }
+          }
+          if (rem > 0 && bQtys.length > 0) {
+            bQtys[bQtys.length - 1] += rem;
+          }
+          payload = {
+            ...payload,
+            batchTokenIds: bIds,
+            batchQuantities: bQtys
           };
         }
       }
@@ -1384,14 +1410,49 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       payload.handoverContractId ||
       (payload.drNumber.toUpperCase().startsWith('DR-') ? `HANDOVER-${payload.drNumber.toUpperCase()}` : `HANDOVER-DR-${payload.drNumber}`);
 
+    const cleanDr = payload.drNumber.replace(/[^a-zA-Z0-9]/g, '');
+    let finalBatchTokenIds = (payload.batchTokenIds && payload.batchTokenIds.length > 0)
+      ? payload.batchTokenIds
+      : [`BATCH-${cleanDr}`];
+    let finalBatchQuantities: number[];
+
+    if (finalBatchTokenIds.length <= 1) {
+      finalBatchQuantities = [effectiveQty];
+    } else {
+      const rawQtys = (payload.batchQuantities || []).map(q => Number(q) || 0);
+      const sumQtys = rawQtys.reduce((sum, q) => sum + q, 0);
+      if (sumQtys === effectiveQty && rawQtys.length === finalBatchTokenIds.length && rawQtys.every(q => q > 0)) {
+        finalBatchQuantities = rawQtys;
+      } else {
+        let remaining = effectiveQty;
+        finalBatchQuantities = [];
+        for (let i = 0; i < finalBatchTokenIds.length; i++) {
+          if (remaining <= 0) break;
+          if (i === finalBatchTokenIds.length - 1) {
+            finalBatchQuantities.push(remaining);
+            remaining = 0;
+          } else {
+            const rawQ = rawQtys[i] || 0;
+            const takeQ = Math.min(rawQ > 0 ? rawQ : Math.floor(effectiveQty / finalBatchTokenIds.length), remaining);
+            const finalQ = takeQ > 0 ? takeQ : 1;
+            finalBatchQuantities.push(finalQ);
+            remaining -= finalQ;
+          }
+        }
+        if (remaining > 0 && finalBatchQuantities.length > 0) {
+          finalBatchQuantities[finalBatchQuantities.length - 1] += remaining;
+        }
+      }
+    }
+
     try {
       const proof = await blockchain.signReleaseProof({
         drNumber: payload.drNumber,
         handoverContractId: resolvedContractId,
         category: payload.category,
         quantity: effectiveQty,
-        batchTokenIds: payload.batchTokenIds || [],
-        batchQuantities: (payload.batchQuantities && payload.batchQuantities.length > 0) ? payload.batchQuantities : [effectiveQty],
+        batchTokenIds: finalBatchTokenIds,
+        batchQuantities: finalBatchQuantities,
         from: payload.from || 'DSWD Logistics Hub',
         to: payload.to || 'Assigned LGU',
         gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,

@@ -1523,19 +1523,55 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }
 
     const cleanDr = release.drNumber.replace(/[^a-zA-Z0-9]/g, '');
-    const allocations: BatchAllocation[] = (release.allocatedBatches && release.allocatedBatches.length > 0)
-      ? release.allocatedBatches.map((b, idx) => {
-          const uniqueTokenId = release.allocatedBatches.length > 1
-            ? `BATCH-${cleanDr}-${idx + 1}`
-            : `BATCH-${cleanDr}`;
-          return {
-            ...b,
-            batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
-            batchTokenId: uniqueTokenId,
-            quantity: Number(b.quantity) || amountApproved
-          };
-        })
-      : [{ batchTokenId: `BATCH-${cleanDr}`, batchNumber: release.drNumber, quantity: amountApproved }];
+    let allocations: BatchAllocation[];
+    if (release.allocatedBatches && release.allocatedBatches.length > 0) {
+      if (release.allocatedBatches.length === 1) {
+        const b = release.allocatedBatches[0];
+        allocations = [{
+          ...b,
+          batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
+          batchTokenId: `BATCH-${cleanDr}`,
+          quantity: amountApproved
+        }];
+      } else {
+        let remaining = amountApproved;
+        const mapped: BatchAllocation[] = [];
+        for (let idx = 0; idx < release.allocatedBatches.length; idx++) {
+          const b = release.allocatedBatches[idx];
+          if (remaining <= 0) break;
+          const uniqueTokenId = `BATCH-${cleanDr}-${idx + 1}`;
+          if (idx === release.allocatedBatches.length - 1) {
+            mapped.push({
+              ...b,
+              batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
+              batchTokenId: uniqueTokenId,
+              quantity: remaining
+            });
+            remaining = 0;
+          } else {
+            const rawBQty = Number(b.quantity) || 0;
+            const takeQty = Math.min(rawBQty, remaining);
+            if (takeQty > 0) {
+              mapped.push({
+                ...b,
+                batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
+                batchTokenId: uniqueTokenId,
+                quantity: takeQty
+              });
+              remaining -= takeQty;
+            }
+          }
+        }
+        if (remaining > 0 && mapped.length > 0) {
+          mapped[mapped.length - 1].quantity += remaining;
+        }
+        allocations = mapped.length > 0
+          ? mapped
+          : [{ batchTokenId: `BATCH-${cleanDr}`, batchNumber: release.drNumber, quantity: amountApproved }];
+      }
+    } else {
+      allocations = [{ batchTokenId: `BATCH-${cleanDr}`, batchNumber: release.drNumber, quantity: amountApproved }];
+    }
 
     let proof: any;
 
