@@ -39,6 +39,19 @@ export function formatUserErrorMessage(error: unknown, fallback = 'Unable to com
     return 'Incorrect email or password. Please try again.';
   }
 
+  // Blockchain smart contract & EVM reverts
+  if (lower.includes('batch not found')) {
+    return 'Inventory batch synchronization with blockchain is in progress. Please retry.';
+  }
+
+  if (lower.includes('action="estimategas"') || lower.includes('call_exception') || lower.includes('execution reverted')) {
+    const match = raw.match(/reason="([^"]+)"/i) || raw.match(/execution reverted: "([^"]+)"/i);
+    if (match && match[1]) {
+      return `Smart contract notice: ${match[1]}. Please tap retry.`;
+    }
+    return 'Smart contract gas estimation pending network confirmation. Please tap retry.';
+  }
+
   return raw;
 }
 

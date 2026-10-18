@@ -56,10 +56,20 @@ export function QrCodeGeneratorModal({
   const [copied, setCopied] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Derive active release from outgoing releases
+  // Stable snapshot of releases to prevent real-time mobile scans from redrawing or flickering the QR canvas
+  const releaseSnapshotRef = useRef<Record<string, OutgoingRelease>>({});
+
+  // Derive active release from outgoing releases with snapshot stability
   const currentRelease = useMemo(() => {
-    return releases.find(r => r.drNumber === selectedDr) || initialRelease || releases[0] || null;
-  }, [selectedDr, releases, initialRelease]);
+    if (selectedDr && releaseSnapshotRef.current[selectedDr]) {
+      return releaseSnapshotRef.current[selectedDr];
+    }
+    const found = releases.find(r => r.drNumber === selectedDr) || initialRelease || releases[0] || null;
+    if (found) {
+      releaseSnapshotRef.current[found.drNumber] = found;
+    }
+    return found;
+  }, [selectedDr, initialRelease]);
 
   // Construct Payload for Receiver App
   const payload: ThesisQrPayload | null = useMemo(() => {

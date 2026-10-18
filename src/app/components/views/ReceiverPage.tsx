@@ -221,13 +221,14 @@ const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPa
           if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {
             throw new Error(`Missing or invalid quantity for shipment ${canonicalDr}. Scan a complete QR payload.`);
           }
+          const matchingBatches = (matchingRel?.allocated_batches || []).filter((b) => b && b.batchTokenId);
           return {
             drNumber: canonicalDr,
             handoverContractId: matchingRel?.handover_contract_id || `HANDOVER-${canonicalDr}`,
             category: params.get('cat') || matchingRel?.category || 'Food Pack',
             quantity: parsedQty,
-            batchTokenIds: [`BATCH-${canonicalDr}`],
-            batchQuantities: [parsedQty],
+            batchTokenIds: matchingBatches.length > 0 ? matchingBatches.map((b) => String(b.batchTokenId)) : [],
+            batchQuantities: matchingBatches.length > 0 ? matchingBatches.map((b) => Number(b.quantity) || parsedQty) : [parsedQty],
             from: params.get('from') || matchingRel?.warehouse_source || 'DSWD Logistics Hub',
             to: params.get('to') || matchingRel?.destination_address || matchingRel?.lgu_name || matchingRel?.municipality || 'Assigned LGU'
           };
@@ -1254,6 +1255,12 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     stopCamera();
     setSignError(null);
     setIsSigning(true);
+    setPendingVerifyPayload(payload);
+    setVerifiedQuantity(payload.quantity);
+    setSelectedTruckId(activeTruckId || profile?.truckId || trucksList[0]?.truckId || 'TRUCK-01');
+
+    // Dismiss camera instantly to eliminate camera freeze and show Cargo Verification first
+    nav('verify');
 
     try {
       // 1. Same-user double-scan guard: already in this driver's active cargo
@@ -1334,9 +1341,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setVerifiedQuantity(payload.quantity);
       setPendingVerifyPayload(payload);
       setSelectedTruckId(activeTruckId || profile?.truckId || trucksList[0]?.truckId || 'TRUCK-01');
-
-      // Prompt driver to pick what truck they are using
-      nav('select_truck');
     } catch (error) {
       console.error('Scan custody initiate error:', error);
       nav('scan');
@@ -1361,6 +1365,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     isExecutingCustodyRef.current = true;
     const { payload, location: nextLocation } = custody;
     const effectiveTruckId = custodyOverride?.truckId || selectedTruckId || activeTruckId || 'TRUCK-01';
+    const effectiveQty = (verifiedQuantity && verifiedQuantity > 0) ? verifiedQuantity : payload.quantity;
     setIsSubmittingProof(true);
     setSignStage('wallet');
     setSignError(null);
@@ -1384,9 +1389,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         drNumber: payload.drNumber,
         handoverContractId: resolvedContractId,
         category: payload.category,
-        quantity: payload.quantity,
+        quantity: effectiveQty,
         batchTokenIds: payload.batchTokenIds || [],
-        batchQuantities: payload.batchQuantities || [payload.quantity],
+        batchQuantities: (payload.batchQuantities && payload.batchQuantities.length > 0) ? payload.batchQuantities : [effectiveQty],
         from: payload.from || 'DSWD Logistics Hub',
         to: payload.to || 'Assigned LGU',
         gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
@@ -1414,7 +1419,42 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           assignedTruckId: effectiveTruckId,
           assigned_truck_id: effectiveTruckId,
           assignedEscortProfileId: profile?.id,
-          assignedDriverProfileId: profile?.id
+          assignedDriverProfileId: profile?.id,
+          amountApproved: effectiveQty
+        }).catch(() => {});
+      }
+
+      // Check if escort adjusted package count or recorded transit remarks
+      const origQty = payload.quantity;
+      const hasCountDiscrepancy = effectiveQty !== origQty;
+      const hasRemarks = Boolean(transitRemarks && transitRemarks.trim());
+
+      if (hasRemarks || hasCountDiscrepancy) {
+        const noteText = [
+          hasCountDiscrepancy ? `Physical count mismatch: verified ${effectiveQty} vs manifest ${origQty}.` : '',
+          hasRemarks ? transitRemarks.trim() : ''
+        ].filter(Boolean).join(' ');
+
+        await backendApi.createDiscrepancyReport({
+          reportType: 'Outgoing',
+          drNumber: payload.drNumber,
+          note: noteText,
+          reportedByRole: 'Escort',
+          reportedByWallet: profile?.walletAddress || undefined,
+          reportedByProfileId: profile?.id
+        }).catch((err) => console.warn('Discrepancy report error:', err));
+
+        await backendApi.logActivity({
+          actorId: profile?.id,
+          actorName: profile?.fullName || receiverId,
+          actorEmail: profile?.email,
+          actorRole: 'escort',
+          actorWallet: activeWalletAddr,
+          action: 'DISCREPANCY_REPORTED',
+          entityType: 'outgoing_request',
+          entityId: payload.drNumber,
+          details: `Relief Escort Officer reported discrepancy for ${payload.drNumber}: ${noteText}`,
+          metadata: { drNumber: payload.drNumber, truckId: effectiveTruckId, verifiedQuantity: effectiveQty, origQty, note: noteText }
         }).catch(() => {});
       }
 
@@ -1426,11 +1466,11 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       );
 
       if (isLguSource && originSource) {
-        await backendApi.deductLguStock(originSource, payload.category, payload.quantity).catch((err) => {
+        await backendApi.deductLguStock(originSource, payload.category, effectiveQty).catch((err) => {
           console.warn('Failed to deduct source LGU stock on custody sign:', err);
         });
       } else {
-        await backendApi.deductWarehouseStock(originSource || 'DSWD Regional Warehouse', payload.category, payload.quantity).catch((err) => {
+        await backendApi.deductWarehouseStock(originSource || 'DSWD Regional Warehouse', payload.category, effectiveQty).catch((err) => {
           console.warn('Failed to deduct warehouse stock on custody sign:', err);
         });
       }
@@ -1524,19 +1564,19 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setInventory({
         batchTokenId: payload.batchTokenIds[0] ?? resolvedContractId,
         category: payload.category,
-        quantity: payload.quantity,
+        quantity: effectiveQty,
         status: 'In transit',
-        remarks: ''
+        remarks: transitRemarks || ''
       });
 
-      setVerifiedQuantity(payload.quantity);
-      setPendingVerifyPayload(payload);
+      setVerifiedQuantity(effectiveQty);
+      setPendingVerifyPayload({ ...payload, quantity: effectiveQty });
       setPendingCustody(null);
 
       setHandoverToast(`On-chain custody transfer confirmed on Sepolia for ${payload.drNumber}`);
       setTimeout(() => setHandoverToast(null), 7000);
 
-      nav('verify');
+      nav('success');
     } catch (err: any) {
       console.warn('Receiver sign custody error:', err);
       // Double check if the DR was already signed on Sepolia despite the error
@@ -1630,7 +1670,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           setVerifiedQuantity(payload.quantity);
           setPendingVerifyPayload(payload);
           setPendingCustody(null);
-          nav('verify');
+          nav('success');
           return;
         }
       } catch (checkErr) {
@@ -2300,13 +2340,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                 <div className="pt-2 flex gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setPendingCustody(null);
-                      nav('pickup');
-                    }}
+                    onClick={() => nav('verify')}
                     className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
                   >
-                    Cancel
+                    Back to Cargo Check
                   </button>
                   <button
                     type="button"
@@ -2362,66 +2399,53 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             />
           )}
 
-          {step === 'verify' && (
+          {step === 'verify' && (pendingVerifyPayload || pendingCustody) && (
             <Modal
-              title="Verify Package Count"
+              title="Inspect Cargo & Verify Count"
               icon={<ClipboardList size={22} className="text-[#2500ba]" />}
-              onClose={() => nav('pickup')}
+              onClose={() => {
+                setPendingCustody(null);
+                setPendingVerifyPayload(null);
+                nav('pickup');
+              }}
             >
-              <div className="text-center mt-1">
-                <span className="inline-block rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wide">
-                  On-Chain Custody Confirmed
-                </span>
-                <p className="text-sm font-extrabold text-gray-900 mt-1">
-                  {pendingVerifyPayload?.drNumber || activePayload?.drNumber}
-                </p>
-                <p className="text-xs text-gray-600 font-semibold mt-0.5">
-                  {pendingVerifyPayload?.category || activePayload?.category}
-                </p>
-                {confirmedTxHash && (
-                  <div className="mt-2 flex justify-center">
-                    <a
-                      href={`https://sepolia.etherscan.io/tx/${confirmedTxHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Sepolia Tx: {confirmedTxHash.slice(0, 8)}...{confirmedTxHash.slice(-6)}</span>
-                      <ExternalLink className="w-3 h-3 text-emerald-600" />
-                    </a>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-3 space-y-2 text-left">
-                <div className="rounded-lg bg-gray-50 border border-gray-200 p-2.5 space-y-1 text-[10.5px]">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 font-medium">Destination:</span>
-                    <span className="font-bold text-gray-800 text-right truncate max-w-[170px]">
-                      {pendingVerifyPayload?.to || activePayload?.to}
+              <div className="space-y-3 text-left mt-1">
+                <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-blue-950 text-xs tracking-tight">
+                      Shipment {(pendingVerifyPayload || pendingCustody?.payload)?.drNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-200/80 text-blue-900 font-bold text-[10px]">
+                      {(pendingVerifyPayload || pendingCustody?.payload)?.category}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 font-medium">Origin:</span>
-                    <span className="font-semibold text-gray-700 text-right truncate max-w-[170px]">
-                      {pendingVerifyPayload?.from || activePayload?.from}
+                  <div className="flex items-center gap-1.5 text-[10.5px] text-blue-900">
+                    <MapPin size={12} className="text-red-500 shrink-0" />
+                    <span className="truncate font-semibold">
+                      Destination: {(pendingVerifyPayload || pendingCustody?.payload)?.to || 'Assigned LGU'}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 font-medium">Commodity:</span>
-                    <span className="font-semibold text-gray-700 text-right truncate max-w-[170px]">
-                      {pendingVerifyPayload?.category || activePayload?.category}
-                    </span>
-                  </div>
+                  <p className="text-[10px] text-gray-500 truncate">
+                    Origin: {(pendingVerifyPayload || pendingCustody?.payload)?.from || 'DSWD Logistics Hub'}
+                  </p>
+                  {((pendingVerifyPayload || pendingCustody?.payload)?.batchTokenIds?.length ?? 0) > 0 && (
+                    <div className="pt-1 flex flex-wrap gap-1">
+                      <span className="text-[9.5px] text-gray-500 font-medium self-center">Batches:</span>
+                      {(pendingVerifyPayload || pendingCustody?.payload)?.batchTokenIds.map((bid) => (
+                        <span key={bid} className="px-1.5 py-0.5 rounded bg-white/90 border border-blue-200 font-mono text-[9px] text-blue-900 font-semibold">
+                          {bid}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 text-center">
-                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
-                    Verified Number of Packages
+                  <label className="block text-[11px] font-bold text-gray-800 mb-0.5">
+                    Physical Package Count
                   </label>
                   <p className="text-[9.5px] text-gray-500 mb-2">
-                    Verify physical count loaded on vehicle before departure.
+                    Manifest: {(pendingVerifyPayload || pendingCustody?.payload)?.quantity} units. Adjust count if physical packages differ.
                   </p>
                   <div className="flex items-center justify-center gap-3">
                     <button
@@ -2452,96 +2476,128 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     </button>
                   </div>
                 </div>
-                {/* Transit Remarks & Discrepancy Notes */}
+
                 <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-left">
                   <label className="block text-[11px] font-bold text-gray-800 mb-1">
-                    Transit Remarks / Discrepancy Notes (Optional)
+                    Cargo Condition / Discrepancy Remarks (Optional)
                   </label>
                   <p className="text-[9.5px] text-gray-500 mb-1.5">
-                    Note cargo packaging condition, damaged units, count adjustments, or road relay info.
+                    Note damaged boxes, damp packaging, broken seals, or missing items before departure.
                   </p>
                   <textarea
                     rows={2}
                     value={transitRemarks}
                     onChange={(e) => setTransitRemarks(e.target.value)}
-                    placeholder="e.g. 5 boxes have damp outer packaging; cargo transferred from vehicle RCVR-1002 due to engine overheat."
+                    placeholder="e.g. 2 boxes damaged; outer seal intact. Count adjusted from manifest."
                     className="w-full text-xs p-2 rounded-lg border border-gray-300 bg-white text-gray-800 placeholder-gray-400 focus:outline-hidden focus:border-[#2500ba] resize-none"
                   />
                 </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingCustody(null);
+                      setPendingVerifyPayload(null);
+                      nav('pickup');
+                    }}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => nav('select_truck')}
+                    className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                  >
+                    <span>Next: Assign Vehicle</span>
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
               </div>
+            </Modal>
+          )}
 
-              <div className="mt-4 pb-3">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const activeDr = pendingVerifyPayload?.drNumber || activePayload?.drNumber;
-                    if (activeDr) {
-                      const origQty = pendingVerifyPayload?.quantity || activePayload?.quantity || verifiedQuantity;
-                      const hasCountDiscrepancy = verifiedQuantity !== origQty;
-                      const hasRemarks = Boolean(transitRemarks && transitRemarks.trim());
+          {step === 'success' && (
+            <Modal
+              title="Proof of Custody Confirmed"
+              icon={<ShieldCheck size={22} className="text-emerald-600" />}
+              onClose={() => {
+                setPendingCustody(null);
+                setPendingVerifyPayload(null);
+                setTransitRemarks('');
+                nav('pickup');
+              }}
+            >
+              <div className="text-center mt-1 space-y-3">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide">
+                  <ShieldCheck size={14} className="text-emerald-700" />
+                  <span>On-Chain Custody Confirmed</span>
+                </div>
 
-                      if (hasCountDiscrepancy) {
-                        try {
-                          await backendApi.updateOutgoing(activeDr, {
-                            amountApproved: verifiedQuantity,
-                            amountRequested: verifiedQuantity
-                          });
-                        } catch (err) {
-                          console.warn('Update verified quantity error:', err);
-                        }
-                      }
+                <div>
+                  <p className="text-base font-extrabold text-gray-900">
+                    {pendingVerifyPayload?.drNumber || activePayload?.drNumber}
+                  </p>
+                  <p className="text-xs text-gray-600 font-semibold mt-0.5">
+                    {verifiedQuantity || pendingVerifyPayload?.quantity || activePayload?.quantity} {pendingVerifyPayload?.category || activePayload?.category}
+                  </p>
+                </div>
 
-                      if (hasRemarks || hasCountDiscrepancy) {
-                        const noteText = [
-                          hasCountDiscrepancy ? `Count mismatch: verified ${verifiedQuantity} vs manifest ${origQty}.` : '',
-                          hasRemarks ? transitRemarks.trim() : ''
-                        ].filter(Boolean).join(' ');
+                <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 space-y-1.5 text-[11px] text-left">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Assigned Vehicle:</span>
+                    <span className="font-bold text-gray-800">
+                      {selectedTruckId || activeTruckId}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Destination:</span>
+                    <span className="font-bold text-gray-800 truncate max-w-[180px]">
+                      {pendingVerifyPayload?.to || activePayload?.to}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Escort Officer:</span>
+                    <span className="font-semibold text-gray-700 truncate max-w-[180px]">
+                      {profile?.fullName || receiverId}
+                    </span>
+                  </div>
+                </div>
 
-                        try {
-                          await backendApi.createDiscrepancyReport({
-                            reportType: 'Outgoing',
-                            drNumber: activeDr,
-                            note: noteText,
-                            reportedByRole: 'Escort',
-                            reportedByWallet: profile?.walletAddress || undefined,
-                            reportedByProfileId: profile?.id
-                          });
-                          await backendApi.logActivity({
-                            actorId: profile?.id,
-                            actorName: profile?.fullName || receiverId,
-                            actorEmail: profile?.email,
-                            actorRole: 'escort',
-                            actorWallet: profile?.walletAddress || undefined,
-                            action: 'DISCREPANCY_REPORTED',
-                            entityType: 'outgoing_request',
-                            entityId: activeDr,
-                            details: `Relief Escort Officer reported discrepancy / transit remarks for ${activeDr}: ${noteText}`,
-                            metadata: { drNumber: activeDr, truckId: receiverId, verifiedQuantity, origQty, note: noteText }
-                          });
-                        } catch (discErr) {
-                          console.warn('Failed to save discrepancy note:', discErr);
-                        }
-                      }
+                {confirmedTxHash && (
+                  <div className="flex justify-center pt-1">
+                    <a
+                      href={`https://sepolia.etherscan.io/tx/${confirmedTxHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Sepolia: {confirmedTxHash.slice(0, 8)}...{confirmedTxHash.slice(-6)}</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                    </a>
+                  </div>
+                )}
 
-                      const updated = activePackages.map((pkg) =>
-                        pkg.drNumber === activeDr ? { ...pkg, quantity: verifiedQuantity } : pkg
-                      );
-                      try {
-                        localStorage.setItem(storageKey, JSON.stringify(updated));
-                      } catch {}
-                      setActivePackages(updated);
-                    }
-                    setTransitRemarks('');
-                    setHandoverToast(`Custody confirmed: ${verifiedQuantity} packages in transit.`);
-                    setTimeout(() => setHandoverToast(null), 5000);
-                    setPendingVerifyPayload(null);
-                    nav('pickup');
-                  }}
-                  className="w-full rounded-xl bg-[#2500ba] py-3 text-xs font-bold text-white shadow-md hover:bg-blue-800 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Check size={16} />
-                  <span>Confirm Packages & Start Delivery</span>
-                </button>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const finalQty = verifiedQuantity || pendingVerifyPayload?.quantity || activePayload?.quantity;
+                      setPendingCustody(null);
+                      setPendingVerifyPayload(null);
+                      setTransitRemarks('');
+                      setHandoverToast(`Custody confirmed: ${finalQty} packages in transit.`);
+                      setTimeout(() => setHandoverToast(null), 5000);
+                      nav('pickup');
+                    }}
+                    className="w-full rounded-xl bg-[#2500ba] py-3 text-xs font-bold text-white shadow-md hover:bg-blue-800 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <MapPin size={16} />
+                    <span>Start Route Navigation</span>
+                  </button>
+                </div>
               </div>
             </Modal>
           )}

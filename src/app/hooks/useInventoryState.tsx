@@ -1522,27 +1522,32 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return { ok: false, message: 'Insufficient available warehouse stock.' };
     }
 
-    const batchTokenId = generateBatchTokenId();
-    let proof;
+    const allocations: BatchAllocation[] = (release.allocatedBatches && release.allocatedBatches.length > 0)
+      ? release.allocatedBatches
+      : [{ batchTokenId: generateBatchTokenId(), quantity: amountApproved }];
+
+    let proof: any;
 
     try {
       await blockchain.requireConnectedWalletRole('Admin');
-      proof = await blockchain.mintAndAuthorizeRelease({
-        drNumber: release.drNumber,
-        batchTokenId,
-        category: release.fnfiCategory,
-        quantity: amountApproved,
-        warehouseSource: release.warehouseSource,
-        lguName: release.lguName
-      });
+      // Mint authentic allocated batches onto Sepolia
+      for (const batch of allocations) {
+        proof = await blockchain.mintAndAuthorizeRelease({
+          drNumber: release.drNumber,
+          batchTokenId: batch.batchTokenId,
+          category: release.fnfiCategory,
+          quantity: Number(batch.quantity) || amountApproved,
+          warehouseSource: release.warehouseSource,
+          lguName: release.lguName
+        });
+      }
     } catch (error) {
       logBackendError('Mint and authorize release on blockchain')(error);
       return { ok: false, message: toFriendlyTxError(error, 'Authorization and batch minting failed. Administrator privileges required.') };
     }
 
-    const allocations: BatchAllocation[] = (release.allocatedBatches && release.allocatedBatches.length > 0)
-      ? release.allocatedBatches
-      : [{ batchTokenId, quantity: amountApproved }];
+    const mintedBatchId = allocations[0]?.batchTokenId || 'BATCH';
+    const batchTokenId = allocations.map(b => b.batchTokenId).join(', ') || mintedBatchId;
 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? {
@@ -1550,9 +1555,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           amountApproved,
           deliveryStatus: 'Approved',
           allocatedBatches: allocations,
-          adminSignature: proof.hash,
-          blockchainTxHash: proof.hash,
-          auditTrail: [audit('Release Minted & Authorized', `Admin authorized dispatch and minted batch ${batchTokenId} on blockchain.`, proof.hash), ...item.auditTrail]
+          adminSignature: proof?.hash,
+          blockchainTxHash: proof?.hash,
+          auditTrail: [audit('Release Minted & Authorized', `Admin authorized dispatch and verified batch ${mintedBatchId} on blockchain.`, proof?.hash), ...item.auditTrail]
         }
       : item));
 
