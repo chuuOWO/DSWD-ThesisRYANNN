@@ -143,6 +143,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     if (!editingIncoming) return;
     const itemTarget = editingIncoming;
     updateIncomingGoods(itemTarget.id, {
+      manifestNumber: updatedGoods.manifestNumber,
       dateReceived: updatedGoods.dateReceived,
       fnfiCategory: updatedGoods.fnfiCategory,
       quantity: updatedGoods.quantity,
@@ -422,8 +423,8 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <table className="w-full min-w-[1200px]">
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">RIS Code</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Manifest</th>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">RIS Number</th>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Incident Code</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
@@ -434,17 +435,18 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <tbody className="divide-y divide-gray-100">
               {paginatedGoods.map((item) => (
                 <tr key={item.id} className="hover:bg-gray-50 transition-colors align-top">
-                  {/* RIS Code - Column before Manifest */}
+                  {/* RIS Number - Document Intake Slip */}
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <p className="font-bold text-sm text-gray-900 font-mono">{item.manifestNumber || item.id}</p>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
+                      <Calendar className="w-3 h-3 text-gray-400" /> {item.dateReceived}
+                    </div>
+                  </td>
+                  {/* Incident / Operation Code */}
                   <td className="px-4 py-4 whitespace-nowrap">
                     <span className="font-mono text-xs font-black text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 inline-block shadow-2xs">
                       {item.incidentCode || '—'}
                     </span>
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <p className="font-bold text-sm text-gray-900 font-mono">{item.id}</p>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
-                      <Calendar className="w-3 h-3 text-gray-400" /> {item.dateReceived}
-                    </div>
                   </td>
                   <td className="px-4 py-4">
                     <p className="font-bold text-sm text-gray-900">{item.fnfiCategory}</p>
@@ -800,6 +802,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           lgusList={lgusList}
           provincesList={provincesList}
           initialData={{
+            manifestNumber: editingIncoming.manifestNumber || editingIncoming.id,
             dateReceived: editingIncoming.dateReceived,
             fnfiCategory: editingIncoming.fnfiCategory,
             quantity: editingIncoming.quantity,

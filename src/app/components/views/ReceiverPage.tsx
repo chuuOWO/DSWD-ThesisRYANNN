@@ -279,7 +279,7 @@ const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPa
       destinationCoords
     };
   } catch (err) {
-    if (trimmed.startsWith('DR-') || trimmed.startsWith('INC-')) {
+    if (trimmed.startsWith('DR-') || trimmed.startsWith('RIS-') || trimmed.startsWith('INC-')) {
       const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === trimmed.toUpperCase());
       const parsedQty = matchingRel?.amount_approved ?? matchingRel?.amount_requested;
       if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {

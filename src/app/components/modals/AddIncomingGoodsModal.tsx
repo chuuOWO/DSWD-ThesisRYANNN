@@ -5,6 +5,7 @@ import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord, LguRecord, Pro
 import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES, DEFAULT_PANAY_LGUS, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 
 export interface IncomingGoodsForm {
+  manifestNumber?: string;
   dateReceived: string;
   fnfiCategory: string;
   quantity: number;
@@ -137,6 +138,7 @@ export function AddIncomingGoodsModal({
   });
 
   const defaultFormData: IncomingGoodsForm = {
+    manifestNumber: '',
     dateReceived: new Date().toISOString().split('T')[0],
     fnfiCategory: categoryOptions[0] || 'Food Pack',
     quantity: 0,
@@ -146,7 +148,7 @@ export function AddIncomingGoodsModal({
     transportMode: 'Delivery',
     destinationType: 'Warehouse',
     destination: warehouseOptions[0] || 'Oton Main Warehouse',
-    incidentCode: ''
+    incidentCode: 'INC-2026-PREPOSITION'
   };
 
   const [formData, setFormData] = useState<IncomingGoodsForm>(
@@ -187,8 +189,8 @@ export function AddIncomingGoodsModal({
   const validate = (): boolean => {
     const newErrors: Partial<Record<keyof IncomingGoodsForm, string>> = {};
 
-    if (!formData.incidentCode || !formData.incidentCode.trim()) {
-      newErrors.incidentCode = 'RIS (Request Slip) reference is required';
+    if (!formData.manifestNumber || !formData.manifestNumber.trim()) {
+      newErrors.manifestNumber = 'RIS (Requisition and Issue Slip) number is required. Please encode the official document number.';
     }
 
     if (!formData.dateReceived) {
@@ -260,9 +262,10 @@ export function AddIncomingGoodsModal({
 
       const submissionData: IncomingGoodsForm = {
         ...formData,
+        manifestNumber: formData.manifestNumber?.trim().toUpperCase(),
         source: finalSource,
         destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination,
-        incidentCode: formData.incidentCode?.trim() || '',
+        incidentCode: formData.incidentCode?.trim().toUpperCase() || 'INC-2026-PREPOSITION',
         supplySourceId: matchedSource?.id,
         kitTypeId: matchedKit?.id,
         destinationWarehouseId: destWhId,
@@ -305,30 +308,47 @@ export function AddIncomingGoodsModal({
           }}
           className="p-6 space-y-6 overflow-y-auto flex-1"
         >
-          {/* RIS (Request Slip) Reference - Required at Top */}
+          {/* RIS (Requisition and Issue Slip) Number - Strictly Required */}
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-2">
-              RIS (Request Slip) Code <span className="text-red-500">*</span>
+              RIS (Requisition &amp; Issue Slip) Number <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
-              value={formData.incidentCode}
-              onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value))}
-              placeholder="e.g., RIS-2026-001, DSWD-RIS-042"
+              value={formData.manifestNumber || ''}
+              onChange={(e) => handleChange('manifestNumber', sanitizeSlipReference(e.target.value.toUpperCase()))}
+              placeholder="e.g., RIS-1171-290, RIS-2026-001"
               className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm ${
-                errors.incidentCode ? 'border-red-500' : 'border-gray-300'
+                errors.manifestNumber ? 'border-red-500 bg-red-50/40' : 'border-gray-300'
               }`}
             />
-            {errors.incidentCode ? (
-              <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                {errors.incidentCode}
+            {errors.manifestNumber ? (
+              <p className="text-red-500 text-xs mt-1 flex items-center gap-1 font-medium">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                {errors.manifestNumber}
               </p>
             ) : (
               <p className="text-xs text-gray-500 mt-1">
-                Official Request and Issue Slip reference for this incoming delivery.
+                Official physical Requisition and Issue Slip control number from warehouse intake documentation.
               </p>
             )}
+          </div>
+
+          {/* Incident / Operation Code - Calamity / Prepositioning */}
+          <div>
+            <label className="block text-sm font-bold text-gray-700 mb-2">
+              Disaster Incident / Operation Code
+            </label>
+            <input
+              type="text"
+              value={formData.incidentCode || ''}
+              onChange={(e) => handleChange('incidentCode', sanitizeSlipReference(e.target.value.toUpperCase()))}
+              placeholder="e.g., INC-2026-PREPOSITION, INC-2026-TY-01"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Associated calamity, disaster, or buffer prepositioning code (e.g. INC-2026-PREPOSITION).
+            </p>
           </div>
 
           {/* Date Received */}

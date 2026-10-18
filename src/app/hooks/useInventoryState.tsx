@@ -1135,23 +1135,23 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const addIncomingGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
-    const nextIndex = incomingGoodsList.reduce((max, entry) => {
-      const match = entry.id.match(/INC-\d{4}-(\d+)/i);
-      if (!match) return max;
-      const value = Number.parseInt(match[1], 10);
-      return Number.isFinite(value) ? Math.max(max, value) : max;
-    }, 0) + 1;
-    const year = new Date().getFullYear();
-    const newId = `INC-${year}-${String(nextIndex).padStart(3, '0')}`;
+    const rawRis = (newGoods.manifestNumber || '').trim();
+    if (!rawRis) {
+      console.error('Cannot add incoming goods: RIS number is strictly required.');
+      return;
+    }
+    const cleanId = rawRis.toUpperCase();
     const isLgu = newGoods.destinationType === 'LGU';
     const initialStatus: IncomingStatus = 'Draft';
     const auditMessage = isLgu
-      ? `Incoming direct delivery to ${newGoods.destination} recorded as editable draft awaiting confirmation.`
-      : 'Incoming manifest saved as editable draft awaiting physical warehouse inspection.';
+      ? `Incoming direct delivery to ${newGoods.destination} recorded under ${cleanId} as editable draft awaiting confirmation.`
+      : `Incoming manifest ${cleanId} saved as editable draft awaiting physical warehouse inspection.`;
 
     const goodsWithId: IncomingGoods = {
       ...newGoods,
-      id: newId,
+      id: cleanId,
+      manifestNumber: cleanId,
+      incidentCode: newGoods.incidentCode?.trim().toUpperCase() || 'INC-2026-PREPOSITION',
       status: initialStatus,
       manifestHash: makeManifestHash(newGoods),
       verifiedBy: undefined,
@@ -1162,7 +1162,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     // Physical warehouse and LGU buffer stocks are updated strictly upon physical inspection & verification (verifyIncomingReceipt)
     backendApi.createIncoming({
       ...newGoods,
-      manifestNumber: newId,
+      manifestNumber: cleanId,
+      incidentCode: goodsWithId.incidentCode,
       status: initialStatus,
       manifestHash: goodsWithId.manifestHash,
       supplySourceId: newGoods.supplySourceId,
@@ -1179,21 +1180,21 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     backendApi.logActivity({
       action: 'INCOMING_ADDED',
       entityType: 'IncomingGoods',
-      entityId: newId,
+      entityId: cleanId,
       actorId: currentActor.id,
       actorName: currentActor.name,
       actorEmail: currentActor.email,
       actorRole: currentActor.role,
       actorWallet: currentActor.wallet,
-      details: `Created incoming manifest ${newId} with ${newGoods.quantity} ${newGoods.unitType || 'units'} of ${newGoods.fnfiCategory} from ${newGoods.source} to ${newGoods.destination}.`,
+      details: `Created incoming manifest ${cleanId} with ${newGoods.quantity} ${newGoods.unitType || 'units'} of ${newGoods.fnfiCategory} from ${newGoods.source} to ${newGoods.destination}.`,
       metadata: {
-        manifestNumber: newId,
+        manifestNumber: cleanId,
         category: newGoods.fnfiCategory,
         quantity: newGoods.quantity,
         unitType: newGoods.unitType,
         source: newGoods.source,
         destination: newGoods.destination,
-        incidentCode: newGoods.incidentCode
+        incidentCode: goodsWithId.incidentCode
       }
     }).catch(() => {});
   };
@@ -1526,14 +1527,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
     const cleanDr = release.drNumber.replace(/[^a-zA-Z0-9]/g, '');
     const allocations: BatchAllocation[] = (release.allocatedBatches && release.allocatedBatches.length > 0)
-      ? release.allocatedBatches.map(b => {
-          const rawToken = b.batchTokenId || generateBatchTokenId();
-          const uniqueTokenId = rawToken.includes(cleanDr) || rawToken.includes(release.drNumber)
-            ? rawToken
-            : `${rawToken}-${cleanDr}`;
+      ? release.allocatedBatches.map((b, idx) => {
+          const uniqueTokenId = release.allocatedBatches.length > 1
+            ? `BATCH-${cleanDr}-${idx + 1}`
+            : `BATCH-${cleanDr}`;
           return {
             ...b,
-            batchNumber: b.batchNumber || rawToken.replace(/^BATCH-/, ''),
+            batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
             batchTokenId: uniqueTokenId,
             quantity: Number(b.quantity) || amountApproved
           };
