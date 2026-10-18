@@ -37,7 +37,7 @@ export function EditLGUModal({
 
   const categoriesToRender = useMemo(() => {
     const canonicalSet = new Set<string>();
-    const standardCategories = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    const standardCategories = ['Family Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sacks', 'Ready-to-Eat Food (RTEF)'];
     standardCategories.forEach(cat => canonicalSet.add(cat));
 
     if (Array.isArray(availableCategories)) {
@@ -74,13 +74,13 @@ export function EditLGUModal({
         ...prev,
         currentStock: nextStock
       };
-      if (canonical === 'Food Pack') updated.foodPacks = val;
+      if (canonical === 'Family Food Pack' || canonical === 'Food Pack') updated.foodPacks = val;
       else if (canonical === 'Hygiene Kit') updated.hygieneKits = val;
       else if (canonical === 'Sleeping Kit') updated.sleepingKits = val;
       else if (canonical === 'Kitchen Kit') updated.kitchenKits = val;
       else if (canonical === 'Family Kit') updated.familyKits = val;
-      else if (canonical === 'Laminated Sack') updated.laminatedSacks = val;
-      else if (canonical === 'RTEF') updated.rtef = val;
+      else if (canonical === 'Laminated Sacks' || canonical === 'Laminated Sack') updated.laminatedSacks = val;
+      else if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF') updated.rtef = val;
       return updated;
     });
   };

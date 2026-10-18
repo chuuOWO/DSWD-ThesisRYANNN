@@ -47,13 +47,13 @@ export interface SynchronizedLgu extends LguRecord {
 export function normalizeCategoryName(cat?: string | null): string {
   if (!cat) return '';
   const c = cat.trim().toLowerCase();
-  if (c.includes('food pack') || c === 'food packs' || c === 'food' || c === 'family food pack' || c === 'family food packs') return 'Food Pack';
+  if (c.includes('food pack') || c === 'food packs' || c === 'food' || c === 'family food pack' || c === 'family food packs' || c === 'ffp') return 'Family Food Pack';
   if (c.includes('hygiene')) return 'Hygiene Kit';
   if (c.includes('family kit') || c === 'family kits' || (c.includes('family') && !c.includes('food'))) return 'Family Kit';
   if (c.includes('sleeping')) return 'Sleeping Kit';
   if (c.includes('kitchen')) return 'Kitchen Kit';
-  if (c.includes('laminated') || c.includes('sack')) return 'Laminated Sack';
-  if (c.includes('rtef') || c.includes('ready-to-eat')) return 'RTEF';
+  if (c.includes('laminated') || c.includes('sack')) return 'Laminated Sacks';
+  if (c.includes('rtef') || c.includes('ready-to-eat')) return 'Ready-to-Eat Food (RTEF)';
   return cat.trim();
 }
 
@@ -76,6 +76,11 @@ export function getLguStockForCategory(
     return Number(stock[canonical]) || 0;
   }
 
+  // Fallback for legacy key if querying Family Food Pack
+  if (canonical === 'Family Food Pack' && stock['Food Pack'] !== undefined && stock['Food Pack'] !== null) {
+    return Number(stock['Food Pack']) || 0;
+  }
+
   const catLower = category.trim().toLowerCase();
   for (const [k, v] of Object.entries(stock)) {
     if (normalizeCategoryName(k).toLowerCase() === canonical.toLowerCase() || k.trim().toLowerCase() === catLower) {
@@ -83,13 +88,13 @@ export function getLguStockForCategory(
     }
   }
 
-  if (canonical === 'Food Pack' || catLower.includes('food')) return Number(lgu.foodPacks) || 0;
+  if (canonical === 'Family Food Pack' || canonical === 'Food Pack' || catLower.includes('food')) return Number(lgu.foodPacks) || 0;
   if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) return Number(lgu.hygieneKits) || 0;
   if (canonical === 'Family Kit' || catLower.includes('family')) return Number(lgu.familyKits) || 0;
   if (canonical === 'Sleeping Kit' || catLower.includes('sleeping')) return Number(lgu.sleepingKits) || 0;
   if (canonical === 'Kitchen Kit' || catLower.includes('kitchen')) return Number(lgu.kitchenKits) || 0;
-  if (canonical === 'Laminated Sack' || catLower.includes('sack')) return Number(lgu.laminatedSacks) || 0;
-  if (canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) return Number(lgu.rtef) || 0;
+  if (canonical === 'Laminated Sacks' || canonical === 'Laminated Sack' || catLower.includes('sack')) return Number(lgu.laminatedSacks) || 0;
+  if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) return Number(lgu.rtef) || 0;
 
   return 0;
 }
@@ -165,13 +170,13 @@ export function computeSynchronizedLgus(params: {
     // 5. Baseline stock from record or emergency recount
     const rawStock = (lgu.currentStock && typeof lgu.currentStock === 'object') ? lgu.currentStock : {};
     const canonicalStock: Record<string, number> = {
-      'Food Pack': 0,
+      'Family Food Pack': 0,
       'Hygiene Kit': 0,
       'Family Kit': 0,
       'Sleeping Kit': 0,
       'Kitchen Kit': 0,
-      'Laminated Sack': 0,
-      'RTEF': 0
+      'Laminated Sacks': 0,
+      'Ready-to-Eat Food (RTEF)': 0
     };
 
     // First consolidate all keys in rawStock into their canonical names
@@ -184,13 +189,13 @@ export function computeSynchronizedLgus(params: {
     });
 
     // Merge dedicated columns from lgu record
-    canonicalStock['Food Pack'] = Math.max(canonicalStock['Food Pack'] || 0, Number(lgu.foodPacks) || 0);
+    canonicalStock['Family Food Pack'] = Math.max(canonicalStock['Family Food Pack'] || 0, Number(lgu.foodPacks) || 0);
     canonicalStock['Hygiene Kit'] = Math.max(canonicalStock['Hygiene Kit'] || 0, Number(lgu.hygieneKits) || 0);
     canonicalStock['Family Kit'] = Math.max(canonicalStock['Family Kit'] || 0, Number(lgu.familyKits) || 0);
     canonicalStock['Sleeping Kit'] = Math.max(canonicalStock['Sleeping Kit'] || 0, Number(lgu.sleepingKits) || 0);
     canonicalStock['Kitchen Kit'] = Math.max(canonicalStock['Kitchen Kit'] || 0, Number(lgu.kitchenKits) || 0);
-    canonicalStock['Laminated Sack'] = Math.max(canonicalStock['Laminated Sack'] || 0, Number(lgu.laminatedSacks) || 0);
-    canonicalStock['RTEF'] = Math.max(canonicalStock['RTEF'] || 0, Number(lgu.rtef) || 0);
+    canonicalStock['Laminated Sacks'] = Math.max(canonicalStock['Laminated Sacks'] || 0, Number(lgu.laminatedSacks) || 0);
+    canonicalStock['Ready-to-Eat Food (RTEF)'] = Math.max(canonicalStock['Ready-to-Eat Food (RTEF)'] || 0, Number(lgu.rtef) || 0);
 
     // 6. Verified direct incoming goods are already credited in lgu.foodPacks and lgu_stock
     // via backendApi.addLguStock during physical verification, so no in-memory addition is needed.
@@ -206,13 +211,13 @@ export function computeSynchronizedLgus(params: {
       }
     });
 
-    const foodPacks = canonicalStock['Food Pack'] || 0;
+    const foodPacks = canonicalStock['Family Food Pack'] || 0;
     const hygieneKits = canonicalStock['Hygiene Kit'] || 0;
     const familyKits = canonicalStock['Family Kit'] || 0;
     const sleepingKits = canonicalStock['Sleeping Kit'] || 0;
     const kitchenKits = canonicalStock['Kitchen Kit'] || 0;
-    const laminatedSacks = canonicalStock['Laminated Sack'] || 0;
-    const rtef = canonicalStock['RTEF'] || 0;
+    const laminatedSacks = canonicalStock['Laminated Sacks'] || 0;
+    const rtef = canonicalStock['Ready-to-Eat Food (RTEF)'] || 0;
 
     const maxStock = Number(lgu.maxStock) > 0 ? Number(lgu.maxStock) : 3000;
     const affectedFamilies = Number(lgu.affectedFamilies ?? 0);

@@ -45,7 +45,7 @@ export function EmergencyStockCorrectionModal({
 
   const categories = useMemo(() => {
     const canonicalSet = new Set<string>();
-    const standardCategories = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    const standardCategories = ['Family Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sacks', 'Ready-to-Eat Food (RTEF)'];
     standardCategories.forEach(cat => canonicalSet.add(cat));
 
     if (kitTypesList && kitTypesList.length > 0) {

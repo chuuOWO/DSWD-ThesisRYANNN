@@ -921,7 +921,7 @@ export function AddReleaseModal({
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <div className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-2xs">
                         <p className="text-[10px] text-gray-500 font-semibold">Food Packs</p>
-                        <p className="text-sm font-bold text-purple-950 font-mono">{(Number(sourceLguRecord.currentStock?.['Food Pack'] ?? sourceLguRecord.foodPacks) || 0).toLocaleString()}</p>
+                        <p className="text-sm font-bold text-purple-950 font-mono">{(Number(sourceLguRecord.currentStock?.['Family Food Pack'] ?? sourceLguRecord.currentStock?.['Food Pack'] ?? sourceLguRecord.foodPacks) || 0).toLocaleString()}</p>
                       </div>
                       <div className="bg-white rounded-lg p-2.5 border border-purple-100 shadow-2xs">
                         <p className="text-[10px] text-gray-500 font-semibold">Hygiene Kits</p>
@@ -939,11 +939,11 @@ export function AddReleaseModal({
 
                     {/* Additional Kit Categories if available */}
                     {Object.entries(sourceLguRecord.currentStock || {})
-                      .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit'].includes(k))
+                      .filter(([k, v]) => Number(v) > 0 && !['Family Food Pack', 'Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit'].includes(k))
                       .length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         {Object.entries(sourceLguRecord.currentStock || {})
-                          .filter(([k, v]) => Number(v) > 0 && !['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit'].includes(k))
+                          .filter(([k, v]) => Number(v) > 0 && !['Family Food Pack', 'Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit'].includes(k))
                           .map(([cat, qty]) => (
                             <span key={cat} className="text-[10px] px-2 py-0.5 rounded bg-white text-purple-900 border border-purple-200 font-medium">
                               {cat}: {Number(qty).toLocaleString()}

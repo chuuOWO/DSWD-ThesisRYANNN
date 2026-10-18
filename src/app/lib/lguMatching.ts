@@ -161,23 +161,23 @@ export function groupMunicipalitiesByProvince(lgus: LguRecord[]): Record<string,
 }
 
 export const DEFAULT_KIT_NAMES = [
-  'Food Pack',
+  'Family Food Pack',
   'Hygiene Kit',
   'Sleeping Kit',
   'Kitchen Kit',
   'Family Kit',
-  'Laminated Sack',
-  'RTEF'
+  'Laminated Sacks',
+  'Ready-to-Eat Food (RTEF)'
 ] as const;
 
 export const DEFAULT_KIT_TYPES = [
-  { id: 'kit-1', name: 'Food Pack', category: 'Food Item' as const, unitType: 'packs', description: 'Family Food Pack (6kg rice, canned goods, coffee, cereal)', isActive: true },
+  { id: 'kit-1', name: 'Family Food Pack', category: 'Food Item' as const, unitType: 'packs', description: 'Standard 6kg emergency nutritional food pack (rice, canned goods, coffee)', isActive: true },
   { id: 'kit-2', name: 'Hygiene Kit', category: 'Non-Food Item' as const, unitType: 'kits', description: 'Toothpaste, toothbrushes, bath soap, detergent, sanitary pads', isActive: true },
   { id: 'kit-3', name: 'Sleeping Kit', category: 'Non-Food Item' as const, unitType: 'kits', description: 'Blankets, sleeping mats, mosquito nets, pillowcases', isActive: true },
   { id: 'kit-4', name: 'Kitchen Kit', category: 'Non-Food Item' as const, unitType: 'kits', description: 'Cooking pots, frying pan, plates, cups, spoons, forks', isActive: true },
   { id: 'kit-5', name: 'Family Kit', category: 'Non-Food Item' as const, unitType: 'kits', description: 'Clothing apparel, bath towels, footwear for families', isActive: true },
-  { id: 'kit-6', name: 'Laminated Sack', category: 'Non-Food Item' as const, unitType: 'sacks', description: 'Heavy-duty weatherproofing tarpaulins for temporary roof shelters', isActive: true },
-  { id: 'kit-7', name: 'RTEF', category: 'Food Item' as const, unitType: 'packs', description: 'Ready-to-Eat Food / pre-cooked retort pouch meals', isActive: true }
+  { id: 'kit-6', name: 'Laminated Sacks', category: 'Non-Food Item' as const, unitType: 'sacks', description: 'Heavy-duty weatherproofing tarpaulins for temporary roof shelters', isActive: true },
+  { id: 'kit-7', name: 'Ready-to-Eat Food (RTEF)', category: 'Food Item' as const, unitType: 'packs', description: 'Ready-to-Eat Food / pre-cooked retort pouch meals', isActive: true }
 ];
 
 export const DEFAULT_WAREHOUSES: WarehouseRecord[] = [
@@ -197,13 +197,13 @@ export const DEFAULT_WAREHOUSES: WarehouseRecord[] = [
     laminatedSacks: 4000,
     rtef: 12000,
     currentStock: {
-      'Food Pack': 25000,
+      'Family Food Pack': 25000,
       'Hygiene Kit': 10000,
       'Sleeping Kit': 8000,
       'Kitchen Kit': 5000,
       'Family Kit': 6000,
-      'Laminated Sack': 4000,
-      'RTEF': 12000
+      'Laminated Sacks': 4000,
+      'Ready-to-Eat Food (RTEF)': 12000
     },
     isActive: true
   },
@@ -223,13 +223,13 @@ export const DEFAULT_WAREHOUSES: WarehouseRecord[] = [
     laminatedSacks: 3000,
     rtef: 9000,
     currentStock: {
-      'Food Pack': 18000,
+      'Family Food Pack': 18000,
       'Hygiene Kit': 7500,
       'Sleeping Kit': 6000,
       'Kitchen Kit': 4000,
       'Family Kit': 4500,
-      'Laminated Sack': 3000,
-      'RTEF': 9000
+      'Laminated Sacks': 3000,
+      'Ready-to-Eat Food (RTEF)': 9000
     },
     isActive: true
   }
@@ -271,13 +271,13 @@ const createDefaultLgu = (
   laminatedSacks: 0,
   rtef: 0,
   currentStock: {
-    'Food Pack': 0,
+    'Family Food Pack': 0,
     'Hygiene Kit': 0,
     'Sleeping Kit': 0,
     'Kitchen Kit': 0,
     'Family Kit': 0,
-    'Laminated Sack': 0,
-    'RTEF': 0
+    'Laminated Sacks': 0,
+    'Ready-to-Eat Food (RTEF)': 0
   },
   urgencyScore: 20,
   priorityColor: 'Green',

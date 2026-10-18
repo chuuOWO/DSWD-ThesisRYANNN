@@ -281,13 +281,13 @@ export function LGUDetailModal({
 
     // Standard priority relief categories
     const categories = [
-      'Food Pack',
+      'Family Food Pack',
       'Hygiene Kit',
-      'Family Kit',
       'Sleeping Kit',
       'Kitchen Kit',
-      'Laminated Sack',
-      'RTEF'
+      'Family Kit',
+      'Laminated Sacks',
+      'Ready-to-Eat Food (RTEF)'
     ];
 
     // Add any custom categories present in currentStock
@@ -743,13 +743,13 @@ export function LGUDetailModal({
                   className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
                 >
                   <option value="all">All Items &amp; Kits</option>
-                  <option value="Food Pack">Only Food Packs (FFP)</option>
+                  <option value="Family Food Pack">Only Family Food Packs (FFP)</option>
                   <option value="Hygiene Kit">Hygiene Kits</option>
                   <option value="Family Kit">Family Kits</option>
                   <option value="Sleeping Kit">Sleeping Kits</option>
                   <option value="Kitchen Kit">Kitchen Kits</option>
-                  <option value="Laminated Sack">Laminated Sacks</option>
-                  <option value="RTEF">RTEF</option>
+                  <option value="Laminated Sacks">Laminated Sacks</option>
+                  <option value="Ready-to-Eat Food (RTEF)">Ready-to-Eat Food (RTEF)</option>
                 </select>
               </div>
 

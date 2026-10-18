@@ -156,13 +156,13 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
     // 0. Start with every LGU from the Supabase master directory
     lgusList.forEach((lgu) => {
       ensureLgu(cleanLguName(lgu.municipality || lgu.lguName), {
-        'Food Pack': lgu.foodPacks || 0,
+        'Family Food Pack': lgu.foodPacks || 0,
         'Hygiene Kit': lgu.hygieneKits || 0,
         'Sleeping Kit': lgu.sleepingKits || 0,
         'Kitchen Kit': lgu.kitchenKits || 0,
         'Family Kit': lgu.familyKits || 0,
-        'Laminated Sack': lgu.laminatedSacks || 0,
-        RTEF: lgu.rtef || 0,
+        'Laminated Sacks': lgu.laminatedSacks || 0,
+        'Ready-to-Eat Food (RTEF)': lgu.rtef || 0,
         ...(lgu.currentStock ?? {})
       });
     });
@@ -188,7 +188,9 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
       const raw = report.municipality || report.lguName || 'Reported LGU';
       const lgu = cleanLguName(raw);
       const record = ensureLgu(lgu);
-      if ('Food Pack' in record || dynamicCategories.includes('Food Pack')) record['Food Pack'] = Math.max(record['Food Pack'] || 0, report.foodPacks || 0);
+      if ('Family Food Pack' in record || dynamicCategories.includes('Family Food Pack') || 'Food Pack' in record) {
+        record['Family Food Pack'] = Math.max(record['Family Food Pack'] || 0, record['Food Pack'] || 0, report.foodPacks || 0);
+      }
       if ('Hygiene Kit' in record || dynamicCategories.includes('Hygiene Kit')) record['Hygiene Kit'] = Math.max(record['Hygiene Kit'] || 0, report.hygieneKits || 0);
       if ('Family Kit' in record || dynamicCategories.includes('Family Kit')) record['Family Kit'] = Math.max(record['Family Kit'] || 0, report.familyKits || 0);
     });

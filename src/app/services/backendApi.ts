@@ -823,13 +823,13 @@ export const backendApi = {
 
       const rawStock = (row.current_stock && typeof row.current_stock === 'object') ? row.current_stock : {};
       const stockMerged: Record<string, number> = {
-        'Food Pack': foodPacks,
+        'Family Food Pack': foodPacks,
         'Hygiene Kit': hygieneKits,
         'Sleeping Kit': sleepingKits,
         'Kitchen Kit': kitchenKits,
         'Family Kit': familyKits,
-        'Laminated Sack': laminatedSacks,
-        'RTEF': rtef,
+        'Laminated Sacks': laminatedSacks,
+        'Ready-to-Eat Food (RTEF)': rtef,
         ...rawStock
       };
 
@@ -869,13 +869,13 @@ export const backendApi = {
         capacity_packs: payload.capacityPacks ?? 50000,
         latitude: payload.latitude ?? 10.6975,
         longitude: payload.longitude ?? 122.4764,
-        food_packs: payload.initialStock?.['Food Pack'] || 0,
+        food_packs: payload.initialStock?.['Family Food Pack'] ?? payload.initialStock?.['Food Pack'] ?? 0,
         hygiene_kits: payload.initialStock?.['Hygiene Kit'] || 0,
         sleeping_kits: payload.initialStock?.['Sleeping Kit'] || 0,
         kitchen_kits: payload.initialStock?.['Kitchen Kit'] || 0,
         family_kits: payload.initialStock?.['Family Kit'] || 0,
-        laminated_sacks: payload.initialStock?.['Laminated Sack'] || 0,
-        rtef: payload.initialStock?.['RTEF'] || 0,
+        laminated_sacks: payload.initialStock?.['Laminated Sacks'] ?? payload.initialStock?.['Laminated Sack'] ?? 0,
+        rtef: payload.initialStock?.['Ready-to-Eat Food (RTEF)'] ?? payload.initialStock?.['RTEF'] ?? 0,
         current_stock: payload.initialStock || {},
         is_active: true
       })
@@ -896,13 +896,16 @@ export const backendApi = {
 
     if (payload.initialStock) {
       updates.current_stock = payload.initialStock;
-      if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
+      if (payload.initialStock['Family Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Family Food Pack'];
+      else if (payload.initialStock['Food Pack'] !== undefined) updates.food_packs = payload.initialStock['Food Pack'];
       if (payload.initialStock['Hygiene Kit'] !== undefined) updates.hygiene_kits = payload.initialStock['Hygiene Kit'];
       if (payload.initialStock['Sleeping Kit'] !== undefined) updates.sleeping_kits = payload.initialStock['Sleeping Kit'];
       if (payload.initialStock['Kitchen Kit'] !== undefined) updates.kitchen_kits = payload.initialStock['Kitchen Kit'];
       if (payload.initialStock['Family Kit'] !== undefined) updates.family_kits = payload.initialStock['Family Kit'];
-      if (payload.initialStock['Laminated Sack'] !== undefined) updates.laminated_sacks = payload.initialStock['Laminated Sack'];
-      if (payload.initialStock['RTEF'] !== undefined) updates.rtef = payload.initialStock['RTEF'];
+      if (payload.initialStock['Laminated Sacks'] !== undefined) updates.laminated_sacks = payload.initialStock['Laminated Sacks'];
+      else if (payload.initialStock['Laminated Sack'] !== undefined) updates.laminated_sacks = payload.initialStock['Laminated Sack'];
+      if (payload.initialStock['Ready-to-Eat Food (RTEF)'] !== undefined) updates.rtef = payload.initialStock['Ready-to-Eat Food (RTEF)'];
+      else if (payload.initialStock['RTEF'] !== undefined) updates.rtef = payload.initialStock['RTEF'];
     }
 
     const { error } = await supabase.from('warehouses').update(updates).eq('id', id);
@@ -969,10 +972,16 @@ export const backendApi = {
 
       const canonical = normalizeCategoryName(category);
       const stockMap = { ...(wh.current_stock || {}) };
-      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const currentVal = stockMap[canonical] !== undefined
+        ? Number(stockMap[canonical])
+        : (canonical === 'Family Food Pack' && stockMap['Food Pack'] !== undefined
+            ? Number(stockMap['Food Pack'])
+            : (Number(stockMap[category]) || 0));
       const nextVal = Math.max(0, currentVal - quantity);
-      if (canonical) stockMap[canonical] = nextVal;
-      stockMap[category] = nextVal;
+      stockMap[canonical] = nextVal;
+      if (canonical === 'Family Food Pack' && 'Food Pack' in stockMap) {
+        delete stockMap['Food Pack'];
+      }
       updates.current_stock = stockMap;
 
       const { error } = await supabase.from('warehouses').update(updates).eq('id', wh.id);
@@ -1047,10 +1056,16 @@ export const backendApi = {
       }
 
       const stockMap = { ...(wh.current_stock || {}) };
-      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const currentVal = stockMap[canonical] !== undefined
+        ? Number(stockMap[canonical])
+        : (canonical === 'Family Food Pack' && stockMap['Food Pack'] !== undefined
+            ? Number(stockMap['Food Pack'])
+            : (Number(stockMap[category]) || 0));
       const nextVal = currentVal + quantity;
-      if (canonical) stockMap[canonical] = nextVal;
-      stockMap[category] = nextVal;
+      stockMap[canonical] = nextVal;
+      if (canonical === 'Family Food Pack' && 'Food Pack' in stockMap) {
+        delete stockMap['Food Pack'];
+      }
       updates.current_stock = stockMap;
 
       const { error } = await supabase.from('warehouses').update(updates).eq('id', wh.id);
@@ -1152,10 +1167,16 @@ export const backendApi = {
       }
 
       const stockMap = { ...(lgu.current_stock || {}) };
-      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const currentVal = stockMap[canonical] !== undefined
+        ? Number(stockMap[canonical])
+        : (canonical === 'Family Food Pack' && stockMap['Food Pack'] !== undefined
+            ? Number(stockMap['Food Pack'])
+            : (Number(stockMap[category]) || 0));
       const nextVal = Math.max(0, currentVal - quantity);
-      if (canonical) stockMap[canonical] = nextVal;
-      stockMap[category] = nextVal;
+      stockMap[canonical] = nextVal;
+      if (canonical === 'Family Food Pack' && 'Food Pack' in stockMap) {
+        delete stockMap['Food Pack'];
+      }
 
       const evalRes = evaluatePriorityIndicator({
         targetQuota: Number(lgu.max_stock ?? 3000),
@@ -1305,10 +1326,16 @@ export const backendApi = {
       }
 
       const stockMap = { ...(lgu.current_stock || {}) };
-      const currentVal = stockMap[canonical] !== undefined ? Number(stockMap[canonical]) : (Number(stockMap[category]) || 0);
+      const currentVal = stockMap[canonical] !== undefined
+        ? Number(stockMap[canonical])
+        : (canonical === 'Family Food Pack' && stockMap['Food Pack'] !== undefined
+            ? Number(stockMap['Food Pack'])
+            : (Number(stockMap[category]) || 0));
       const nextVal = currentVal + quantity;
-      if (canonical) stockMap[canonical] = nextVal;
-      stockMap[category] = nextVal;
+      stockMap[canonical] = nextVal;
+      if (canonical === 'Family Food Pack' && 'Food Pack' in stockMap) {
+        delete stockMap['Food Pack'];
+      }
 
       const evalRes = evaluatePriorityIndicator({
         targetQuota: Number(lgu.max_stock ?? 3000),
@@ -1686,13 +1713,13 @@ export const backendApi = {
         Object.entries(rawStock).forEach(([key, val]) => {
           const canonical = normalizeCategoryName(key);
           const num = Number(val) || 0;
-          if (canonical === 'Food Pack') extractedFoodPacks = Math.max(extractedFoodPacks, num);
+          if (canonical === 'Family Food Pack' || canonical === 'Food Pack') extractedFoodPacks = Math.max(extractedFoodPacks, num);
           else if (canonical === 'Hygiene Kit') extractedHygieneKits = Math.max(extractedHygieneKits, num);
           else if (canonical === 'Sleeping Kit') extractedSleepingKits = Math.max(extractedSleepingKits, num);
           else if (canonical === 'Kitchen Kit') extractedKitchenKits = Math.max(extractedKitchenKits, num);
           else if (canonical === 'Family Kit') extractedFamilyKits = Math.max(extractedFamilyKits, num);
-          else if (canonical === 'Laminated Sack') extractedLaminatedSacks = Math.max(extractedLaminatedSacks, num);
-          else if (canonical === 'RTEF') extractedRtef = Math.max(extractedRtef, num);
+          else if (canonical === 'Laminated Sacks' || canonical === 'Laminated Sack') extractedLaminatedSacks = Math.max(extractedLaminatedSacks, num);
+          else if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF') extractedRtef = Math.max(extractedRtef, num);
         });
 
         const foodPacks = extractedFoodPacks;
@@ -1714,19 +1741,19 @@ export const backendApi = {
         const priorityColor: 'Red' | 'Yellow' | 'Green' | 'Orange' = (row.priority_color as any) || evalRes.priorityColor;
 
         const stockMerged: Record<string, number> = {
-          'Food Pack': foodPacks,
+          'Family Food Pack': foodPacks,
           'Hygiene Kit': hygieneKits,
           'Sleeping Kit': sleepingKits,
           'Kitchen Kit': kitchenKits,
           'Family Kit': familyKits,
-          'Laminated Sack': laminatedSacks,
-          'RTEF': rtef
+          'Laminated Sacks': laminatedSacks,
+          'Ready-to-Eat Food (RTEF)': rtef
         };
 
         // Also preserve custom / dynamic non-standard categories
         Object.entries(rawStock).forEach(([key, val]) => {
           const canonical = normalizeCategoryName(key);
-          if (!['Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sack', 'RTEF'].includes(canonical)) {
+          if (!['Family Food Pack', 'Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sacks', 'Laminated Sack', 'Ready-to-Eat Food (RTEF)', 'RTEF'].includes(canonical)) {
             stockMerged[canonical || key] = Number(val) || 0;
           }
         });
@@ -1841,7 +1868,7 @@ export const backendApi = {
             municipality: payload.municipality.trim(),
             province: payload.province.trim(),
             lgu_name: payload.lguName.trim(),
-            food_packs: payload.initialStock['Food Pack'] || 0,
+            food_packs: payload.initialStock['Family Food Pack'] ?? payload.initialStock['Food Pack'] ?? 0,
             hygiene_kits: payload.initialStock['Hygiene Kit'] || 0,
             family_kits: payload.initialStock['Family Kit'] || 0,
             reported_at: new Date().toISOString()
@@ -1885,7 +1912,7 @@ export const backendApi = {
           canonicalInitial[k] = val;
         });
 
-        const foodReport = canonicalInitial['Food Pack'] || 0;
+        const foodReport = canonicalInitial['Family Food Pack'] ?? canonicalInitial['Food Pack'] ?? 0;
         const hygieneReport = canonicalInitial['Hygiene Kit'] || 0;
         const familyReport = canonicalInitial['Family Kit'] || 0;
         await supabase

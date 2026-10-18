@@ -378,7 +378,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
     const fromMaster = effectiveLgus.map((lgu) => {
       const key = lgu.municipality.trim().toLowerCase();
       const report = reportMap.get(key);
-      const onHandFoodPacks = getLguStockForCategory(lgu, 'Food Pack');
+      const onHandFoodPacks = getLguStockForCategory(lgu, 'Family Food Pack');
       const foodPacks = onHandFoodPacks > 0
         ? onHandFoodPacks
         : (lgu.foodPacks !== undefined && lgu.foodPacks !== null && lgu.foodPacks > 0)
@@ -680,7 +680,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
 
   // CHART 3: Stock vs Demand & Shortage Analysis
   const stockVsDemandData = useMemo(() => {
-    const defaultCats = ['Food Pack', 'Hygiene Kit', 'Family Kit', 'Sleeping Kit', 'Kitchen Kit', 'Laminated Sack', 'RTEF'];
+    const defaultCats = ['Family Food Pack', 'Hygiene Kit', 'Sleeping Kit', 'Kitchen Kit', 'Family Kit', 'Laminated Sacks', 'Ready-to-Eat Food (RTEF)'];
     const catSet = new Set<string>(defaultCats);
     kitTypesList.forEach(k => {
       const canonical = normalizeCategoryName(k.name);
