@@ -11,7 +11,7 @@ import {
   Building2,
   CheckCircle2
 } from 'lucide-react';
-import type { InventoryBatchRecord, KitTypeRecord, LguRecord } from '../../services/backendApi';
+import type { InventoryBatchRecord, KitTypeRecord, LguRecord, WarehouseRecord } from '../../services/backendApi';
 import { normalizeCategoryName } from '../../lib/lguSync';
 import {
   EXPIRY_THRESHOLDS,
@@ -25,6 +25,7 @@ interface FefoLotsLedgerTableProps {
   allBatches: InventoryBatchRecord[];
   dynamicCategories: string[];
   kitTypesList?: KitTypeRecord[];
+  warehousesList?: WarehouseRecord[];
   lgusList?: LguRecord[];
   isBatchesLoading?: boolean;
   onRefreshBatches?: () => void;
@@ -35,6 +36,7 @@ export function FefoLotsLedgerTable({
   allBatches,
   dynamicCategories,
   kitTypesList = [],
+  warehousesList = [],
   lgusList = [],
   isBatchesLoading = false,
   onRefreshBatches,
@@ -63,11 +65,16 @@ export function FefoLotsLedgerTable({
       const norm = normalizeCategoryName(batch.kitTypeId);
       if (norm) return norm;
     }
-    return batch.kitName || batch.kitTypeId || 'Relief Goods';
+    return 'Family Food Pack';
   };
 
   const resolveBatchFacility = (batch: InventoryBatchRecord): string => {
     if (batch.warehouseId) {
+      const foundWh = warehousesList.find(
+        (w) => w.id === batch.warehouseId || w.name.toLowerCase() === batch.warehouseId?.toLowerCase()
+      );
+      if (foundWh) return foundWh.name;
+
       const lower = batch.warehouseId.toLowerCase();
       if (lower.includes('oton')) return 'Oton Main Warehouse';
       if (lower.includes('pototan')) return 'Pototan Main Warehouse';
@@ -134,7 +141,7 @@ export function FefoLotsLedgerTable({
     });
 
     return result;
-  }, [allBatches, fefoSearchQuery, fefoUrgencyFilter, fefoCategoryFilter, fefoFacilityFilter, fefoSortOrder, kitTypesList, lgusList]);
+  }, [allBatches, fefoSearchQuery, fefoUrgencyFilter, fefoCategoryFilter, fefoFacilityFilter, fefoSortOrder, kitTypesList, lgusList, warehousesList]);
 
   // FEFO Metrics Summary across all active batches
   const fefoMetrics = useMemo(() => {

@@ -20,7 +20,7 @@ import {
   Layers
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { backendApi, type LguRecord, type KitTypeRecord, type InventoryBatchRecord } from '../../services/backendApi';
+import { backendApi, type LguRecord, type KitTypeRecord, type InventoryBatchRecord, type WarehouseRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
 import { normalizeCategoryName } from '../../lib/lguSync';
 import type { UserProfile } from '../../services/authApi';
@@ -41,6 +41,7 @@ interface InventoryState {
   lguPriorityReports: LGUPriorityReport[];
   lgusList?: LguRecord[];
   kitTypesList?: KitTypeRecord[];
+  warehousesList?: WarehouseRecord[];
   addStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => void;
   deductStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse', quantity: number) => boolean;
   getAvailableStock: (category: string, warehouse: 'Oton Main Warehouse' | 'Pototan Main Warehouse') => number;
@@ -62,7 +63,7 @@ interface InventoryItem {
 }
 
 export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryMonitoringProps) {
-  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [], kitTypesList = [] } = inventoryState;
+  const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [], kitTypesList = [], warehousesList = [] } = inventoryState;
 
   // Primary facility scope filter: defaults to Main Warehouses (Oton & Pototan)
   const [facilityScope, setFacilityScope] = useState<'main' | 'oton' | 'pototan' | 'all' | 'lgu'>('main');
@@ -818,6 +819,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
           allBatches={allBatches}
           dynamicCategories={dynamicCategories}
           kitTypesList={kitTypesList}
+          warehousesList={warehousesList}
           lgusList={lgusList}
           isBatchesLoading={isBatchesLoading}
           onRefreshBatches={loadBatches}

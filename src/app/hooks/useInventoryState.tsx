@@ -1527,10 +1527,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     if (release.allocatedBatches && release.allocatedBatches.length > 0) {
       if (release.allocatedBatches.length === 1) {
         const b = release.allocatedBatches[0];
+        const authenticTokenId = (b.batchTokenId && !b.batchTokenId.includes(cleanDr))
+          ? b.batchTokenId
+          : (b.batchNumber ? `BATCH-${b.batchNumber}` : `BATCH-${cleanDr}`);
         allocations = [{
           ...b,
           batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
-          batchTokenId: `BATCH-${cleanDr}`,
+          batchTokenId: authenticTokenId,
           quantity: amountApproved
         }];
       } else {
@@ -1539,12 +1542,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         for (let idx = 0; idx < release.allocatedBatches.length; idx++) {
           const b = release.allocatedBatches[idx];
           if (remaining <= 0) break;
-          const uniqueTokenId = `BATCH-${cleanDr}-${idx + 1}`;
+          const authenticTokenId = (b.batchTokenId && !b.batchTokenId.includes(cleanDr))
+            ? b.batchTokenId
+            : (b.batchNumber ? `BATCH-${b.batchNumber}` : `BATCH-${cleanDr}-${idx + 1}`);
           if (idx === release.allocatedBatches.length - 1) {
             mapped.push({
               ...b,
               batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
-              batchTokenId: uniqueTokenId,
+              batchTokenId: authenticTokenId,
               quantity: remaining
             });
             remaining = 0;
@@ -1555,7 +1560,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
               mapped.push({
                 ...b,
                 batchNumber: b.batchNumber || b.batchTokenId?.replace(/^BATCH-/, '') || release.drNumber,
-                batchTokenId: uniqueTokenId,
+                batchTokenId: authenticTokenId,
                 quantity: takeQty
               });
               remaining -= takeQty;
@@ -1696,7 +1701,108 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         .catch(err => console.warn('Supabase deductLguStock error:', err));
     }
 
+    // Deduct batches in local state for instantaneous FEFO reflect
+    if (allocations && allocations.length > 0) {
+      setInventoryBatchesList(prev => prev.map(batch => {
+        const matchAlloc = allocations.find(a =>
+          a.batchTokenId === batch.batchTokenId ||
+          (a.batchNumber && batch.batchTokenId.includes(a.batchNumber))
+        );
+        if (matchAlloc) {
+          return {
+            ...batch,
+            remainingQuantity: Math.max(0, batch.remainingQuantity - (Number(matchAlloc.quantity) || 0))
+          };
+        }
+        return batch;
+      }));
+    }
+
     return { ok: true, message: `Release approved! Batch token ${batchTokenId} minted on blockchain with Admin signature.` };
+  };
+
+  const cancelApproval = async (drNumber: string): Promise<{ ok: boolean; message?: string }> => {
+    const release = outgoingReleasesList.find(r => r.drNumber === drNumber);
+    if (!release) return { ok: false, message: 'Release not found.' };
+    if (!['Approved', 'Packed'].includes(release.deliveryStatus)) {
+      return { ok: false, message: 'Only Approved or Packed releases can have approval cancelled.' };
+    }
+
+    const approvedQty = release.amountApproved || release.amountRequested || 0;
+
+    try {
+      // 1. Call backendApi to rollback in Supabase
+      const res = await backendApi.cancelOutgoingApproval(drNumber);
+      if (!res.ok) {
+        return { ok: false, message: res.message || 'Failed to cancel approval in database.' };
+      }
+
+      // 2. Restore warehouse stock in local state
+      if (isMainWarehouse(release.warehouseSource) && approvedQty > 0) {
+        setWarehousesList(prev => {
+          const updated = prev.map(wh => {
+            const matchName = release.warehouseSource.replace(/main|warehouse/gi, '').trim().toLowerCase();
+            if (!wh.name.toLowerCase().includes(matchName)) return wh;
+            const catLower = release.fnfiCategory.toLowerCase();
+            const newWh = { ...wh };
+            if (catLower.includes('food pack')) newWh.foodPacks = (wh.foodPacks || 0) + approvedQty;
+            else if (catLower.includes('hygiene')) newWh.hygieneKits = (wh.hygieneKits || 0) + approvedQty;
+            else if (catLower.includes('sleeping')) newWh.sleepingKits = (wh.sleepingKits || 0) + approvedQty;
+            else if (catLower.includes('kitchen')) newWh.kitchenKits = (wh.kitchenKits || 0) + approvedQty;
+            else if (catLower.includes('family kit')) newWh.familyKits = (wh.familyKits || 0) + approvedQty;
+            else if (catLower.includes('sack')) newWh.laminatedSacks = (wh.laminatedSacks || 0) + approvedQty;
+            else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) newWh.rtef = (wh.rtef || 0) + approvedQty;
+
+            if (newWh.currentStock && newWh.currentStock[release.fnfiCategory] !== undefined) {
+              newWh.currentStock = {
+                ...newWh.currentStock,
+                [release.fnfiCategory]: (newWh.currentStock[release.fnfiCategory] || 0) + approvedQty
+              };
+            }
+            return newWh;
+          });
+          setInventory(calculateWarehouseInventory(updated, kitTypesList));
+          return updated;
+        });
+      }
+
+      // 3. Restore inventory batches in local state
+      if (release.allocatedBatches && release.allocatedBatches.length > 0) {
+        setInventoryBatchesList(prev => prev.map(batch => {
+          const matchAlloc = release.allocatedBatches?.find(a =>
+            a.batchTokenId === batch.batchTokenId ||
+            (a.batchNumber && batch.batchTokenId.includes(a.batchNumber))
+          );
+          if (matchAlloc) {
+            return {
+              ...batch,
+              remainingQuantity: batch.remainingQuantity + (Number(matchAlloc.quantity) || 0)
+            };
+          }
+          return batch;
+        }));
+      }
+
+      // 4. Update outgoing releases list: revert to Allocating
+      setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
+        ? {
+            ...item,
+            deliveryStatus: 'Allocating',
+            amountApproved: undefined,
+            adminSignature: '',
+            blockchainTxHash: '',
+            auditTrail: [
+              audit('Approval Cancelled', `Admin cancelled release approval. Allocated stock restored to tables.`),
+              ...item.auditTrail
+            ]
+          }
+        : item));
+
+      return { ok: true, message: `Approval cancelled for ${drNumber}. Allocated stock has been restored to tables.` };
+    } catch (err: any) {
+      logBackendError('Cancel outgoing approval')(err);
+      return { ok: false, message: err?.message || 'Failed to cancel approval.' };
+    }
   };
 
   const senderSignAndRelease = async (drNumber: string, actorRole: UserRole = 'Receiver') => {
@@ -2358,6 +2464,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     addOutgoingRelease,
     updateOutgoingRelease,
     approveAllocation,
+    cancelApproval,
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,

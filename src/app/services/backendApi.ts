@@ -2181,6 +2181,113 @@ export const backendApi = {
     return { ok: true };
   },
 
+  async cancelOutgoingApproval(drNumber: string): Promise<{ ok: boolean; message?: string }> {
+    try {
+      const canonicalDr = drNumber.trim();
+      const { data: releaseRow, error: fetchErr } = await supabase
+        .from('outgoing_requests')
+        .select('*')
+        .ilike('dr_number', canonicalDr)
+        .maybeSingle();
+
+      if (fetchErr || !releaseRow) {
+        return { ok: false, message: 'Outgoing release not found.' };
+      }
+
+      const approvedQty = Number(releaseRow.amount_approved || releaseRow.amount_requested || 0);
+      const category = releaseRow.category || 'Family Food Pack';
+      const sourceType = releaseRow.source_type || 'Warehouse';
+      const sourceName = releaseRow.warehouse_source || releaseRow.lgu_name;
+
+      // 1. Restore batch remaining quantities in inventory_batches
+      const allocations = (releaseRow.allocated_batches || []) as Array<{
+        batchTokenId?: string;
+        batchNumber?: string;
+        quantity?: number;
+      }>;
+
+      for (const alloc of allocations) {
+        const allocQty = Number(alloc.quantity || 0);
+        if (allocQty <= 0) continue;
+
+        let batchRow: { batch_token_id: string; remaining_quantity: number } | null = null;
+        if (alloc.batchTokenId) {
+          const { data } = await supabase
+            .from('inventory_batches')
+            .select('batch_token_id, remaining_quantity')
+            .eq('batch_token_id', alloc.batchTokenId)
+            .maybeSingle();
+          if (data) batchRow = data;
+        }
+
+        if (!batchRow && alloc.batchNumber) {
+          const { data } = await supabase
+            .from('inventory_batches')
+            .select('batch_token_id, remaining_quantity')
+            .ilike('batch_token_id', `%${alloc.batchNumber}%`)
+            .maybeSingle();
+          if (data) batchRow = data;
+        }
+
+        if (batchRow) {
+          const restoredQty = Number(batchRow.remaining_quantity || 0) + allocQty;
+          await supabase
+            .from('inventory_batches')
+            .update({ remaining_quantity: restoredQty })
+            .eq('batch_token_id', batchRow.batch_token_id);
+        }
+      }
+
+      // 2. Delete outgoing_batch_allocations for this DR
+      await supabase
+        .from('outgoing_batch_allocations')
+        .delete()
+        .eq('outgoing_request_id', releaseRow.dr_number);
+
+      // 3. Restore warehouse or LGU stock
+      if (sourceName && approvedQty > 0) {
+        if (sourceType === 'Warehouse') {
+          await this.addWarehouseStock(sourceName, category, approvedQty);
+        } else {
+          await this.addLguStock(sourceName, category, approvedQty);
+        }
+      }
+
+      // 4. Update outgoing_requests back to Allocating
+      const { error: updateErr } = await supabase
+        .from('outgoing_requests')
+        .update({
+          delivery_status: 'Allocating',
+          amount_approved: null,
+          admin_signature: '',
+          tx_hash: ''
+        })
+        .eq('id', releaseRow.id);
+
+      if (updateErr) {
+        throw updateErr;
+      }
+
+      // 5. Append stock ledger movement for rollback
+      await this.appendStockLedger({
+        facilityType: sourceType,
+        warehouseId: releaseRow.source_warehouse_id,
+        lguId: releaseRow.source_lgu_id,
+        kitTypeId: releaseRow.kit_type_id || category,
+        deltaQuantity: approvedQty,
+        balanceAfter: 0,
+        movementType: 'APPROVAL_CANCELLED',
+        referenceDrId: releaseRow.dr_number,
+        drNumber: releaseRow.dr_number
+      }).catch(err => console.warn('appendStockLedger error on cancel approval:', err));
+
+      return { ok: true };
+    } catch (err: any) {
+      console.error('cancelOutgoingApproval error:', err);
+      return { ok: false, message: err?.message || 'Failed to cancel approval' };
+    }
+  },
+
 
   async createLGUInventoryReport(payload: LGUInventoryReportPayload) {
     let resolvedLguId = isUuid(payload.lguId) ? payload.lguId : null;
@@ -3295,18 +3402,31 @@ export const backendApi = {
           allocated_at: new Date().toISOString()
         });
 
-        const { data: batch } = await supabase
-          .from('inventory_batches')
-          .select('remaining_quantity')
-          .eq('batch_token_id', alloc.batchTokenId)
-          .maybeSingle();
+        let batchRow: { batch_token_id: string; remaining_quantity: number } | null = null;
+        if (alloc.batchTokenId) {
+          const { data } = await supabase
+            .from('inventory_batches')
+            .select('batch_token_id, remaining_quantity')
+            .eq('batch_token_id', alloc.batchTokenId)
+            .maybeSingle();
+          if (data) batchRow = data;
+        }
 
-        if (batch) {
-          const newQty = Math.max(0, Number(batch.remaining_quantity ?? 0) - alloc.quantity);
+        if (!batchRow && (alloc as any).batchNumber) {
+          const { data } = await supabase
+            .from('inventory_batches')
+            .select('batch_token_id, remaining_quantity')
+            .ilike('batch_token_id', `%${(alloc as any).batchNumber}%`)
+            .maybeSingle();
+          if (data) batchRow = data;
+        }
+
+        if (batchRow) {
+          const newQty = Math.max(0, Number(batchRow.remaining_quantity ?? 0) - alloc.quantity);
           await supabase
             .from('inventory_batches')
             .update({ remaining_quantity: newQty })
-            .eq('batch_token_id', alloc.batchTokenId);
+            .eq('batch_token_id', batchRow.batch_token_id);
         }
       }
       return { ok: true };
@@ -3431,25 +3551,38 @@ export const backendApi = {
       for (const alloc of allocations) {
         if (!alloc.quantity || alloc.quantity <= 0) continue;
 
-        const { data: batch } = await supabase
-          .from('inventory_batches')
-          .select('remaining_quantity')
-          .eq('batch_token_id', alloc.batchTokenId)
-          .maybeSingle();
+        let batchRow: { batch_token_id: string; remaining_quantity: number } | null = null;
+        if (alloc.batchTokenId) {
+          const { data } = await supabase
+            .from('inventory_batches')
+            .select('batch_token_id, remaining_quantity')
+            .eq('batch_token_id', alloc.batchTokenId)
+            .maybeSingle();
+          if (data) batchRow = data;
+        }
 
-        if (batch) {
-          const newQty = Math.max(0, Number(batch.remaining_quantity || 0) - alloc.quantity);
+        if (!batchRow && (alloc as any).batchNumber) {
+          const { data } = await supabase
+            .from('inventory_batches')
+            .select('batch_token_id, remaining_quantity')
+            .ilike('batch_token_id', `%${(alloc as any).batchNumber}%`)
+            .maybeSingle();
+          if (data) batchRow = data;
+        }
+
+        if (batchRow) {
+          const newQty = Math.max(0, Number(batchRow.remaining_quantity || 0) - alloc.quantity);
           await supabase
             .from('inventory_batches')
             .update({ remaining_quantity: newQty })
-            .eq('batch_token_id', alloc.batchTokenId);
+            .eq('batch_token_id', batchRow.batch_token_id);
         }
 
         await supabase
           .from('outgoing_batch_allocations')
           .insert({
             outgoing_request_id: canonicalDr,
-            batch_token_id: alloc.batchTokenId,
+            batch_token_id: batchRow ? batchRow.batch_token_id : alloc.batchTokenId,
             allocated_quantity: alloc.quantity,
             allocated_at: new Date().toISOString()
           });

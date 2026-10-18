@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { CheckCircle, ChevronLeft, ChevronRight, Edit, Loader2, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronLeft, ChevronRight, Edit, Loader2, MapPin, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { parseIncidentInfo } from '../../lib/incidentHelper';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
@@ -22,6 +22,7 @@ interface InventoryState {
   addOutgoingRelease: (data: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'> & { allocatedBatches?: any[] }) => void;
   updateOutgoingRelease: (drNumber: string, patch: Partial<OutgoingRelease>) => void;
   approveAllocation: (drNumber: string, amountApproved: number) => Promise<{ ok: boolean; message: string }>;
+  cancelApproval?: (drNumber: string) => Promise<{ ok: boolean; message?: string }>;
   senderSignAndRelease: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
   markInTransit: (drNumber: string) => void;
   receiverAcceptWithGps: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
@@ -68,6 +69,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     addOutgoingRelease,
     updateOutgoingRelease,
     approveAllocation,
+    cancelApproval,
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,
@@ -88,6 +90,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [selectedRelease, setSelectedRelease] = useState<OutgoingRelease | null>(null);
   const [approvalAmount, setApprovalAmount] = useState(0);
   const [isApproving, setIsApproving] = useState(false);
+  const [cancelApprovalRelease, setCancelApprovalRelease] = useState<OutgoingRelease | null>(null);
+  const [isCancellingApproval, setIsCancellingApproval] = useState(false);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [actionModal, setActionModal] = useState<ReleaseActionModalState | null>(null);
   const [qrModalRelease, setQrModalRelease] = useState<OutgoingRelease | null>(null);
@@ -175,6 +179,20 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       setActionModal({ type: 'message', message: err instanceof Error ? err.message : 'Approval and minting failed.' });
     } finally {
       setIsApproving(false);
+    }
+  };
+
+  const handleConfirmCancelApproval = async () => {
+    if (!cancelApprovalRelease || !cancelApproval || isCancellingApproval) return;
+    setIsCancellingApproval(true);
+    try {
+      const result = await cancelApproval(cancelApprovalRelease.drNumber);
+      setCancelApprovalRelease(null);
+      setActionModal({ type: 'message', message: result.message || 'Approval cancelled.' });
+    } catch (err) {
+      setActionModal({ type: 'message', message: err instanceof Error ? err.message : 'Failed to cancel approval.' });
+    } finally {
+      setIsCancellingApproval(false);
     }
   };
 
@@ -523,9 +541,24 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                         </button>
                       )}
                       {['Approved', 'Packed'].includes(release.deliveryStatus) && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
-                          <QrCode className="w-3.5 h-3.5 text-amber-600" /> Awaiting Escort Scan
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
+                            <QrCode className="w-3.5 h-3.5 text-amber-600" /> Awaiting Escort Scan
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCancelApprovalRelease(release)}
+                            disabled={currentRole !== 'Admin'}
+                            title={currentRole !== 'Admin' ? 'Admin privileges required to cancel approval' : 'Cancel approval and return stock to tables'}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition ${
+                              currentRole === 'Admin'
+                                ? 'bg-red-50 text-red-700 hover:bg-red-100 border-red-200 cursor-pointer'
+                                : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                            }`}
+                          >
+                            <RotateCcw className="w-3 h-3" /> Cancel Approval
+                          </button>
+                        </div>
                       )}
                       {['In Transit', 'Delivered'].includes(release.deliveryStatus) && (
                         <button
@@ -842,6 +875,67 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   </>
                 ) : (
                   'Confirm'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cancelApprovalRelease && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-red-50">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+                <h2 className="text-lg font-bold text-gray-900">Cancel Release Approval</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancelApprovalRelease(null)}
+                disabled={isCancellingApproval}
+                className="p-2 rounded-lg hover:bg-red-100"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-gray-700">
+                Are you sure you want to cancel the approval for <strong className="font-semibold text-gray-900">{cancelApprovalRelease.drNumber}</strong>?
+              </p>
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1">
+                <p className="font-bold">What will happen:</p>
+                <ul className="list-disc list-inside space-y-0.5">
+                  <li>Allocated batch units (<span className="font-semibold">{cancelApprovalRelease.amountApproved || cancelApprovalRelease.amountRequested} {cancelApprovalRelease.category || 'items'}</span>) will be restored to warehouse stock and FEFO lots.</li>
+                  <li>The release status will revert back to <span className="font-semibold text-yellow-800">Allocating</span>.</li>
+                  <li>You will be able to edit quantities, re-allocate batches, or re-approve the request.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex gap-3 px-6 pb-6">
+              <button
+                type="button"
+                onClick={() => setCancelApprovalRelease(null)}
+                disabled={isCancellingApproval}
+                className="flex-1 px-5 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Keep Approved
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelApproval}
+                disabled={isCancellingApproval}
+                className="flex-1 px-5 py-2.5 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              >
+                {isCancellingApproval ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Cancelling...</span>
+                  </>
+                ) : (
+                  'Confirm Cancel'
                 )}
               </button>
             </div>
