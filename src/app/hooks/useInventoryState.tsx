@@ -84,6 +84,8 @@ export interface IncomingGoods {
 
 export interface BatchAllocation {
   batchTokenId: string;
+  batchNumber?: string;
+  expirationDate?: string;
   quantity: number;
 }
 
