@@ -52,10 +52,13 @@ export function FefoLotsLedgerTable({
   const [fefoPage, setFefoPage] = useState(1);
   const fefoPageSize = 10;
 
+  const isUuidString = (str?: string | null) =>
+    Boolean(str && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim()));
+
   const resolveBatchCategory = (batch: InventoryBatchRecord): string => {
     if (batch.kitName) {
       const norm = normalizeCategoryName(batch.kitName);
-      if (norm) return norm;
+      if (norm && !isUuidString(norm)) return norm;
     }
     if (batch.kitTypeId) {
       const found = kitTypesList.find(
@@ -63,7 +66,7 @@ export function FefoLotsLedgerTable({
       );
       if (found) return normalizeCategoryName(found.name) || found.name;
       const norm = normalizeCategoryName(batch.kitTypeId);
-      if (norm) return norm;
+      if (norm && !isUuidString(norm)) return norm;
     }
     return 'Family Food Pack';
   };

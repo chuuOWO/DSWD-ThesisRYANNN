@@ -3,7 +3,7 @@ import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Pac
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
-import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
+import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord, LguRecord, ProvinceRecord, InventoryBatchRecord } from '../../services/backendApi';
 import {
   EXPIRY_THRESHOLDS,
   getDaysRemaining,
@@ -13,6 +13,7 @@ import {
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
+  inventoryBatchesList?: InventoryBatchRecord[];
   discrepancyReports: DiscrepancyReport[];
   warehousesList?: WarehouseRecord[];
   supplySourcesList?: SupplySourceRecord[];
@@ -72,6 +73,7 @@ interface IncomingActionModalState {
 export function IncomingModule({ inventoryState, currentRole }: IncomingModuleProps) {
   const {
     incomingGoodsList,
+    inventoryBatchesList = [],
     addIncomingGoods,
     updateIncomingGoods,
     submitIncomingForVerification,
@@ -253,10 +255,24 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       .map(item => {
         const daysRemaining = getDaysRemaining(item.expirationDate);
         const tier = getExpiryTier(item.expirationDate);
+
+        // Match against live inventory_batches to get remainingQuantity
+        const matchedBatch = inventoryBatchesList.find(b =>
+          (item.batchTokenId && b.batchTokenId === item.batchTokenId) ||
+          (item.manifestHash && b.manifestHash && b.manifestHash === item.manifestHash) ||
+          (b.batchTokenId && (b.batchTokenId === item.id || b.batchTokenId.includes(item.id))) ||
+          (b.incomingManifestId && (b.incomingManifestId === item.id || b.incomingManifestId.includes(item.id)))
+        );
+
+        const remainingQuantity = matchedBatch
+          ? Math.max(0, Number(matchedBatch.remainingQuantity || 0))
+          : Number(item.quantity || 0);
+
         return {
           ...item,
           daysRemaining,
-          tier
+          tier,
+          remainingQuantity
         };
       })
       .sort((a, b) => a.daysRemaining - b.daysRemaining);
@@ -266,13 +282,13 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     const safeItems = itemsWithDays.filter(i => i.tier === 'safe');
 
     const criticalCount = criticalItems.length;
-    const criticalQty = criticalItems.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+    const criticalQty = criticalItems.reduce((sum, i) => sum + Number(i.remainingQuantity ?? i.quantity ?? 0), 0);
 
     const moderateCount = moderateItems.length;
-    const moderateQty = moderateItems.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+    const moderateQty = moderateItems.reduce((sum, i) => sum + Number(i.remainingQuantity ?? i.quantity ?? 0), 0);
 
     const safeCount = safeItems.length;
-    const safeQty = safeItems.reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+    const safeQty = safeItems.reduce((sum, i) => sum + Number(i.remainingQuantity ?? i.quantity ?? 0), 0);
 
     return {
       all: itemsWithDays,
@@ -284,7 +300,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       safeCount,
       safeQty
     };
-  }, [incomingGoodsList]);
+  }, [incomingGoodsList, inventoryBatchesList]);
 
   // Most recent 5 incoming deliveries for the activity stream
   const recentIntakes = useMemo(() => {
@@ -657,7 +673,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mt-0.5">
-                          <span>{item.quantity.toLocaleString()} {item.unitType}</span>
+                          <span>{((item as any).remainingQuantity ?? item.quantity).toLocaleString()} {item.unitType || 'packs'}</span>
                           <span>&middot;</span>
                           <span className="font-medium text-gray-700">{item.destination}</span>
                         </div>
