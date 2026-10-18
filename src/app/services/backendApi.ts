@@ -2265,7 +2265,7 @@ export const backendApi = {
         .update({
           delivery_status: 'Cancelled',
           allocated_batches: [],
-          amount_approved: null,
+          amount_approved: 0,
           admin_signature: '',
           tx_hash: ''
         })

@@ -58,6 +58,7 @@ interface ReleaseActionModalState {
   requestedAmount?: number;
   note?: string;
   message?: string;
+  title?: string;
 }
 
 export function OutgoingModule({ inventoryState, currentRole }: OutgoingModuleProps) {
@@ -188,9 +189,13 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     try {
       const result = await cancelOutgoingRelease(cancellingRelease.drNumber);
       setCancellingRelease(null);
-      setActionModal({ type: 'message', message: result.message || 'Release cancelled.' });
+      if (!result.ok) {
+        setActionModal({ type: 'message', title: 'Cancellation Failed', message: result.message || 'Failed to cancel release.' });
+      } else {
+        setActionModal({ type: 'message', title: 'Successful!', message: result.message || 'Release cancelled.' });
+      }
     } catch (err) {
-      setActionModal({ type: 'message', message: err instanceof Error ? err.message : 'Failed to cancel release.' });
+      setActionModal({ type: 'message', title: 'Cancellation Failed', message: err instanceof Error ? err.message : 'Failed to cancel release.' });
     } finally {
       setIsCancellingRelease(false);
     }
@@ -805,7 +810,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           isOpen={true}
           onClose={closeActionModal}
           message={actionModal.message}
-          title="Successful!"
+          title={actionModal.title || 'Successful!'}
           buttonText="Done"
         />
       )}

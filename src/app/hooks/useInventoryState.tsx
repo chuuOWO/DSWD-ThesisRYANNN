@@ -1790,7 +1790,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
             ...item,
             deliveryStatus: 'Cancelled',
             allocatedBatches: [],
-            amountApproved: undefined,
+            amountApproved: 0,
             auditTrail: [
               audit('Release Cancelled', `Outgoing request cancelled before approval. Allocated stock restored to warehouse and FEFO lots.`),
               ...item.auditTrail
