@@ -774,6 +774,7 @@ export const blockchain = {
     }
 
     const task = (async () => {
+      onStage?.('wallet');
       const signer = await getSigner();
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
       onStage?.('mining');
@@ -782,7 +783,8 @@ export const blockchain = {
         input.drNumber,
         input.newDriverWallet,
         input.gps,
-        input.note || 'Transshipment Relay'
+        input.note || 'Transshipment Relay',
+        { gasLimit: 950000n }
       );
       onStage?.('mining', tx.hash);
       const receipt = await tx.wait(1);

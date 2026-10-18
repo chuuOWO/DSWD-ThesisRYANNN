@@ -2331,7 +2331,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   ? 'Transaction broadcast! Waiting for Sepolia block confirmation...'
                   : signError
                   ? signError
-                  : 'Submitting sponsored transaction to Alchemy Paymaster...'
+                  : 'Broadcasting transaction via Sepolia Relayer...'
               }
               onRetry={isSubmittingProof ? undefined : () => void handleExecuteCustodySign()}
               onClose={() => {
@@ -2461,11 +2461,17 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   {hasActiveVehicleSession ? (
                     <button
                       type="button"
+                      disabled={!pendingCustody}
                       onClick={() => {
+                        if (!pendingCustody) return;
                         setSelectedTruckId(activeTruckId);
                         nav('sign_custody');
+                        void handleExecuteCustodySign({
+                          ...pendingCustody,
+                          truckId: activeTruckId
+                        });
                       }}
-                      className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                      className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
                     >
                       <span>Load onto {activeTruckId} & Sign</span>
                       <ChevronRight size={14} />
@@ -2473,8 +2479,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   ) : (
                     <button
                       type="button"
+                      disabled={!pendingCustody}
                       onClick={() => nav('select_truck')}
-                      className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                      className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
                     >
                       <span>Next: Assign Vehicle</span>
                       <ChevronRight size={14} />
