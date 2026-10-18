@@ -1729,7 +1729,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }
 
     const totalAllocQty = (release.allocatedBatches || []).reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
-    const qtyToRestore = totalAllocQty > 0 ? totalAllocQty : Number(release.amountRequested || 0);
+    const qtyToRestore = totalAllocQty;
 
     try {
       // 1. Call backendApi to cancel and rollback in Supabase

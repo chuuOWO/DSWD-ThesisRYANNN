@@ -2249,8 +2249,8 @@ export const backendApi = {
         .delete()
         .eq('outgoing_request_id', releaseRow.dr_number);
 
-      // 3. Restore warehouse or LGU stock if stock was deducted upon creation
-      const qtyToRestore = totalAllocQty > 0 ? totalAllocQty : Number(releaseRow.amount_requested || 0);
+      // 3. Restore warehouse or LGU stock only if batches were actually allocated and deducted upon creation
+      const qtyToRestore = totalAllocQty;
       if (sourceName && qtyToRestore > 0) {
         if (sourceType === 'Warehouse') {
           await this.addWarehouseStock(sourceName, category, qtyToRestore);
@@ -2275,18 +2275,20 @@ export const backendApi = {
         throw updateErr;
       }
 
-      // 5. Append stock ledger movement for rollback
-      await this.appendStockLedger({
-        facilityType: sourceType,
-        warehouseId: releaseRow.source_warehouse_id,
-        lguId: releaseRow.source_lgu_id,
-        kitTypeId: releaseRow.kit_type_id || category,
-        deltaQuantity: qtyToRestore,
-        balanceAfter: 0,
-        movementType: 'RELEASE_CANCELLED',
-        referenceDrId: releaseRow.dr_number,
-        drNumber: releaseRow.dr_number
-      }).catch(err => console.warn('appendStockLedger error on cancel release:', err));
+      // 5. Append stock ledger movement for rollback if stock was restored
+      if (qtyToRestore > 0) {
+        await this.appendStockLedger({
+          facilityType: sourceType,
+          warehouseId: releaseRow.source_warehouse_id,
+          lguId: releaseRow.source_lgu_id,
+          kitTypeId: releaseRow.kit_type_id || category,
+          deltaQuantity: qtyToRestore,
+          balanceAfter: 0,
+          movementType: 'RELEASE_CANCELLED',
+          referenceDrId: releaseRow.dr_number,
+          drNumber: releaseRow.dr_number
+        }).catch(err => console.warn('appendStockLedger error on cancel release:', err));
+      }
 
       return { ok: true };
     } catch (err: any) {
