@@ -38,6 +38,12 @@ import {
   getExpiryBadgeConfig,
   type ExpiryTier
 } from '../../lib/expiryConstants';
+import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter,
+  isFoodItem,
+  isNonFoodItem
+} from '../../lib/commodityClassification';
 import { LGUReportPdfModal } from './LGUReportPdfModal';
 
 export interface LGUTransaction {
@@ -91,6 +97,7 @@ interface LGUDetailModalProps {
   outgoingReleases?: OutgoingRelease[];
   incomingGoods?: IncomingGoods[];
   kitTypesList?: KitTypeRecord[];
+  initialCommodityFilter?: CommodityTypeFilter;
 }
 
 export function LGUDetailModal({
@@ -99,7 +106,8 @@ export function LGUDetailModal({
   lgu,
   outgoingReleases = [],
   incomingGoods = [],
-  kitTypesList = []
+  kitTypesList = [],
+  initialCommodityFilter = 'All'
 }: LGUDetailModalProps) {
   // Tab switcher: 'transactions' = Flow & Delivery ledger; 'fefo_expiry' = Batches by Expiry Date
   const [activeTab, setActiveTab] = useState<'transactions' | 'fefo_expiry'>('transactions');
@@ -109,6 +117,7 @@ export function LGUDetailModal({
   const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
 
   // Filters & Search
+  const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>(initialCommodityFilter || 'All');
   const [timeFilter, setTimeFilter] = useState<'all' | '10days' | '30days' | '90days'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'Incoming' | 'Outgoing'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -200,8 +209,11 @@ export function LGUDetailModal({
   useEffect(() => {
     if (isOpen) {
       setCurrentPage(1);
+      if (initialCommodityFilter) {
+        setCommodityTypeFilter(initialCommodityFilter);
+      }
     }
-  }, [isOpen, lgu?.id, activeTab]);
+  }, [isOpen, lgu?.id, activeTab, initialCommodityFilter]);
 
   // Close on Escape key
   useEffect(() => {
@@ -650,7 +662,36 @@ export function LGUDetailModal({
     return lots;
   }, [lgu, outgoingReleases, incomingGoods, dbBatches, expiryMap]);
 
-  // FEFO shelf-life metrics for this LGU
+  // Pre-calculated batch classification counts (Food vs Non-Food)
+  const lotClassificationCounts = useMemo(() => {
+    let foodLots = 0;
+    let foodUnits = 0;
+    let nonFoodLots = 0;
+    let nonFoodUnits = 0;
+
+    allLots.forEach((lot) => {
+      const isFood = isFoodItem(lot.category);
+      const qty = lot.quantity || 0;
+      if (isFood) {
+        foodLots++;
+        foodUnits += qty;
+      } else {
+        nonFoodLots++;
+        nonFoodUnits += qty;
+      }
+    });
+
+    return {
+      allLots: allLots.length,
+      allUnits: allLots.reduce((sum, l) => sum + (l.quantity || 0), 0),
+      foodLots,
+      foodUnits,
+      nonFoodLots,
+      nonFoodUnits
+    };
+  }, [allLots]);
+
+  // FEFO shelf-life metrics for this LGU (dynamically filtered by commodity classification)
   const fefoMetrics = useMemo(() => {
     let criticalLots = 0;
     let moderateLots = 0;
@@ -660,8 +701,12 @@ export function LGUDetailModal({
     let moderateUnits = 0;
     let safeUnits = 0;
     let expiredUnits = 0;
+    let matchingLotsCount = 0;
 
     allLots.forEach((lot) => {
+      if (!matchesCommodityFilter(lot.category, commodityTypeFilter)) return;
+      matchingLotsCount++;
+
       if (!lot.expirationDate) return;
       const tier = lot.expiryTier;
       const qty = lot.quantity || 0;
@@ -681,7 +726,7 @@ export function LGUDetailModal({
     });
 
     return {
-      totalLots: allLots.length,
+      totalLots: matchingLotsCount,
       criticalLots,
       criticalUnits,
       moderateLots,
@@ -691,7 +736,7 @@ export function LGUDetailModal({
       expiredLots,
       expiredUnits
     };
-  }, [allLots]);
+  }, [allLots, commodityTypeFilter]);
 
   // Calculate On-Hand Inventory Category ledger with latest dates
   const inventoryDates = useMemo(() => {
@@ -748,6 +793,7 @@ export function LGUDetailModal({
     let ninetyDaysCount = 0;
 
     allTransactions.forEach((tx) => {
+      if (!matchesCommodityFilter(tx.category, commodityTypeFilter)) return;
       if (typeFilter !== 'all' && tx.type !== typeFilter) return;
       if (categoryFilter !== 'all') {
         const canonicalTx = normalizeCategoryName(tx.category);
@@ -785,7 +831,7 @@ export function LGUDetailModal({
     });
 
     return { allCount, tenDaysCount, thirtyDaysCount, ninetyDaysCount };
-  }, [allTransactions, typeFilter, categoryFilter, expiryFilter, searchQuery]);
+  }, [allTransactions, commodityTypeFilter, typeFilter, categoryFilter, expiryFilter, searchQuery]);
 
   // Filtered & sorted transactions
   const filteredTransactions = useMemo(() => {
@@ -793,6 +839,7 @@ export function LGUDetailModal({
     today.setHours(23, 59, 59, 999);
 
     const result = allTransactions.filter((tx) => {
+      if (!matchesCommodityFilter(tx.category, commodityTypeFilter)) return false;
       if (typeFilter !== 'all' && tx.type !== typeFilter) return false;
 
       if (categoryFilter !== 'all') {
@@ -867,11 +914,13 @@ export function LGUDetailModal({
     });
 
     return result;
-  }, [allTransactions, typeFilter, categoryFilter, expiryFilter, timeFilter, searchQuery, sortBy]);
+  }, [allTransactions, commodityTypeFilter, typeFilter, categoryFilter, expiryFilter, timeFilter, searchQuery, sortBy]);
 
   // Filtered & sorted lots (Stock by Expiry)
   const filteredLots = useMemo(() => {
     const result = allLots.filter((lot) => {
+      if (!matchesCommodityFilter(lot.category, commodityTypeFilter)) return false;
+
       if (categoryFilter !== 'all') {
         const canonicalLot = normalizeCategoryName(lot.category);
         const canonicalFilter = normalizeCategoryName(categoryFilter);
@@ -928,7 +977,36 @@ export function LGUDetailModal({
     });
 
     return result;
-  }, [allLots, categoryFilter, expiryFilter, searchQuery, sortBy]);
+  }, [allLots, commodityTypeFilter, categoryFilter, expiryFilter, searchQuery, sortBy]);
+
+  // Dynamic category options filtered by current commodity classification
+  const availableCategoryOptions = useMemo(() => {
+    const all = [
+      'Family Food Pack',
+      'Ready-to-Eat Food (RTEF)',
+      'Hygiene Kit',
+      'Sleeping Kit',
+      'Kitchen Kit',
+      'Family Kit',
+      'Laminated Sacks'
+    ];
+
+    if (commodityTypeFilter === 'Food Items') {
+      return all.filter((c) => isFoodItem(c));
+    }
+    if (commodityTypeFilter === 'Non-Food Items') {
+      return all.filter((c) => isNonFoodItem(c));
+    }
+    return all;
+  }, [commodityTypeFilter]);
+
+  const handleCommodityFilterChange = (val: CommodityTypeFilter) => {
+    setCommodityTypeFilter(val);
+    setCurrentPage(1);
+    if (categoryFilter !== 'all' && !matchesCommodityFilter(categoryFilter, val)) {
+      setCategoryFilter('all');
+    }
+  };
 
   // Active view list and pagination
   const activeList = activeTab === 'transactions' ? filteredTransactions : filteredLots;
@@ -1212,7 +1290,7 @@ export function LGUDetailModal({
                   title="View prepositioned stock and delivered lots by expiration date (FEFO)"
                 >
                   <Clock className="w-3.5 h-3.5" />
-                  <span>View by Expiry ({allLots.length})</span>
+                  <span>View by Expiry ({fefoMetrics.totalLots})</span>
                   {fefoMetrics.criticalLots > 0 && (
                     <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-red-600 text-white animate-pulse">
                       {fefoMetrics.criticalLots}
@@ -1221,6 +1299,93 @@ export function LGUDetailModal({
                 </button>
               </div>
             </div>
+
+            {/* Commodity Classification Quick Toggle Bar for Stock by Expiry */}
+            {activeTab === 'fefo_expiry' && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 flex-shrink-0">
+                    <Filter className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-gray-900">Commodity Classification</span>
+                      <span className="text-[10px] font-semibold text-gray-600 bg-white px-1.5 py-0.2 rounded border border-gray-200">
+                        FEFO Stock Filter
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500">
+                      Filter prepositioned relief batches by Food vs Non-Food Items
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-gray-200 shadow-2xs flex-wrap sm:flex-nowrap">
+                  <button
+                    type="button"
+                    onClick={() => handleCommodityFilterChange('All')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                      commodityTypeFilter === 'All'
+                        ? 'bg-gray-900 text-white shadow-xs'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span>All Commodities</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        commodityTypeFilter === 'All'
+                          ? 'bg-white/20 text-white'
+                          : 'bg-gray-200 text-gray-700'
+                      }`}
+                    >
+                      {lotClassificationCounts.allLots}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCommodityFilterChange('Food Items')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                      commodityTypeFilter === 'Food Items'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'text-amber-800 hover:text-amber-950 hover:bg-amber-50'
+                    }`}
+                  >
+                    <span>Food Items (FFP &amp; RTEF)</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        commodityTypeFilter === 'Food Items'
+                          ? 'bg-white/20 text-white'
+                          : 'bg-amber-100 text-amber-900'
+                      }`}
+                    >
+                      {lotClassificationCounts.foodLots}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCommodityFilterChange('Non-Food Items')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                      commodityTypeFilter === 'Non-Food Items'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-indigo-800 hover:text-indigo-950 hover:bg-indigo-50'
+                    }`}
+                  >
+                    <span>Non-Food Items (NFIs)</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                        commodityTypeFilter === 'Non-Food Items'
+                          ? 'bg-white/20 text-white'
+                          : 'bg-indigo-100 text-indigo-900'
+                      }`}
+                    >
+                      {lotClassificationCounts.nonFoodLots}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* FEFO Shelf-Life Metrics Sub-Banner (Always available as quick filters) */}
             {activeTab === 'fefo_expiry' && (
@@ -1412,8 +1577,22 @@ export function LGUDetailModal({
               </div>
             )}
 
-            {/* Filter Bar: Flow/Urgency, Category, Sort by Expiry/Date, and Search */}
-            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Filter Bar: Classification, Flow/Urgency, Category, Sort by Expiry/Date, and Search */}
+            <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+              {/* Classification Filter */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">Classification</label>
+                <select
+                  value={commodityTypeFilter}
+                  onChange={(e) => handleCommodityFilterChange(e.target.value as CommodityTypeFilter)}
+                  className="w-full px-3 py-2 text-xs font-semibold border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
+                >
+                  <option value="All">All Commodities</option>
+                  <option value="Food Items">Food Items (FFP &amp; RTEF)</option>
+                  <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+                </select>
+              </div>
+
               {/* Type Filter (Transactions Mode) OR Expiry Urgency Filter (Both Modes) */}
               {activeTab === 'transactions' ? (
                 <div>
@@ -1453,7 +1632,13 @@ export function LGUDetailModal({
 
               {/* Category Filter */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1">Commodity / Item Type</label>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  {commodityTypeFilter === 'Food Items'
+                    ? 'Food Item Type'
+                    : commodityTypeFilter === 'Non-Food Items'
+                    ? 'Non-Food Item Type'
+                    : 'Commodity / Item Type'}
+                </label>
                 <select
                   value={categoryFilter}
                   onChange={(e) => {
@@ -1462,14 +1647,18 @@ export function LGUDetailModal({
                   }}
                   className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
                 >
-                  <option value="all">All Items &amp; Kits</option>
-                  <option value="Family Food Pack">Only Family Food Packs (FFP)</option>
-                  <option value="Hygiene Kit">Hygiene Kits</option>
-                  <option value="Family Kit">Family Kits</option>
-                  <option value="Sleeping Kit">Sleeping Kits</option>
-                  <option value="Kitchen Kit">Kitchen Kits</option>
-                  <option value="Laminated Sacks">Laminated Sacks</option>
-                  <option value="Ready-to-Eat Food (RTEF)">Ready-to-Eat Food (RTEF)</option>
+                  <option value="all">
+                    {commodityTypeFilter === 'Food Items'
+                      ? 'All Food Items (FFP & RTEF)'
+                      : commodityTypeFilter === 'Non-Food Items'
+                      ? 'All Non-Food Items (NFIs)'
+                      : 'All Items & Kits'}
+                  </option>
+                  {availableCategoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1511,6 +1700,35 @@ export function LGUDetailModal({
                 </div>
               </div>
             </div>
+
+            {/* Active Scope Notice Banner when Filtered */}
+            {activeTab === 'fefo_expiry' && commodityTypeFilter !== 'All' && (
+              <div
+                className={`px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 text-xs ${
+                  commodityTypeFilter === 'Food Items'
+                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                    : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      commodityTypeFilter === 'Food Items' ? 'bg-amber-500' : 'bg-indigo-500'
+                    } animate-pulse`}
+                  />
+                  <span>
+                    Scope Filter: <strong>{commodityTypeFilter === 'Food Items' ? 'Food Items Only (FFP & RTEF)' : 'Non-Food Items Only (NFIs)'}</strong> &mdash; Showing {filteredLots.length} lot{filteredLots.length === 1 ? '' : 's'} ({filteredLots.reduce((acc, l) => acc + (l.quantity || 0), 0).toLocaleString()} units)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCommodityFilterChange('All')}
+                  className="font-bold underline text-[11px] hover:opacity-80 cursor-pointer"
+                >
+                  Reset to All Commodities
+                </button>
+              </div>
+            )}
 
             {/* Active Table: Transactions OR Stock by Expiry */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-xs">
@@ -1598,8 +1816,17 @@ export function LGUDetailModal({
                             {tx.referenceCode}
                           </td>
 
-                          <td className="px-4 py-3 font-semibold text-gray-800 whitespace-nowrap">
-                            {tx.category}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="font-semibold text-gray-800 block">{tx.category}</span>
+                            <span
+                              className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                isFoodItem(tx.category)
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              }`}
+                            >
+                              {isFoodItem(tx.category) ? 'Food Item' : 'Non-Food'}
+                            </span>
                           </td>
 
                           <td className="px-4 py-3 text-right font-bold text-gray-900 whitespace-nowrap">
@@ -1693,8 +1920,17 @@ export function LGUDetailModal({
                             {lot.referenceCode}
                           </td>
 
-                          <td className="px-4 py-3 font-semibold text-gray-900 whitespace-nowrap">
-                            {lot.category}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="font-semibold text-gray-900 block">{lot.category}</span>
+                            <span
+                              className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                isFoodItem(lot.category)
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                              }`}
+                            >
+                              {isFoodItem(lot.category) ? 'Food Item' : 'Non-Food'}
+                            </span>
                           </td>
 
                           <td className="px-4 py-3 text-right font-bold text-gray-900 whitespace-nowrap">
@@ -1780,6 +2016,7 @@ export function LGUDetailModal({
                   <button
                     type="button"
                     onClick={() => {
+                      setCommodityTypeFilter('All');
                       setTimeFilter('all');
                       setTypeFilter('all');
                       setCategoryFilter('all');

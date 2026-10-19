@@ -1011,6 +1011,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           outgoingReleases={inventoryState?.outgoingReleasesList}
           incomingGoods={inventoryState?.incomingGoodsList}
           kitTypesList={inventoryState?.kitTypesList}
+          initialCommodityFilter={commodityTypeFilter}
         />
       )}
     </div>
