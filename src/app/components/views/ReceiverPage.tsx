@@ -1117,16 +1117,18 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         const accuracy = nextPos.coords.accuracy;
 
         if (typeof rawLat !== 'number' || typeof rawLng !== 'number' || isNaN(rawLat) || isNaN(rawLng)) return;
-        if (accuracy && accuracy > 150) return;
 
         const prev = lastProcessedLocRef.current;
-        if (prev) {
-          const distance = getDistanceMeters(prev.latitude, prev.longitude, rawLat, rawLng);
-          if (distance < 5) return;
-        }
+        const distance = prev ? getDistanceMeters(prev.latitude, prev.longitude, rawLat, rawLng) : 0;
 
-        const smoothedLat = prev ? smoothCoordinate(prev.latitude, rawLat, 0.4) : rawLat;
-        const smoothedLng = prev ? smoothCoordinate(prev.longitude, rawLng, 0.4) : rawLng;
+        // Ignore micro sensor jitter under 1.5 meters when stationary
+        if (prev && distance < 1.5) return;
+
+        // If distance is large (> 40 meters, e.g. mock location jump, teleport, or switching from fake to real GPS),
+        // or if there is no previous point, SNAP IMMEDIATELY to coordinates without smoothing damping!
+        const shouldSnap = !prev || distance > 40;
+        const smoothedLat = shouldSnap ? rawLat : smoothCoordinate(prev.latitude, rawLat, 0.5);
+        const smoothedLng = shouldSnap ? rawLng : smoothCoordinate(prev.longitude, rawLng, 0.5);
 
         const updatedLoc: PhoneLocation = {
           latitude: smoothedLat,
@@ -1164,7 +1166,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         console.warn('Continuous GPS Watch:', err);
         setIsGpsWeak(true);
       },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 12000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 }
     );
 
     watchIdRef.current = id;
@@ -1191,66 +1193,128 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
     const checkCustodyStatus = async () => {
       try {
+        // If offline, do NOT alter activePackages or prune anything
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          return;
+        }
+
         const releases = await backendApi.getReceiverReleases();
 
         if (!isSubscribed) return;
+        if (!releases || releases.length === 0) return;
+
         setAllReleases(releases);
-        const currentRelease = releases.find((r) => r.assigned_truck_id === activeTruckId || r.assigned_driver_profile_id === profile?.id || r.assigned_truck_id === receiverId) || releases[0] || null;
+        const currentRelease = releases.find((r) => 
+          (activeTruckId && r.assigned_truck_id === activeTruckId) || 
+          (profile?.id && r.assigned_driver_profile_id === profile.id) || 
+          (profile?.truckId && r.assigned_truck_id === profile.truckId) ||
+          (receiverId && r.assigned_truck_id === receiverId)
+        ) || releases[0] || null;
         setRelease(currentRelease);
 
-        const currentPackages = activePackagesRef.current;
-        if (currentPackages && currentPackages.length > 0) {
-          const remainingPackages = currentPackages.filter((pkg) => {
-            const matchingReq = releases.find((r) => r.dr_number === pkg.drNumber);
-            if (!matchingReq) return false;
-            const isAssignedToMe = matchingReq.assigned_truck_id === activeTruckId || matchingReq.assigned_driver_profile_id === profile?.id || matchingReq.assigned_truck_id === receiverId;
-            const isDone = ['Delivered', 'Accepted', 'Distributed'].includes(matchingReq.delivery_status ?? '');
-            return isAssignedToMe && !isDone;
-          });
+        const currentPackages = activePackagesRef.current || [];
 
-          if (remainingPackages.length !== currentPackages.length) {
-            const removedPackages = currentPackages.filter((pkg) => !remainingPackages.some((r) => r.drNumber === pkg.drNumber));
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(remainingPackages));
-            } catch {}
-            setActivePackages(remainingPackages);
-            if (remainingPackages.length === 0) {
-              setInventory(initialInventory);
+        // 1. Safe Pruning: ONLY prune packages that are explicitly DELIVERED/ACCEPTED/DISTRIBUTED
+        // or explicitly reassigned to another officer. Never drop packages on network or lookup failures!
+        const remainingPackages = currentPackages.filter((pkg) => {
+          const matchingReq = releases.find((r) => r.dr_number === pkg.drNumber);
+          // If matching release is not in this result, retain it locally! (network/paging safety)
+          if (!matchingReq) return true;
+
+          // If delivery is finalized, drop it
+          const isDone = ['Delivered', 'Accepted', 'Distributed'].includes(matchingReq.delivery_status ?? '');
+          if (isDone) return false;
+
+          // If explicitly assigned to a DIFFERENT truck & escort, drop it
+          const isAssignedToOther = matchingReq.assigned_truck_id &&
+            matchingReq.assigned_truck_id !== activeTruckId &&
+            matchingReq.assigned_truck_id !== profile?.truckId &&
+            matchingReq.assigned_truck_id !== receiverId &&
+            matchingReq.assigned_driver_profile_id &&
+            matchingReq.assigned_driver_profile_id !== profile?.id;
+          if (isAssignedToOther) return false;
+
+          return true;
+        });
+
+        // 2. Auto-Hydration: If activePackages is empty (e.g. reload or fresh device) OR missing an assigned release in Supabase,
+        // automatically restore it from Supabase so the escort never loses their assigned cargo!
+        let mergedPackages = [...remainingPackages];
+        const assignedToMeInTransit = releases.filter((r) => {
+          const isMine = (profile?.id && r.assigned_driver_profile_id === profile.id) ||
+                         (activeTruckId && r.assigned_truck_id === activeTruckId) ||
+                         (profile?.truckId && r.assigned_truck_id === profile.truckId);
+          const isPendingTransit = ['In Transit', 'Packed', 'Approved'].includes(r.delivery_status ?? '');
+          return isMine && isPendingTransit;
+        });
+
+        let autoHydratedAny = false;
+        assignedToMeInTransit.forEach((r) => {
+          const alreadyInList = mergedPackages.some((p) => p.drNumber === r.dr_number);
+          if (!alreadyInList) {
+            autoHydratedAny = true;
+            // Also sync activeTruckId if specified
+            if (r.assigned_truck_id && r.assigned_truck_id.startsWith('TRUCK-') && r.assigned_truck_id !== activeTruckId) {
+              setActiveTruckId(r.assigned_truck_id);
             }
-            const handoverNote = removedPackages.map((p) => {
-              const req = releases.find((r) => r.dr_number === p.drNumber);
-              if (req?.assigned_truck_id && req.assigned_truck_id !== activeTruckId && req.assigned_truck_id !== receiverId) {
-                return `DR #${p.drNumber} transferred to ${req.assigned_truck_id}`;
-              }
-              return `DR #${p.drNumber} delivered/accepted`;
-            }).join(', ');
-            setHandoverToast(handoverNote);
-            setTimeout(() => setHandoverToast(null), 7000);
-          }
 
-          // Automatically backfill pinned destination coordinates from Supabase if missing
-          let updatedAnyCoords = false;
-          const currentPkgs = remainingPackages.length !== currentPackages.length ? remainingPackages : currentPackages;
-          const updatedWithCoords = currentPkgs.map((pkg) => {
-            if (!pkg.destinationCoords) {
-              const req = releases.find((r) => r.dr_number === pkg.drNumber);
-              if (req?.receiver_gps) {
-                const parts = req.receiver_gps.split(',').map((s) => parseFloat(s.trim()));
-                if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-                  updatedAnyCoords = true;
-                  return { ...pkg, destinationCoords: [parts[0], parts[1]] as [number, number] };
-                }
+            let destCoords: [number, number] | undefined = undefined;
+            if (r.receiver_gps) {
+              const parts = r.receiver_gps.split(',').map((s) => parseFloat(s.trim()));
+              if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                destCoords = [parts[0], parts[1]];
               }
             }
-            return pkg;
-          });
 
-          if (updatedAnyCoords) {
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(updatedWithCoords));
-            } catch {}
-            setActivePackages(updatedWithCoords);
+            const autoPkg: QrPayload = {
+              drNumber: r.dr_number,
+              handoverContractId: r.handover_contract_id || `DSWD-HANDOVER-${r.dr_number}`,
+              category: r.category || 'Relief Goods',
+              quantity: Number(r.amount_approved) || Number(r.amount_requested) || 1,
+              batchTokenIds: Array.isArray(r.allocated_batches) ? r.allocated_batches.map((b: any) => b.batch_token_id || b.batchTokenId || b.batch_number).filter(Boolean) : [],
+              batchQuantities: Array.isArray(r.allocated_batches) ? r.allocated_batches.map((b: any) => Number(b.allocated_quantity || b.quantity || 0)) : [],
+              from: r.warehouse_source || 'DSWD Logistics Hub',
+              to: r.destination_address || r.lgu_name || r.municipality || 'Assigned LGU',
+              destinationCoords: destCoords,
+              blockchain: { txHash: r.tx_hash || undefined },
+              txHash: r.tx_hash || undefined
+            };
+            mergedPackages.push(autoPkg);
           }
+        });
+
+        if (mergedPackages.length !== currentPackages.length || autoHydratedAny) {
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(mergedPackages));
+          } catch {}
+          setActivePackages(mergedPackages);
+          if (mergedPackages.length === 0) {
+            setInventory(initialInventory);
+          }
+        }
+
+        // Backfill pinned destination coordinates from Supabase if missing
+        let updatedAnyCoords = false;
+        const currentPkgs = mergedPackages;
+        const updatedWithCoords = currentPkgs.map((pkg) => {
+          if (!pkg.destinationCoords) {
+            const req = releases.find((r) => r.dr_number === pkg.drNumber);
+            if (req?.receiver_gps) {
+              const parts = req.receiver_gps.split(',').map((s) => parseFloat(s.trim()));
+              if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                updatedAnyCoords = true;
+                return { ...pkg, destinationCoords: [parts[0], parts[1]] as [number, number] };
+              }
+            }
+          }
+          return pkg;
+        });
+
+        if (updatedAnyCoords) {
+          try {
+            localStorage.setItem(storageKey, JSON.stringify(updatedWithCoords));
+          } catch {}
+          setActivePackages(updatedWithCoords);
         }
       } catch (error) {
         console.warn('Failed to verify receiver custody status:', error);
@@ -1272,7 +1336,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       unsubscribe();
       clearInterval(interval);
     };
-  }, [receiverId, storageKey]);
+  }, [receiverId, storageKey, profile?.id, profile?.truckId, activeTruckId]);
 
   const stopCamera = () => {
     cameraOpenRef.current = false;
@@ -2104,7 +2168,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         )}
 
         {/* GPS Satellite Signal Status HUD Bar */}
-        {isGpsWeak || ((location?.accuracy ?? 0) > 45) ? (
+        {isGpsWeak || ((location?.accuracy ?? 0) > 120) ? (
           <div className="bg-amber-600 text-white px-3 py-1.5 text-[9.5px] font-semibold flex items-center justify-between z-10 shadow-inner">
             <div className="flex items-center gap-1.5 min-w-0">
               <AlertTriangle size={13} className="text-yellow-200 flex-shrink-0" />
