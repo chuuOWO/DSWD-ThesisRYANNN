@@ -1,28 +1,26 @@
 -- ==============================================================================
 -- DSWD RELIEF LOGISTICS & INVENTORY TRACKING SYSTEM
--- AUTHORITATIVE REALISTIC DATA SEED SCRIPT (SUPABASE POSTGRESQL)
+-- AUTHORITATIVE REALISTIC DATA SEED SCRIPT (ILOILO PROVINCE LGUS ONLY)
 -- ==============================================================================
--- Purpose:
--- 1. Populates all 101 Panay Island and Guimaras LGUs with realistic operational
---    data across 4 disaster prioritization tiers:
---      - Severe / Critical (Red): <25% stock rate, high urgency (75-98)
---      - Low / Warning (Orange): 25-49% stock rate, urgent replenishment (55-74)
---      - Medium / Moderate (Yellow): 50-74% stock rate, active monitoring (35-54)
---      - Adequate / Safe (Green): >=75% stock rate, normal operations (5-34)
--- 2. Populates normalized physical buffer stock in public.lgu_stock for all 7 kits.
--- 3. Populates public.lgu_inventory_reports for the live situational dashboard.
--- 4. Populates warehouse capacities and physical reserves in public.warehouse_stock.
--- 5. Populates verified inbound manifests in public.incoming_manifests.
--- 6. Populates public.inventory_batches with rolling expiration date windows:
+-- Memory-Optimized Configuration:
+-- 1. Maintained exclusively for Iloilo Province (43 Municipalities / Cities):
+--      - Severe / Critical (Red) (6 LGUs): Carles, Balasan, Estancia, San Dionisio, Batad, Concepcion
+--      - Low / Warning (Orange) (8 LGUs): Ajuy, Sara, Barotac Viejo, Lemery, San Rafael, Anilao, Banate, Tubungan
+--      - Medium / Moderate (Yellow) (11 LGUs): Calinog, Lambunao, Janiuay, Badiangan, Dueñas, Dingle, Mina, Bingawan, Alimodian, Leon, Maasin
+--      - Adequate / Safe (Green) (18 LGUs): Iloilo City, Passi City, Pavia, Santa Barbara, Cabatuan, Leganes, Zarraga, Dumangas, Barotac Nuevo, Oton, Pototan, Tigbauan, Guimbal, Miag-ao, San Joaquin, San Miguel, San Enrique, New Lucena, Igbaras
+-- 2. Purges non-Iloilo operational records to reduce database size, table bloat, and Supabase RAM usage.
+-- 3. Populates public.lgu_stock for the 43 Iloilo LGUs across all 7 kit types (301 rows).
+-- 4. Populates public.lgu_inventory_reports for the 43 Iloilo LGUs (43 rows).
+-- 5. Populates regional warehouse physical stocks in Oton and Pototan.
+-- 6. Populates verified inbound logistics manifests and batches exclusively for Iloilo with rolling expiry:
 --      - Expiring in <= 90 Days (rolling 1-3 months)
 --      - Expiring in 91-120 Days (rolling 4-6 months)
 --      - Standard shelf life (> 120 Days)
--- 7. Populates double-entry audit journal in public.stock_ledger.
+-- 7. Runs VACUUM ANALYZE to reclaim disk pages and OS memory back to Supabase.
 --
 -- EXCLUSION RULE:
--- Strictly DOES NOT insert or mutate outgoing_requests, outgoing_batch_allocations,
--- or custody_hops because outbound dispatches require cryptographic wallet signatures
--- and blockchain smart contract minting.
+-- Strictly DOES NOT touch outgoing_requests, outgoing_batch_allocations, or custody_hops
+-- to preserve blockchain contract integrity and cryptographic wallet dispatches.
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
@@ -30,10 +28,6 @@
 -- ------------------------------------------------------------------------------
 
 insert into public.provinces (name, region) values
-  ('Aklan', 'Region VI (Western Visayas)'),
-  ('Antique', 'Region VI (Western Visayas)'),
-  ('Capiz', 'Region VI (Western Visayas)'),
-  ('Guimaras', 'Region VI (Western Visayas)'),
   ('Iloilo', 'Region VI (Western Visayas)')
 on conflict (name) do nothing;
 
@@ -72,19 +66,42 @@ from public.provinces p
 where w.province_id is null and lower(trim(w.province)) = lower(trim(p.name));
 
 -- ------------------------------------------------------------------------------
--- SECTION 2: MASTER LGUS DIRECTORY & SITUATIONAL BUFFER STOCK (101 LGUS)
+-- SECTION 2: PURGE NON-ILOILO RECORDS TO MINIMIZE SUPABASE MEMORY & STORAGE
 -- ------------------------------------------------------------------------------
--- Tier Distribution:
---   Severe / Red: ~18 LGUs (<25% stock rate, high affected families, urgency 75-98)
---   Low / Orange: ~25 LGUs (25-49% stock rate, urgent replenishment, urgency 55-74)
---   Medium / Yellow: ~28 LGUs (50-74% stock rate, active monitoring, urgency 35-54)
---   Adequate / Green: ~30 LGUs (>=75% stock rate, normal operations, urgency 5-34)
+
+delete from public.stock_ledger
+where lgu_id in (select id from public.lgus where province != 'Iloilo');
+
+delete from public.inventory_batches
+where lgu_id in (select id from public.lgus where province != 'Iloilo');
+
+delete from public.incoming_manifests
+where destination_lgu_id in (select id from public.lgus where province != 'Iloilo');
+
+delete from public.lgu_stock
+where lgu_id in (select id from public.lgus where province != 'Iloilo');
+
+delete from public.lgu_inventory_reports
+where province != 'Iloilo';
+
+-- Remove non-Iloilo LGUs unless explicitly referenced by user profile accounts
+delete from public.lgus
+where province != 'Iloilo'
+  and id not in (select lgu_id from public.profiles where lgu_id is not null);
+
+-- ------------------------------------------------------------------------------
+-- SECTION 3: SEED MASTER ILOILO LGUS DIRECTORY & BUFFER STOCK (43 LGUS)
+-- ------------------------------------------------------------------------------
+-- Distribution:
+--   Severe / Red: 6 LGUs (<25% stock rate, high affected families, urgency 75-98)
+--   Low / Orange: 8 LGUs (25-49% stock rate, urgent replenishment, urgency 55-74)
+--   Medium / Yellow: 11 LGUs (50-74% stock rate, active monitoring, urgency 35-54)
+--   Adequate / Green: 18 LGUs (>=75% stock rate, normal operations, urgency 5-34)
 -- ------------------------------------------------------------------------------
 
 with lgu_seed_data(muni, prov, name, lat, lng, max_s, ffp, rtef, hyg, sleep, kitc, fam, sack, aff_fam, dmg_idx, urg_score, p_color, rec) as (
   values
-    -- ===== ILOILO (43 LGUs) =====
-    -- Severe Tier (Red)
+    -- ===== SEVERE TIER (RED) (6 LGUs) =====
     ('Carles', 'Iloilo', 'Carles Municipal Hall', 11.5833, 123.1667, 3000, 180, 45, 60, 40, 25, 30, 20, 3850, 92, 96, 'Red', 'CRITICAL: Severe coastal inundation; immediate food pack airlift and sealift required.'),
     ('Balasan', 'Iloilo', 'Balasan Municipal Civic Center', 11.4721, 123.0847, 3000, 240, 60, 80, 50, 35, 45, 30, 2900, 88, 93, 'Red', 'CRITICAL: Northern flood damage with high displaced population; buffer stock depleted.'),
     ('Estancia', 'Iloilo', 'Estancia Municipal Hall', 11.4556, 123.1528, 3000, 290, 75, 95, 65, 40, 50, 40, 3200, 89, 94, 'Red', 'CRITICAL: Evacuation center overcrowding; immediate relief convoy augmentation flagged.'),
@@ -92,7 +109,7 @@ with lgu_seed_data(muni, prov, name, lat, lng, max_s, ffp, rtef, hyg, sleep, kit
     ('Batad', 'Iloilo', 'Batad Municipal Hall', 11.4167, 123.0833, 3000, 350, 90, 105, 80, 45, 60, 50, 2150, 82, 87, 'Red', 'CRITICAL: Urgent food pack and hygiene kit replenishment requested.'),
     ('Concepcion', 'Iloilo', 'Concepcion Municipal Hall', 11.2189, 123.1111, 3000, 420, 110, 120, 85, 60, 70, 45, 2600, 85, 89, 'Red', 'CRITICAL: Island barangays cut off; relief dispatch via coast guard underway.'),
 
-    -- Low / Warning Tier (Orange)
+    -- ===== LOW / WARNING TIER (ORANGE) (8 LGUs) =====
     ('Ajuy', 'Iloilo', 'Ajuy Municipal Hall / DRRM Office', 11.1714, 122.9818, 3000, 840, 210, 280, 190, 150, 170, 120, 1420, 62, 68, 'Orange', 'WARNING: Buffer reserves falling below safety margin; preposition dispatch recommended.'),
     ('Sara', 'Iloilo', 'Sara Municipal Hall', 11.2667, 123.0167, 3000, 920, 230, 310, 210, 160, 185, 140, 1580, 65, 71, 'Orange', 'WARNING: Evacuation centers filling up; secondary replenishment staged.'),
     ('Barotac Viejo', 'Iloilo', 'Barotac Viejo Municipal Hall', 11.0503, 122.8466, 3000, 980, 245, 320, 230, 175, 190, 130, 1340, 58, 64, 'Orange', 'WARNING: Riverbank erosion risk; stage 1,000 FFPs from Oton warehouse.'),
@@ -102,7 +119,7 @@ with lgu_seed_data(muni, prov, name, lat, lng, max_s, ffp, rtef, hyg, sleep, kit
     ('Banate', 'Iloilo', 'Banate Municipal Hall', 11.0022, 122.8174, 3000, 1250, 310, 400, 290, 220, 240, 180, 890, 46, 55, 'Orange', 'WARNING: Coastal storm surge warning active; stock replenishment queued.'),
     ('Tubungan', 'Iloilo', 'Tubungan Municipal Hall', 10.7500, 122.3333, 3000, 1320, 330, 420, 310, 235, 255, 190, 810, 44, 55, 'Orange', 'WARNING: Upland landslide risk; maintain heightened relief staging.'),
 
-    -- Medium / Moderate Tier (Yellow)
+    -- ===== MEDIUM / MODERATE TIER (YELLOW) (11 LGUs) =====
     ('Calinog', 'Iloilo', 'Calinog Municipal Hall', 11.1242, 122.4939, 3000, 1550, 380, 480, 360, 280, 310, 210, 450, 35, 46, 'Yellow', 'MODERATE: Steady buffer stock; monitor community evacuation centers.'),
     ('Lambunao', 'Iloilo', 'Lambunao Municipal Hall', 11.0500, 122.4833, 3000, 1620, 400, 510, 380, 295, 325, 220, 410, 32, 44, 'Yellow', 'MODERATE: Adequate central supplies; small barangay prepositioning active.'),
     ('Janiuay', 'Iloilo', 'Janiuay Municipal Hall', 10.9500, 122.5000, 3000, 1680, 420, 530, 400, 310, 340, 230, 380, 30, 42, 'Yellow', 'MODERATE: Safe operational threshold; standard bi-weekly monitoring.'),
@@ -115,7 +132,7 @@ with lgu_seed_data(muni, prov, name, lat, lng, max_s, ffp, rtef, hyg, sleep, kit
     ('Leon', 'Iloilo', 'Leon Municipal Office', 10.7819, 122.3831, 3000, 2100, 525, 660, 495, 390, 430, 300, 120, 15, 35, 'Yellow', 'MODERATE: Satisfactory reserve capacity; routine reporting.'),
     ('Maasin', 'Iloilo', 'Maasin Municipal Hall', 10.8833, 122.4333, 3000, 2160, 540, 680, 510, 400, 440, 310, 95, 12, 35, 'Yellow', 'MODERATE: Watershed basin stable; standard standby mode.'),
 
-    -- Adequate / Safe Tier (Green)
+    -- ===== ADEQUATE / SAFE TIER (GREEN) (18 LGUs) =====
     ('Iloilo City', 'Iloilo', 'Iloilo City Hall / CDRRMO', 10.7202, 122.5621, 6000, 5450, 1360, 1720, 1280, 980, 1100, 750, 45, 5, 8, 'Green', 'ADEQUATE: Major regional hub well-stocked; regional disaster reserve intact.'),
     ('Passi City', 'Iloilo', 'Passi City CDRRMO', 11.1067, 122.6417, 4500, 3980, 995, 1250, 930, 720, 810, 560, 30, 4, 9, 'Green', 'ADEQUATE: Component city buffer stock sufficient; routine monitoring active.'),
     ('Pavia', 'Iloilo', 'Pavia Municipal Hall', 10.7764, 122.5400, 3000, 2580, 645, 810, 610, 480, 520, 360, 20, 3, 10, 'Green', 'ADEQUATE: High buffer stock; logistics proximity to regional warehouse.'),
@@ -134,96 +151,7 @@ with lgu_seed_data(muni, prov, name, lat, lng, max_s, ffp, rtef, hyg, sleep, kit
     ('San Miguel', 'Iloilo', 'San Miguel Municipal Hall', 10.7833, 122.4667, 3000, 2890, 720, 905, 685, 545, 590, 420, 0, 0, 5, 'Green', 'ADEQUATE: Central plains inventory verified; normal status.'),
     ('San Enrique', 'Iloilo', 'San Enrique Municipal Hall', 11.0833, 122.6500, 3000, 2910, 725, 910, 690, 550, 595, 425, 0, 0, 5, 'Green', 'ADEQUATE: Storage facility fully provisioned; no deficiencies.'),
     ('New Lucena', 'Iloilo', 'New Lucena Municipal Hall', 10.8833, 122.6000, 3000, 2930, 730, 915, 695, 555, 600, 430, 0, 0, 5, 'Green', 'ADEQUATE: Routine monitoring; inventory matches target capacity.'),
-    ('Igbaras', 'Iloilo', 'Igbaras Municipal Hall', 10.7167, 122.2667, 3000, 2950, 735, 920, 700, 560, 605, 435, 0, 0, 5, 'Green', 'ADEQUATE: Upland relief buffer completely filled; standard alert.'),
-
-    -- ===== ANTIQUE (18 LGUs) =====
-    -- Severe Tier (Red)
-    ('Caluya', 'Antique', 'Caluya Municipal Hall', 11.9167, 121.5667, 3000, 210, 50, 70, 45, 30, 35, 25, 3400, 91, 95, 'Red', 'CRITICAL: Isolated island group; emergency sea transport of food packs required.'),
-    ('Culasi', 'Antique', 'Culasi Municipal Hall', 11.4333, 122.0667, 3000, 280, 70, 90, 60, 40, 45, 35, 2750, 87, 91, 'Red', 'CRITICAL: Severe coastal wave surges; urgent prepositioning needed.'),
-    ('Barbaza', 'Antique', 'Barbaza Municipal Hall', 11.2167, 122.0667, 3000, 360, 90, 115, 75, 50, 60, 40, 2200, 83, 86, 'Red', 'CRITICAL: Major river spillover; local stocks below 20%.'),
-    ('Pandan', 'Antique', 'Pandan Municipal Hall', 11.7167, 122.1000, 3000, 440, 110, 130, 90, 65, 75, 50, 2500, 84, 88, 'Red', 'CRITICAL: Coastal access limited; relief augmentation dispatched.'),
-
-    -- Low / Warning Tier (Orange)
-    ('Bugasong', 'Antique', 'Bugasong Municipal Hall', 11.0500, 122.0667, 3000, 890, 220, 290, 200, 155, 175, 125, 1380, 61, 67, 'Orange', 'WARNING: Bridge approaches threatened; stage 800 food packs.'),
-    ('Laua-an', 'Antique', 'Laua-an Municipal Hall', 11.1500, 122.0500, 3000, 960, 240, 315, 220, 170, 190, 135, 1280, 57, 63, 'Orange', 'WARNING: Buffer reserves falling; emergency dispatch flagged.'),
-    ('Tibiao', 'Antique', 'Tibiao Municipal Hall', 11.2833, 122.0333, 3000, 1020, 255, 330, 235, 180, 200, 145, 1190, 54, 61, 'Orange', 'WARNING: River swell monitoring; preposition additional NFIs.'),
-    ('Valderrama', 'Antique', 'Valderrama Municipal Hall', 11.0000, 122.1333, 3000, 1090, 270, 350, 250, 195, 215, 155, 1100, 52, 59, 'Orange', 'WARNING: Mountain road blockages reported; stock replenishment queued.'),
-    ('Patnongon', 'Antique', 'Patnongon Municipal Hall', 10.9167, 121.9833, 3000, 1160, 290, 370, 265, 205, 225, 165, 960, 47, 56, 'Orange', 'WARNING: Moderate flood risk in low-lying barangays; monitor closely.'),
-
-    -- Medium / Moderate Tier (Yellow)
-    ('Belison', 'Antique', 'Belison Municipal Hall', 10.8333, 121.9667, 3000, 1580, 395, 500, 370, 285, 315, 215, 420, 33, 45, 'Yellow', 'MODERATE: Steady buffer stock; routine bi-weekly monitoring.'),
-    ('San Remigio', 'Antique', 'San Remigio Municipal Hall', 10.7833, 122.0833, 3000, 1670, 415, 525, 395, 305, 335, 225, 360, 28, 41, 'Yellow', 'MODERATE: Highland community access maintained; reserves stable.'),
-    ('Sebaste', 'Antique', 'Sebaste Municipal Hall', 11.5833, 122.0833, 3000, 1750, 435, 555, 415, 325, 355, 245, 280, 25, 39, 'Yellow', 'MODERATE: Local drainage holding; standard standby status.'),
-    ('Hamtic', 'Antique', 'Hamtic Municipal Hall', 10.7000, 121.9833, 3000, 1840, 460, 580, 435, 340, 375, 255, 210, 21, 36, 'Yellow', 'MODERATE: Satisfactory supply balance; standard monitoring.'),
-    ('Tobias Fornier', 'Antique', 'Tobias Fornier (Dao) Municipal Hall', 10.5167, 121.9333, 3000, 1930, 480, 610, 455, 355, 390, 270, 170, 19, 35, 'Yellow', 'MODERATE: Southern coast calm; normal relief readiness.'),
-
-    -- Adequate / Safe Tier (Green)
-    ('San Jose', 'Antique', 'San Jose de Buenavista Capital Hall', 10.7500, 121.9500, 5000, 4420, 1105, 1390, 1045, 815, 895, 620, 25, 3, 7, 'Green', 'ADEQUATE: Provincial capital hub fully provisioned; optimal reserves.'),
-    ('Sibalom', 'Antique', 'Sibalom Municipal Hall', 10.7833, 122.0167, 3000, 2680, 670, 845, 635, 495, 540, 375, 0, 0, 5, 'Green', 'ADEQUATE: Agricultural supply center well-stocked; routine operations.'),
-    ('Anini-y', 'Antique', 'Anini-y Municipal Hall', 10.4333, 121.9333, 3000, 2780, 695, 875, 655, 510, 560, 390, 0, 0, 5, 'Green', 'ADEQUATE: Southern tip clear; buffer reserves fully maintained.'),
-    ('Libertad', 'Antique', 'Libertad Municipal Hall', 12.0333, 121.9167, 3000, 2860, 715, 900, 675, 530, 580, 405, 0, 0, 5, 'Green', 'ADEQUATE: Northern gateway stable; full operational readiness.'),
-
-    -- ===== CAPIZ (17 LGUs) =====
-    -- Severe Tier (Red)
-    ('Tapaz', 'Capiz', 'Tapaz Municipal Hall', 11.2667, 122.5333, 3000, 220, 55, 75, 50, 35, 40, 25, 3600, 93, 97, 'Red', 'CRITICAL: Severe inland river flooding; isolated indigenous communities in need.'),
-    ('Jamindan', 'Capiz', 'Jamindan Municipal Hall', 11.4333, 122.4833, 3000, 320, 80, 100, 70, 45, 55, 35, 2700, 86, 90, 'Red', 'CRITICAL: Stock depletion below 15%; immediate convoy dispatch requested.'),
-    ('Sigma', 'Capiz', 'Sigma Municipal Hall', 11.4167, 122.6667, 3000, 390, 95, 120, 85, 60, 70, 45, 2350, 84, 88, 'Red', 'CRITICAL: Major road submerged; amphibious relief distribution active.'),
-
-    -- Low / Warning Tier (Orange)
-    ('Dumalag', 'Capiz', 'Dumalag Municipal Hall', 11.3000, 122.6167, 3000, 870, 215, 285, 195, 150, 170, 120, 1450, 63, 69, 'Orange', 'WARNING: Panay river tributaries rising; preposition 800 FFPs.'),
-    ('Dumarao', 'Capiz', 'Dumarao Municipal Hall', 11.2667, 122.7000, 3000, 940, 235, 310, 215, 165, 185, 130, 1320, 59, 65, 'Orange', 'WARNING: Agricultural flood damage; buffer stock declining.'),
-    ('Maayon', 'Capiz', 'Maayon Municipal Hall', 11.3833, 122.7833, 3000, 1010, 250, 330, 230, 180, 200, 140, 1200, 55, 62, 'Orange', 'WARNING: Low-lying barangays flooded; stage emergency relief.'),
-    ('Cuartero', 'Capiz', 'Cuartero Municipal Hall', 11.3500, 122.6833, 3000, 1080, 270, 350, 245, 190, 210, 150, 1120, 51, 58, 'Orange', 'WARNING: Main transport artery flooded; monitor stock drawdown.'),
-    ('Dao', 'Capiz', 'Dao Municipal Hall', 11.3833, 122.6833, 3000, 1150, 285, 370, 260, 200, 225, 160, 990, 48, 56, 'Orange', 'WARNING: Drainage bottleneck; relief augmentation scheduled.'),
-
-    -- Medium / Moderate Tier (Yellow)
-    ('Panay', 'Capiz', 'Panay Municipal Hall', 11.5500, 122.8000, 3000, 1600, 400, 510, 375, 290, 320, 220, 400, 31, 43, 'Yellow', 'MODERATE: Fishpond dikes monitored; buffer reserves stable.'),
-    ('Panitan', 'Capiz', 'Panitan Municipal Hall', 11.4667, 122.7667, 3000, 1690, 420, 535, 400, 310, 340, 235, 340, 28, 41, 'Yellow', 'MODERATE: Steady stock level; routine weekly assessment.'),
-    ('Pilar', 'Capiz', 'Pilar Municipal Hall', 11.4833, 122.9833, 3000, 1780, 445, 565, 420, 330, 360, 250, 270, 24, 38, 'Yellow', 'MODERATE: Coastal protection intact; normal standby.'),
-    ('Pontevedra', 'Capiz', 'Pontevedra Municipal Hall', 11.4833, 122.8500, 3000, 1870, 465, 590, 440, 345, 380, 260, 210, 21, 36, 'Yellow', 'MODERATE: River mouth clear; reserves at safe threshold.'),
-    ('President Roxas', 'Capiz', 'President Roxas Municipal Hall', 11.4333, 122.9333, 3000, 1950, 485, 615, 460, 360, 395, 275, 160, 18, 35, 'Yellow', 'MODERATE: Buffer inventory verified; standard reporting.'),
-    ('Mambusao', 'Capiz', 'Mambusao Municipal Hall', 11.4333, 122.6000, 3000, 2020, 505, 640, 475, 375, 410, 285, 130, 15, 35, 'Yellow', 'MODERATE: Satisfactory supply balance; normal operations.'),
-
-    -- Adequate / Safe Tier (Green)
-    ('Roxas City', 'Capiz', 'Roxas City CDRRMO Hall', 11.5853, 122.7511, 5500, 4850, 1210, 1530, 1145, 895, 985, 680, 35, 4, 8, 'Green', 'ADEQUATE: Provincial capital hub fully stocked; emergency reserves prime.'),
-    ('Sapian', 'Capiz', 'Sapian Municipal Hall', 11.5000, 122.6000, 3000, 2720, 680, 860, 645, 505, 550, 385, 0, 0, 5, 'Green', 'ADEQUATE: Coastal DRRM stock at optimal level; routine status.'),
-    ('Ivisan', 'Capiz', 'Ivisan Municipal Hall', 11.5167, 122.7000, 3000, 2840, 710, 895, 670, 525, 575, 400, 0, 0, 5, 'Green', 'ADEQUATE: Strategic junction fully supplied; no deficiencies.'),
-
-    -- ===== AKLAN (17 LGUs) =====
-    -- Severe Tier (Red)
-    ('Buruanga', 'Aklan', 'Buruanga Municipal Hall', 11.8333, 121.8833, 3000, 230, 55, 75, 50, 35, 40, 25, 3100, 90, 94, 'Red', 'CRITICAL: Western coastline cut off by landslide; emergency food packs airlifted.'),
-    ('Libacao', 'Aklan', 'Libacao Municipal Hall', 11.4500, 122.3000, 3000, 310, 75, 100, 70, 45, 55, 35, 2650, 86, 90, 'Red', 'CRITICAL: Aklan river headwaters overflowing; upland stock critically low.'),
-    ('Madalag', 'Aklan', 'Madalag Municipal Hall', 11.5167, 122.3000, 3000, 400, 100, 125, 85, 60, 70, 45, 2300, 83, 87, 'Red', 'CRITICAL: Mountain road erosion; urgent replenishment queued.'),
-
-    -- Low / Warning Tier (Orange)
-    ('Ibajay', 'Aklan', 'Ibajay Municipal Hall', 11.8167, 122.1667, 3000, 880, 220, 285, 195, 155, 175, 125, 1410, 62, 68, 'Orange', 'WARNING: River mouth siltation causing localized floods; stage 800 FFPs.'),
-    ('Malay', 'Aklan', 'Malay Municipal Hall (Boracay Hub)', 11.9000, 121.9167, 4000, 1350, 335, 430, 320, 250, 275, 190, 1550, 58, 64, 'Orange', 'WARNING: Tourism workers relief queue forming; augmentation requested.'),
-    ('Nabas', 'Aklan', 'Nabas Municipal Hall', 11.8833, 122.0667, 3000, 1030, 255, 335, 235, 185, 205, 145, 1180, 54, 61, 'Orange', 'WARNING: Highway pass landslide watch; preposition secondary stock.'),
-    ('Tangalan', 'Aklan', 'Tangalan Municipal Hall', 11.7833, 122.2500, 3000, 1110, 275, 355, 250, 195, 220, 155, 1070, 50, 58, 'Orange', 'WARNING: Coastal tidal flood warning; buffer stock declining.'),
-    ('Numancia', 'Aklan', 'Numancia Municipal Hall', 11.7000, 122.3333, 3000, 1180, 295, 380, 265, 210, 230, 165, 950, 47, 55, 'Orange', 'WARNING: Delta flooding risk; stage emergency food packs.'),
-
-    -- Medium / Moderate Tier (Yellow)
-    ('Altavas', 'Aklan', 'Altavas Municipal Hall', 11.5333, 122.5000, 3000, 1620, 405, 515, 380, 295, 325, 225, 390, 30, 43, 'Yellow', 'MODERATE: Bay area waters calm; buffer stock maintained.'),
-    ('Balete', 'Aklan', 'Balete Municipal Hall', 11.5500, 122.3833, 3000, 1710, 425, 540, 405, 315, 345, 240, 330, 27, 40, 'Yellow', 'MODERATE: Inland creeks stable; routine inventory monitoring.'),
-    ('Banga', 'Aklan', 'Banga Municipal Hall', 11.6333, 122.3333, 3000, 1800, 450, 570, 425, 330, 365, 250, 260, 24, 38, 'Yellow', 'MODERATE: Satisfactory supply balance; normal standby status.'),
-    ('Batan', 'Aklan', 'Batan Municipal Hall', 11.5833, 122.5000, 3000, 1890, 470, 600, 445, 350, 385, 265, 200, 20, 36, 'Yellow', 'MODERATE: Coastal fish sanctuaries safe; standard reporting.'),
-    ('Lezo', 'Aklan', 'Lezo Municipal Hall', 11.6667, 122.3333, 3000, 1970, 490, 620, 465, 365, 400, 280, 150, 17, 35, 'Yellow', 'MODERATE: Local pottery barangays secure; reserves safe.'),
-    ('Makato', 'Aklan', 'Makato Municipal Hall', 11.7167, 122.2833, 3000, 2050, 510, 650, 480, 380, 415, 290, 110, 14, 35, 'Yellow', 'MODERATE: Agricultural zone stable; bi-weekly review passed.'),
-
-    -- Adequate / Safe Tier (Green)
-    ('Kalibo', 'Aklan', 'Kalibo Municipal Hall / MDRRMO', 11.7083, 122.3667, 5000, 4350, 1085, 1370, 1025, 805, 885, 615, 20, 3, 7, 'Green', 'ADEQUATE: Provincial capital hub heavily provisioned; ready for deployment.'),
-    ('Malinao', 'Aklan', 'Malinao Municipal Hall', 11.6500, 122.3167, 3000, 2750, 685, 870, 650, 510, 555, 385, 0, 0, 5, 'Green', 'ADEQUATE: Buffer capacity optimal; no active disaster flags.'),
-    ('New Washington', 'Aklan', 'New Washington Municipal Hall', 11.6500, 122.4333, 3000, 2870, 715, 900, 675, 530, 580, 405, 0, 0, 5, 'Green', 'ADEQUATE: Port facilities fully stocked; routine operations.'),
-
-    -- ===== GUIMARAS (5 LGUs) =====
-    -- Severe Tier (Red)
-    ('Jordan', 'Guimaras', 'Jordan Municipal Hall / PDRRMO', 10.6583, 122.5933, 3000, 330, 80, 105, 75, 50, 60, 40, 2800, 88, 92, 'Red', 'CRITICAL: Island crossing disrupted by gale warning; emergency buffer depleted.'),
-    ('Buenavista', 'Guimaras', 'Buenavista Municipal Hall', 10.6939, 122.6842, 3000, 410, 100, 125, 90, 65, 75, 50, 2450, 85, 89, 'Red', 'CRITICAL: Northern wharf sea barrier damaged; relief barge dispatched.'),
-
-    -- Low / Warning Tier (Orange)
-    ('Nueva Valencia', 'Guimaras', 'Nueva Valencia Municipal Hall', 10.5186, 122.5414, 3000, 930, 230, 300, 210, 160, 180, 125, 1360, 60, 66, 'Orange', 'WARNING: Southern coastline swell warning; stage 700 FFPs.'),
-    ('San Lorenzo', 'Guimaras', 'San Lorenzo Municipal Hall', 10.6128, 122.6881, 3000, 1050, 260, 335, 235, 185, 205, 145, 1170, 53, 60, 'Orange', 'WARNING: Wind corridor damage; buffer reserves falling.'),
-    ('Sibunag', 'Guimaras', 'Sibunag Municipal Hall', 10.5500, 122.6333, 3000, 1140, 285, 365, 255, 200, 220, 155, 1020, 49, 57, 'Orange', 'WARNING: Inshore fisheries disruption; relief replenishment scheduled.')
+    ('Igbaras', 'Iloilo', 'Igbaras Municipal Hall', 10.7167, 122.2667, 3000, 2950, 735, 920, 700, 560, 605, 435, 0, 0, 5, 'Green', 'ADEQUATE: Upland relief buffer completely filled; standard alert.')
 )
 insert into public.lgus (
   municipality,
@@ -297,16 +225,16 @@ on conflict (municipality, province) do update set
   recommendation = excluded.recommendation,
   last_reported_at = excluded.last_reported_at;
 
--- Link LGUs to province foreign key
+-- Link Iloilo LGUs to province foreign key
 update public.lgus l
 set province_id = p.id
 from public.provinces p
 where l.province_id is null and lower(trim(l.province)) = lower(trim(p.name));
 
 -- ------------------------------------------------------------------------------
--- SECTION 3: NORMALIZED PHYSICAL BUFFER STOCK (public.lgu_stock)
+-- SECTION 4: NORMALIZED PHYSICAL BUFFER STOCK (public.lgu_stock)
 -- ------------------------------------------------------------------------------
--- Inserts 7 rows per LGU (101 * 7 = 707 rows)
+-- Inserts 7 rows per Iloilo LGU (43 * 7 = 301 rows)
 -- ------------------------------------------------------------------------------
 
 insert into public.lgu_stock (lgu_id, kit_type_id, quantity, updated_at)
@@ -326,16 +254,15 @@ select
   now()
 from public.lgus l
 cross join public.kit_types k
+where l.province = 'Iloilo'
 on conflict (lgu_id, kit_type_id) do update set
   quantity = excluded.quantity,
   updated_at = now();
 
 -- ------------------------------------------------------------------------------
--- SECTION 4: SITUATIONAL ASSESSMENT REPORTS (public.lgu_inventory_reports)
+-- SECTION 5: SITUATIONAL ASSESSMENT REPORTS (public.lgu_inventory_reports)
 -- ------------------------------------------------------------------------------
--- Seed fresh reports for all 101 LGUs matching their prioritized situation.
--- Idempotent: cleans prior automated seed reports (reported_by_profile_id is null)
--- so running this script multiple times will never duplicate rows.
+-- Seed fresh reports for the 43 Iloilo LGUs (43 rows)
 -- ------------------------------------------------------------------------------
 
 delete from public.lgu_inventory_reports
@@ -370,13 +297,13 @@ select
   l.urgency_score,
   l.priority_color,
   l.recommendation
-from public.lgus l;
+from public.lgus l
+where l.province = 'Iloilo';
 
 -- ------------------------------------------------------------------------------
--- SECTION 5: REGIONAL WAREHOUSE RESERVES (public.warehouse_stock)
+-- SECTION 6: REGIONAL WAREHOUSE RESERVES (public.warehouse_stock)
 -- ------------------------------------------------------------------------------
--- Oton Main Warehouse: ~140,200 kits total
--- Pototan Main Warehouse: ~74,000 kits total
+-- Oton Main Warehouse (140,200 kits) & Pototan Main Warehouse (74,000 kits)
 -- ------------------------------------------------------------------------------
 
 with wh_stock_seed(wh_name, kit_name, qty) as (
@@ -428,9 +355,9 @@ set
   );
 
 -- ------------------------------------------------------------------------------
--- SECTION 6: VERIFIED INBOUND LOGISTICS MANIFESTS (public.incoming_manifests)
+-- SECTION 7: VERIFIED INBOUND LOGISTICS MANIFESTS (public.incoming_manifests)
 -- ------------------------------------------------------------------------------
--- Inbound shipments from National Resource Centers (VDRC / LDRC) to Warehouses & LGUs
+-- Exclusively to Oton, Pototan, and key Iloilo LGUs
 -- ------------------------------------------------------------------------------
 
 with incoming_seed(m_num, rcv_date, src_code, dest_type, wh_name, lgu_muni, lgu_prov, kit_name, qty, exp_interval, inc_code, hash) as (
@@ -455,22 +382,22 @@ with incoming_seed(m_num, rcv_date, src_code, dest_type, wh_name, lgu_muni, lgu_
     ('MNF-2026-POT-03', current_date - 3, 'LDRC', 'Warehouse', 'Pototan Main Warehouse', null, null, 'Family Food Pack', 15000, interval '240 days', 'INC-2026-PREPOSITION', '0x5bc783ae655d2b49ebf7084d14760ea8e92158b2d7a75ae84bc9a40b2817cd4b'),
     ('MNF-2026-POT-04', current_date - 2, 'LDRC', 'Warehouse', 'Pototan Main Warehouse', null, null, 'Hygiene Kit', 3500, interval '112 days', 'INC-2026-PREPOSITION', '0x6cd894bf766e3c5af008195e25871fb9fa3269c3e8b86bf95cda051c3928de5c'),
 
-    -- Direct Inbounds to Critical LGUs (Near Expiry <= 90 Days)
+    -- Direct Inbounds to Iloilo LGUs (Near Expiry <= 90 Days)
     ('MNF-2026-LGU-CARLES-01', current_date - 5, 'VDRC', 'LGU', null, 'Carles', 'Iloilo', 'Family Food Pack', 120, interval '28 days', 'INC-2026-TY-01', '0x7de9a5c0877f4d6b01192a6f369820cafb437ad4f9c97c0a6deb162d4a39ef6d'),
     ('MNF-2026-LGU-BALASAN-01', current_date - 4, 'VDRC', 'LGU', null, 'Balasan', 'Iloilo', 'Family Food Pack', 150, interval '35 days', 'INC-2026-TY-01', '0x8ef0b6d198805e7c122a3b7047a931db0c548be50ad08d1b7efc273e5b4af07e'),
     ('MNF-2026-LGU-ESTANCIA-01', current_date - 4, 'VDRC', 'LGU', null, 'Estancia', 'Iloilo', 'Ready-to-Eat Food (RTEF)', 80, interval '50 days', 'INC-2026-TY-01', '0x9f01c7e2a9916f8d233b4c8158ba42ec1d659cf61be19e2c8f0d384f6c5b018f'),
-    ('MNF-2026-LGU-TAPAZ-01', current_date - 3, 'LDRC', 'LGU', null, 'Tapaz', 'Capiz', 'Family Food Pack', 140, interval '42 days', 'INC-2026-FLD-01', '0xa012d8f3ba02709e344c5d9269cb53fd2e76ad072cf2af3d901e49507d6c1290'),
-    ('MNF-2026-LGU-CALUYA-01', current_date - 6, 'VDRC', 'LGU', null, 'Caluya', 'Antique', 'Family Food Pack', 160, interval '38 days', 'INC-2026-TY-01', '0xb123e904cb1381af455d6ea370dc640e3f87be183d03b04ea12f5a618e7d23a1'),
-    ('MNF-2026-LGU-JORDAN-01', current_date - 5, 'VDRC', 'LGU', null, 'Jordan', 'Guimaras', 'Family Food Pack', 180, interval '55 days', 'INC-2026-TY-01', '0xc234fa15dc2492b0566e7fb481ed751f4098cf294e14c15fb2306b729f8e34b2'),
-    ('MNF-2026-LGU-BURUANGA-01', current_date - 4, 'LDRC', 'LGU', null, 'Buruanga', 'Aklan', 'Family Food Pack', 130, interval '62 days', 'INC-2026-TY-01', '0xd3450b26ed35a3c1677f80c592fe862051a9d03a5f25d260c3417c83a09f45c3'),
+    ('MNF-2026-LGU-SANDIONISIO-01', current_date - 3, 'LDRC', 'LGU', null, 'San Dionisio', 'Iloilo', 'Family Food Pack', 140, interval '42 days', 'INC-2026-FLD-01', '0xa012d8f3ba02709e344c5d9269cb53fd2e76ad072cf2af3d901e49507d6c1290'),
+    ('MNF-2026-LGU-BATAD-01', current_date - 6, 'VDRC', 'LGU', null, 'Batad', 'Iloilo', 'Family Food Pack', 160, interval '38 days', 'INC-2026-TY-01', '0xb123e904cb1381af455d6ea370dc640e3f87be183d03b04ea12f5a618e7d23a1'),
+    ('MNF-2026-LGU-CONCEPCION-01', current_date - 5, 'VDRC', 'LGU', null, 'Concepcion', 'Iloilo', 'Family Food Pack', 180, interval '55 days', 'INC-2026-TY-01', '0xc234fa15dc2492b0566e7fb481ed751f4098cf294e14c15fb2306b729f8e34b2'),
+    ('MNF-2026-LGU-SARA-01', current_date - 4, 'LDRC', 'LGU', null, 'Sara', 'Iloilo', 'Family Food Pack', 130, interval '62 days', 'INC-2026-TY-01', '0xd3450b26ed35a3c1677f80c592fe862051a9d03a5f25d260c3417c83a09f45c3'),
 
-    -- Direct Inbounds to Critical LGUs (Near Expiry 91 - 120 Days)
+    -- Direct Inbounds to Iloilo LGUs (Near Expiry 91 - 120 Days)
     ('MNF-2026-LGU-CARLES-02', current_date - 3, 'VDRC', 'LGU', null, 'Carles', 'Iloilo', 'Ready-to-Eat Food (RTEF)', 60, interval '98 days', 'INC-2026-TY-01', '0xe4561c37fe46b4d2788091d6a30f973162ba814b6036e371d4528d94b1a056d4'),
     ('MNF-2026-LGU-AJUY-01', current_date - 4, 'VDRC', 'LGU', null, 'Ajuy', 'Iloilo', 'Family Food Pack', 350, interval '105 days', 'INC-2026-PREPOSITION', '0xf5672d480f57c5e38991a2e7b410a84273cb925c7147f482e5639ea5c2b167e5'),
-    ('MNF-2026-LGU-ROXAS-01', current_date - 2, 'LDRC', 'LGU', null, 'Roxas City', 'Capiz', 'Hygiene Kit', 400, interval '112 days', 'INC-2026-PREPOSITION', '0x06783e591068d6f49aa2b3f8c521b95384dc036d82580593f674afb6d3c278f6'),
-    ('MNF-2026-LGU-KALIBO-01', current_date - 3, 'LDRC', 'LGU', null, 'Kalibo', 'Aklan', 'Family Food Pack', 600, interval '118 days', 'INC-2026-PREPOSITION', '0x17894f6a2179e705abb3c409d632ca6495ed147e936916a40785b0c7e4d38907'),
-    ('MNF-2026-LGU-SANJOSE-01', current_date - 4, 'VDRC', 'LGU', null, 'San Jose', 'Antique', 'Family Kit', 320, interval '108 days', 'INC-2026-PREPOSITION', '0x2890507b328af816bcc4d51ae743db75a6fe258fa47a27b51896c1d8f5e49a18'),
-    ('MNF-2026-LGU-JORDAN-02', current_date - 2, 'VDRC', 'LGU', null, 'Jordan', 'Guimaras', 'Hygiene Kit', 150, interval '115 days', 'INC-2026-TY-01', '0x39a1618c439b0927cdd5e62bf854ec86b70f3690b58b38c629a7d2e906f5ab29')
+    ('MNF-2026-LGU-PASSI-01', current_date - 2, 'LDRC', 'LGU', null, 'Passi City', 'Iloilo', 'Hygiene Kit', 400, interval '112 days', 'INC-2026-PREPOSITION', '0x06783e591068d6f49aa2b3f8c521b95384dc036d82580593f674afb6d3c278f6'),
+    ('MNF-2026-LGU-ILOILOCITY-01', current_date - 3, 'LDRC', 'LGU', null, 'Iloilo City', 'Iloilo', 'Family Food Pack', 600, interval '118 days', 'INC-2026-PREPOSITION', '0x17894f6a2179e705abb3c409d632ca6495ed147e936916a40785b0c7e4d38907'),
+    ('MNF-2026-LGU-BAROTACVIEJO-01', current_date - 4, 'VDRC', 'LGU', null, 'Barotac Viejo', 'Iloilo', 'Family Kit', 320, interval '108 days', 'INC-2026-PREPOSITION', '0x2890507b328af816bcc4d51ae743db75a6fe258fa47a27b51896c1d8f5e49a18'),
+    ('MNF-2026-LGU-LEMERY-01', current_date - 2, 'VDRC', 'LGU', null, 'Lemery', 'Iloilo', 'Hygiene Kit', 150, interval '115 days', 'INC-2026-TY-01', '0x39a1618c439b0927cdd5e62bf854ec86b70f3690b58b38c629a7d2e906f5ab29')
 )
 insert into public.incoming_manifests (
   manifest_number,
@@ -521,7 +448,7 @@ on conflict (manifest_number) do update set
   manifest_hash = excluded.manifest_hash;
 
 -- ------------------------------------------------------------------------------
--- SECTION 7: INVENTORY LOT BATCHES WITH EXPIRATION TRACKING (public.inventory_batches)
+-- SECTION 8: INVENTORY LOT BATCHES WITH EXPIRATION TRACKING (public.inventory_batches)
 -- ------------------------------------------------------------------------------
 -- Linked to inbound manifests with explicit rolling expiration countdowns
 -- ------------------------------------------------------------------------------
@@ -558,7 +485,7 @@ on conflict (batch_token_id) do update set
   manifest_hash = excluded.manifest_hash;
 
 -- ------------------------------------------------------------------------------
--- SECTION 8: DOUBLE-ENTRY AUDIT JOURNAL (public.stock_ledger)
+-- SECTION 9: DOUBLE-ENTRY AUDIT JOURNAL (public.stock_ledger)
 -- ------------------------------------------------------------------------------
 -- Auditable record of verified inbound intakes
 -- ------------------------------------------------------------------------------
@@ -592,21 +519,34 @@ where m.manifest_number like 'MNF-2026-%'
   );
 
 -- ------------------------------------------------------------------------------
--- SECTION 9: VERIFICATION & SUMMARY DIAGNOSTIC AUDIT
+-- SECTION 10: RECLAIM STORAGE PAGES & MEMORY
+-- ------------------------------------------------------------------------------
+
+vacuum analyze public.stock_ledger;
+vacuum analyze public.inventory_batches;
+vacuum analyze public.incoming_manifests;
+vacuum analyze public.lgu_inventory_reports;
+vacuum analyze public.lgu_stock;
+vacuum analyze public.warehouse_stock;
+vacuum analyze public.lgus;
+vacuum analyze public.warehouses;
+
+-- ------------------------------------------------------------------------------
+-- SECTION 11: VERIFICATION & SUMMARY DIAGNOSTIC AUDIT
 -- ------------------------------------------------------------------------------
 
 select
-  'SUMMARY AUDIT' as check_type,
-  (select count(*) from public.lgus) as total_lgus,
-  (select count(*) from public.lgus where priority_color = 'Red') as severe_red_lgus,
-  (select count(*) from public.lgus where priority_color = 'Orange') as low_orange_lgus,
-  (select count(*) from public.lgus where priority_color = 'Yellow') as mid_yellow_lgus,
-  (select count(*) from public.lgus where priority_color = 'Green') as safe_green_lgus,
-  (select count(*) from public.lgu_stock) as total_lgu_stock_records,
-  (select count(*) from public.warehouses) as total_warehouses,
-  (select count(*) from public.warehouse_stock) as total_warehouse_stock_records,
-  (select count(*) from public.incoming_manifests) as total_incoming_manifests,
-  (select count(*) from public.inventory_batches) as total_inventory_batches,
-  (select count(*) from public.inventory_batches where expiration_date <= current_date + interval '90 days') as batches_expiring_90d,
-  (select count(*) from public.inventory_batches where expiration_date > current_date + interval '90 days' and expiration_date <= current_date + interval '120 days') as batches_expiring_120d;
-
+  'ILOILO PROVINCE AUDIT' as check_type,
+  (select count(*) from public.lgus where province = 'Iloilo') as iloilo_lgus_total,
+  (select count(*) from public.lgus where province = 'Iloilo' and priority_color = 'Red') as severe_red_lgus,
+  (select count(*) from public.lgus where province = 'Iloilo' and priority_color = 'Orange') as low_orange_lgus,
+  (select count(*) from public.lgus where province = 'Iloilo' and priority_color = 'Yellow') as mid_yellow_lgus,
+  (select count(*) from public.lgus where province = 'Iloilo' and priority_color = 'Green') as safe_green_lgus,
+  (select count(*) from public.lgu_stock where lgu_id in (select id from public.lgus where province = 'Iloilo')) as iloilo_stock_records,
+  (select count(*) from public.lgu_inventory_reports where province = 'Iloilo') as iloilo_inventory_reports,
+  (select count(*) from public.warehouses where province = 'Iloilo') as iloilo_warehouses,
+  (select count(*) from public.warehouse_stock) as warehouse_stock_records,
+  (select count(*) from public.incoming_manifests where manifest_number like 'MNF-2026-%') as active_inbound_manifests,
+  (select count(*) from public.inventory_batches where batch_token_id like 'BATCH-MNF-2026-%') as active_batches,
+  (select count(*) from public.inventory_batches where batch_token_id like 'BATCH-MNF-2026-%' and expiration_date <= current_date + interval '90 days') as batches_expiring_90d,
+  (select count(*) from public.inventory_batches where batch_token_id like 'BATCH-MNF-2026-%' and expiration_date > current_date + interval '90 days' and expiration_date <= current_date + interval '120 days') as batches_expiring_120d;

@@ -97,3 +97,4 @@ select
   (select count(*) from public.lgu_inventory_reports where reported_by_profile_id is null) as remaining_seed_reports,
   (select sum(food_packs) from public.lgus) as total_lgu_food_packs_sum,
   (select sum(food_packs) from public.warehouses) as total_warehouse_food_packs_sum;
+
