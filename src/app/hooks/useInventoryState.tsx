@@ -2009,6 +2009,97 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     return { ok: true, message: `Receiver confirmation recorded via ${proof.mode === 'contract' ? 'blockchain transaction' : 'cryptographic signature proof'}.`, txHash: proof.hash };
   };
 
+  const adminEmergencyBypassAccept = async (
+    drNumber: string,
+    reason: string
+  ): Promise<{ ok: boolean; message: string; txHash?: string }> => {
+    if (!adminActionsEnabled) {
+      return { ok: false, message: 'Administrative Mode must be enabled in Settings to execute an emergency bypass.' };
+    }
+    const cleanReason = (reason || '').trim();
+    if (!cleanReason) {
+      return { ok: false, message: 'An emergency authorization reason / incident note is required.' };
+    }
+
+    const targetDrUpper = drNumber.trim().toUpperCase();
+    const release = outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
+    if (!release) return { ok: false, message: 'Release not found.' };
+    const canonicalDr = release.drNumber;
+
+    if (!['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'].includes(release.deliveryStatus)) {
+      return {
+        ok: false,
+        message: `Shipment ${canonicalDr} is currently "${release.deliveryStatus}". It cannot be bypassed in its current state.`
+      };
+    }
+
+    const lguLookup = findMatchingLgu(lgusList, release?.destinationAddress || release?.lguName || release?.municipality || '', release?.province);
+    const bypassGps = release?.receiverGps || (lguLookup ? `${lguLookup.latitude.toFixed(5)}, ${lguLookup.longitude.toFixed(5)}` : '10.7202, 122.5621');
+    const handoverContractId = release.handoverContractId || `HANDOVER-${canonicalDr}`;
+
+    let proofHash = `0xBYPASS_${Date.now().toString(16)}_${Math.random().toString(16).slice(2, 10)}`;
+    try {
+      const proof = await blockchain.confirmReceipt({
+        drNumber: canonicalDr,
+        handoverContractId,
+        destination: release.lguName || '',
+        gps: bypassGps,
+        signerWallet: currentActor.wallet || undefined
+      });
+      if (proof?.hash) proofHash = proof.hash;
+    } catch (err) {
+      console.warn('Blockchain confirmReceipt for emergency bypass fallback to cryptographic record:', err);
+    }
+
+    const auditNote = `[EMERGENCY BYPASS] LGU QR scan requirement bypassed by Administrator (${currentActor.name || 'DSWD Admin'}). Reason: ${cleanReason}`;
+
+    setOutgoingReleasesList(prev => prev.map(item => item.drNumber.trim().toUpperCase() === targetDrUpper
+      ? {
+          ...item,
+          deliveryStatus: 'Accepted',
+          handoverContractId,
+          receiverSignature: proofHash,
+          receiverGps: bypassGps,
+          blockchainTxHash: proofHash,
+          auditTrail: [audit('Admin Emergency Bypass', auditNote, proofHash), ...item.auditTrail]
+        }
+      : item
+    ));
+
+    await backendApi.updateOutgoing(canonicalDr, {
+      deliveryStatus: 'Accepted',
+      receiverGps: bypassGps,
+      txHash: proofHash,
+      handoverContractId,
+      receiverSignature: proofHash,
+      walletAddress: currentActor.wallet || undefined,
+      receivedByProfileId: currentActor.id
+    }).then(() => {
+      backendApi.markTruckLiveLocationDoneByDr(canonicalDr).catch(() => {});
+    }).catch(error => {
+      logBackendError('Admin emergency bypass accept')(error);
+    });
+
+    await backendApi.logActivity({
+      action: 'ADMIN_EMERGENCY_BYPASS',
+      entityType: 'OutgoingRelease',
+      entityId: canonicalDr,
+      details: auditNote,
+      txHash: proofHash,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      metadata: {
+        drNumber: canonicalDr,
+        destination: release.lguName,
+        reason: cleanReason,
+        gps: bypassGps,
+        txHash: proofHash
+      }
+    }).catch(() => {});
+
+    return { ok: true, message: `Emergency bypass confirmed. Shipment ${canonicalDr} is now marked as Accepted.`, txHash: proofHash };
+  };
+
   const assignEscortAndTruck = async (
     drNumber: string,
     truckId: string | null,
@@ -2461,6 +2552,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     senderSignAndRelease,
     markInTransit,
     receiverAcceptWithGps,
+    adminEmergencyBypassAccept,
     assignEscortAndTruck,
     recordCustodyHop: backendApi.recordCustodyHop.bind(backendApi),
     getCustodyHops: backendApi.getCustodyHops.bind(backendApi),

@@ -987,18 +987,17 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <MapPin className="w-5 h-5 text-blue-600 group-hover:text-white transition-colors" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="inline-block text-[10px] font-mono font-semibold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5 truncate max-w-full" title={lgu.id}>
-                        {lgu.id}
-                      </span>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <h3 className="font-bold text-base text-gray-900 group-hover:text-blue-600 transition-colors truncate" title={lgu.municipality}>{lgu.municipality}</h3>
+                        <h3 className="font-bold text-base text-gray-900 group-hover:text-blue-600 transition-colors truncate" title={lgu.lguName || lgu.municipality}>
+                          {lgu.lguName || lgu.municipality}
+                        </h3>
                         {lgu.isActive === false && (
                           <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
                             Archived
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{lgu.municipality}, {lgu.province}</p>
                     </div>
                   </div>
                   {adminActionsEnabled && (

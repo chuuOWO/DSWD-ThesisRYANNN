@@ -7,6 +7,7 @@ interface AuthContextValue {
   session: Session | null;
   profile: UserProfile | null;
   isLoading: boolean;
+  isLoggingOut: boolean;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -17,6 +18,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const loadProfile = async (nextSession: Session | null) => {
     if (!nextSession?.user) {
@@ -95,13 +97,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const handleSignOut = async () => {
+    setIsLoggingOut(true);
+    try {
+      await authApi.signOut();
+    } catch (err) {
+      console.error('Failed to sign out', err);
+    } finally {
+      setTimeout(() => {
+        setIsLoggingOut(false);
+      }, 500);
+    }
+  };
+
   const value = useMemo<AuthContextValue>(() => ({
     session,
     profile,
     isLoading,
+    isLoggingOut,
     refreshProfile,
-    signOut: authApi.signOut
-  }), [session, profile, isLoading]);
+    signOut: handleSignOut
+  }), [session, profile, isLoading, isLoggingOut]);
 
   return (
     <AuthContext.Provider value={value}>

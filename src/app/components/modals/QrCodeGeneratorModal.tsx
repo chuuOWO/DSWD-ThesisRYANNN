@@ -253,8 +253,9 @@ export function QrCodeGeneratorModal({
     printWindow.document.close();
   };
 
+  const isDroppedOff = Boolean(currentRelease && currentRelease.deliveryStatus === 'Delivered');
   const isCompleted = Boolean(
-    currentRelease && ['Delivered', 'Accepted', 'Distributed'].includes(currentRelease.deliveryStatus)
+    currentRelease && ['Accepted', 'Distributed'].includes(currentRelease.deliveryStatus)
   );
 
   const content = (
@@ -343,9 +344,13 @@ export function QrCodeGeneratorModal({
       <div className="w-full lg:w-96 flex flex-col items-center justify-center bg-gray-50 rounded-2xl p-6 border border-gray-200">
         <div className="text-center mb-3">
           <span className={`inline-block rounded-full text-[10px] font-bold px-3 py-1 uppercase tracking-wider mb-1 ${
-            isCompleted ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+            isCompleted
+              ? 'bg-emerald-100 text-emerald-800'
+              : isDroppedOff
+              ? 'bg-purple-100 text-purple-900 border border-purple-200'
+              : 'bg-blue-100 text-blue-800'
           }`}>
-            {isCompleted ? 'Completed Shipment' : 'Official Manifest QR'}
+            {isCompleted ? 'Completed Shipment' : isDroppedOff ? 'Dropped Off at Site' : 'Official Manifest QR'}
           </span>
           <h3 className="text-base font-extrabold text-gray-900">{payload?.drNumber || currentRelease?.drNumber || 'No Release'}</h3>
           {payload ? (
@@ -359,7 +364,7 @@ export function QrCodeGeneratorModal({
 
         {/* QR Code Canvas / Image */}
         <div className={`relative p-4 bg-white rounded-2xl shadow-md border-2 ${
-          isCompleted ? 'border-emerald-500/30 opacity-90' : 'border-blue-600/30'
+          isCompleted ? 'border-emerald-500/30 opacity-90' : isDroppedOff ? 'border-purple-600/40' : 'border-blue-600/30'
         }`}>
           {qrDataUrl ? (
             <img
@@ -379,9 +384,13 @@ export function QrCodeGeneratorModal({
             </div>
           )}
           <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full shadow ${
-            isCompleted ? 'bg-emerald-700' : 'bg-blue-700'
+            isCompleted ? 'bg-emerald-700' : isDroppedOff ? 'bg-purple-700' : 'bg-blue-700'
           }`}>
-            {isCompleted ? 'Completed — QR Closed' : 'Ready for Receiver Scan'}
+            {isCompleted
+              ? 'Completed — QR Closed'
+              : isDroppedOff
+              ? 'Dropped Off — Ready for LGU Scan'
+              : 'Ready for Receiver Scan'}
           </div>
         </div>
 
@@ -389,6 +398,10 @@ export function QrCodeGeneratorModal({
           {isCompleted ? (
             <span className="text-emerald-700 font-semibold">
               This shipment has been accepted into inventory. The delivery cycle is complete and this QR code is closed.
+            </span>
+          ) : isDroppedOff ? (
+            <span className="text-purple-900 font-semibold">
+              Shipment dropped off on location by escort officer. Scan with the <strong>LGU Receiver Scanner</strong> to confirm physical receipt and intake into inventory.
             </span>
           ) : (
             <>

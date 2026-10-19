@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
@@ -27,7 +27,8 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  ExternalLink
+  ExternalLink,
+  X
 } from 'lucide-react';
 import {
   BarChart,
@@ -245,6 +246,24 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [selectedDisasterFilter, setSelectedDisasterFilter] = useState<string>('All');
   const [selectedLguFilter, setSelectedLguFilter] = useState<string>('All');
+  const [selectedLgus, setSelectedLgus] = useState<string[]>([]);
+  const [hasCustomLguFilter, setHasCustomLguFilter] = useState<boolean>(false);
+  const [isLguDropdownOpen, setIsLguDropdownOpen] = useState(false);
+  const [lguSearchQuery, setLguSearchQuery] = useState('');
+  const lguDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (lguDropdownRef.current && !lguDropdownRef.current.contains(e.target as Node)) {
+        setIsLguDropdownOpen(false);
+      }
+    };
+    if (isLguDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isLguDropdownOpen]);
+
   const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
   const [capacityVersion, setCapacityVersion] = useState(0);
@@ -552,7 +571,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
       }
 
       // 3. LGU filter
-      if (selectedLguFilter !== 'All') {
+      if (hasCustomLguFilter) {
+        if (!r.municipality || !selectedLgus.includes(r.municipality)) return false;
+      } else if (selectedLguFilter !== 'All') {
         if (!r.municipality || r.municipality.toLowerCase() !== selectedLguFilter.toLowerCase()) return false;
       }
 
@@ -574,7 +595,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
 
       return true;
     });
-  }, [outgoingReleasesList, timeFilter, selectedQuarter, selectedMonth, selectedDisasterFilter, selectedLguFilter, commodityTypeFilter, selectedCategoryFilter]);
+  }, [outgoingReleasesList, timeFilter, selectedQuarter, selectedMonth, selectedDisasterFilter, selectedLguFilter, hasCustomLguFilter, selectedLgus, commodityTypeFilter, selectedCategoryFilter]);
 
   // Warehouse Capacities partitioned into 2: Food Items and Non-Food Items (User-configured)
   const warehouseCapacityTotals = useMemo(() => {
@@ -775,9 +796,11 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
         const warehouseStock = whItem ? (whItem.totalStock ?? (whItem.warehouseA + whItem.warehouseB)) : 0;
 
         // 2. LGU on-hand
-        const lguOnHand = effectiveLgus.reduce((sum, lgu) => {
-          return sum + (getLguStockForCategory(lgu, cat) || 0);
-        }, 0);
+        const lguOnHand = effectiveLgus
+          .filter(lgu => !hasCustomLguFilter || selectedLgus.includes(lgu.municipality))
+          .reduce((sum, lgu) => {
+            return sum + (getLguStockForCategory(lgu, cat) || 0);
+          }, 0);
 
         // 3. Demand (requested)
         const demand = filteredReleases
@@ -808,7 +831,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
           status: isShortage ? 'Deficit' : 'Surplus'
         };
       });
-  }, [inventory, effectiveLgus, filteredReleases, kitTypesList, commodityTypeFilter]);
+  }, [inventory, effectiveLgus, filteredReleases, kitTypesList, commodityTypeFilter, hasCustomLguFilter, selectedLgus]);
 
   // CHART 4: Incoming Expirations on LGUs and Warehouses
   const { expirationBuckets, expiringBatches } = useMemo(() => {
@@ -2335,19 +2358,145 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             </select>
           </div>
 
-          {/* 4. Destination LGU Filter */}
-          <div>
-            <label className="block text-[11px] font-bold text-gray-600 mb-1">Destination Municipality / LGU</label>
-            <select
-              value={selectedLguFilter}
-              onChange={(e) => setSelectedLguFilter(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
+          {/* 4. Destination LGU Multi-Select Filter */}
+          <div className="relative" ref={lguDropdownRef}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-bold text-gray-600">
+                Destination LGUs ({!hasCustomLguFilter ? availableLgus.length : selectedLgus.length})
+              </label>
+              {hasCustomLguFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHasCustomLguFilter(false);
+                    setSelectedLgus([]);
+                    setSelectedLguFilter('All');
+                  }}
+                  className="text-[10px] text-[#2500ba] font-bold hover:underline cursor-pointer"
+                >
+                  Reset All
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsLguDropdownOpen(prev => !prev)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white flex items-center justify-between text-left hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-[#2500ba] transition shadow-2xs"
             >
-              <option value="All">All LGUs ({availableLgus.length})</option>
-              {availableLgus.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+              <span className="truncate text-gray-800">
+                {!hasCustomLguFilter || selectedLgus.length === availableLgus.length
+                  ? `All Monitored LGUs (${availableLgus.length})`
+                  : selectedLgus.length === 0
+                    ? 'No LGUs selected'
+                    : selectedLgus.length === 1
+                      ? selectedLgus[0]
+                      : `${selectedLgus.length} LGUs selected`}
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 text-gray-500 transition-transform ${isLguDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isLguDropdownOpen && (
+              <div className="absolute z-50 mt-1.5 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-2.5 space-y-2 animate-in fade-in zoom-in-95 duration-100">
+                {/* Search bar inside popover */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={lguSearchQuery}
+                    onChange={(e) => setLguSearchQuery(e.target.value)}
+                    placeholder="Search municipality..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#2500ba]"
+                    autoFocus
+                  />
+                  {lguSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setLguSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick actions: Select All / Clear All */}
+                <div className="flex items-center justify-between px-1 text-[11px] font-bold border-b border-gray-100 pb-1.5 text-gray-600">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasCustomLguFilter(false);
+                      setSelectedLgus([]);
+                      setSelectedLguFilter('All');
+                    }}
+                    className="text-[#2500ba] hover:underline cursor-pointer"
+                  >
+                    Select All ({availableLgus.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasCustomLguFilter(true);
+                      setSelectedLgus([]);
+                    }}
+                    className="text-gray-500 hover:text-red-600 cursor-pointer"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                {/* Checkbox list */}
+                <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                  {availableLgus
+                    .filter(m => !lguSearchQuery.trim() || m.toLowerCase().includes(lguSearchQuery.toLowerCase()))
+                    .map(muni => {
+                      const isChecked = !hasCustomLguFilter || selectedLgus.includes(muni);
+                      return (
+                        <label
+                          key={muni}
+                          className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs select-none text-gray-800"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              if (!hasCustomLguFilter) {
+                                setHasCustomLguFilter(true);
+                                setSelectedLgus(availableLgus.filter(m => m !== muni));
+                              } else {
+                                if (selectedLgus.includes(muni)) {
+                                  setSelectedLgus(selectedLgus.filter(m => m !== muni));
+                                } else {
+                                  const next = [...selectedLgus, muni];
+                                  if (next.length === availableLgus.length) {
+                                    setHasCustomLguFilter(false);
+                                    setSelectedLgus([]);
+                                  } else {
+                                    setSelectedLgus(next);
+                                  }
+                                }
+                              }
+                            }}
+                            className="rounded border-gray-300 text-[#2500ba] focus:ring-[#2500ba]"
+                          />
+                          <span className="truncate">{muni}</span>
+                        </label>
+                      );
+                    })}
+                </div>
+
+                <div className="pt-1.5 border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-500">
+                  <span>{!hasCustomLguFilter ? availableLgus.length : selectedLgus.length} of {availableLgus.length} visible</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLguDropdownOpen(false)}
+                    className="px-2.5 py-1 bg-gray-900 text-white rounded font-bold hover:bg-black transition text-[11px] cursor-pointer"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 5. Commodity Classification Filter (Food vs Non-Food) */}

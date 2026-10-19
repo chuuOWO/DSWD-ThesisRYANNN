@@ -1,9 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
 import { X, MapPin, AlertCircle, Edit, Lock, Unlock, Package, ShieldAlert } from 'lucide-react';
+import L from 'leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import { sanitizeTextOnly, sanitizePhone } from '../../lib/inputValidation';
 import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { normalizeCategoryName, getLguStockForCategory } from '../../lib/lguSync';
 import { getLguCapacities, saveLguCapacities } from '../../lib/commodityClassification';
+import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import type { LGUDelivery } from '../views/LGUMonitoring';
 
 interface EditLGUModalProps {
@@ -16,6 +19,52 @@ interface EditLGUModalProps {
 }
 
 const PROVINCES = REGIONAL_PROVINCES;
+
+const lguPinIcon = L.divIcon({
+  className: 'custom-lgu-pin',
+  html: `
+    <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: grab; transform: translate(-50%, -100%);">
+      <div style="
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #ea580c;
+        border: 2.5px solid #ffffff;
+        box-shadow: 0 4px 14px rgba(234,88,12,0.4), 0 2px 4px rgba(0,0,0,0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        z-index: 2;
+      ">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+        </svg>
+      </div>
+      <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #ea580c; margin-top: -1px; z-index: 1;"></div>
+    </div>
+  `,
+  iconSize: [0, 0],
+  iconAnchor: [0, 0]
+});
+
+function MapClickHandler({ onPinChange, disabled }: { onPinChange: (lat: number, lng: number) => void; disabled?: boolean }) {
+  useMapEvents({
+    click(e) {
+      if (disabled) return;
+      onPinChange(Number(e.latlng.lat.toFixed(5)), Number(e.latlng.lng.toFixed(5)));
+    }
+  });
+  return null;
+}
+
+function RecenterMap({ lat, lng }: { lat: number; lng: number }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView([lat, lng], map.getZoom());
+  }, [lat, lng, map]);
+  return null;
+}
 
 export function EditLGUModal({
   lgu,
@@ -162,43 +211,48 @@ export function EditLGUModal({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Province & Municipality */}
+          {/* Province & Municipality (Permanent Read-Only System Associations) */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Province <span className="text-red-500">*</span>
-              </label>
-              <select
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-gray-700">
+                  Province
+                </label>
+                <span className="flex items-center gap-1 text-[9.5px] text-gray-500 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">
+                  <Lock className="w-2.5 h-2.5 text-gray-400" /> Locked Key
+                </span>
+              </div>
+              <input
+                type="text"
                 value={formData.province}
-                onChange={(e) => handleChange('province', e.target.value)}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.province ? 'border-red-500' : 'border-gray-300'
-                }`}
-              >
-                {PROVINCES.map(prov => (
-                  <option key={prov} value={prov}>{prov}</option>
-                ))}
-              </select>
+                readOnly
+                disabled
+                className="w-full px-3 py-2 border border-gray-200 bg-gray-100 text-gray-600 rounded-lg cursor-not-allowed text-xs font-semibold select-all"
+              />
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Municipality <span className="text-red-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-gray-700">
+                  Municipality
+                </label>
+                <span className="flex items-center gap-1 text-[9.5px] text-gray-500 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">
+                  <Lock className="w-2.5 h-2.5 text-gray-400" /> Locked Key
+                </span>
+              </div>
               <input
                 type="text"
                 value={formData.municipality}
-                onChange={(e) => handleChange('municipality', sanitizeTextOnly(e.target.value))}
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.municipality ? 'border-red-500' : 'border-gray-300'
-                }`}
+                readOnly
+                disabled
+                className="w-full px-3 py-2 border border-gray-200 bg-gray-100 text-gray-600 rounded-lg cursor-not-allowed text-xs font-semibold select-all"
               />
             </div>
           </div>
 
           {/* LGU ID */}
           <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
+            <label className="block text-xs font-bold text-gray-700 mb-1.5">
               LGU ID
             </label>
             <input
@@ -206,21 +260,33 @@ export function EditLGUModal({
               value={formData.id}
               readOnly
               disabled
-              className="w-full px-4 py-2.5 border border-gray-200 bg-gray-100 text-gray-700 rounded-lg cursor-not-allowed font-mono text-xs font-semibold select-all"
+              className="w-full px-3 py-2 border border-gray-200 bg-gray-100 text-gray-600 rounded-lg cursor-not-allowed font-mono text-xs font-semibold select-all"
             />
           </div>
 
           {/* LGU Name */}
           <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              LGU Name <span className="text-red-500">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-bold text-gray-700">
+                Official LGU Name <span className="text-red-500">*</span>
+              </label>
+              {!adminActionsEnabled && (
+                <span className="flex items-center gap-1 text-[9.5px] text-gray-500 font-semibold bg-gray-100 px-1.5 py-0.5 rounded">
+                  <Lock className="w-2.5 h-2.5 text-gray-400" /> Admin Mode Required
+                </span>
+              )}
+            </div>
             <input
               type="text"
               value={formData.lguName}
+              disabled={!adminActionsEnabled}
               onChange={(e) => handleChange('lguName', sanitizeTextOnly(e.target.value))}
-              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                errors.lguName ? 'border-red-500' : 'border-gray-300'
+              className={`w-full px-3 py-2 border rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                !adminActionsEnabled
+                  ? 'bg-gray-100 border-gray-200 text-gray-600 cursor-not-allowed'
+                  : errors.lguName
+                    ? 'border-red-500 bg-white text-gray-900'
+                    : 'border-gray-300 bg-white text-gray-900'
               }`}
             />
           </div>
@@ -228,29 +294,35 @@ export function EditLGUModal({
           {/* Contact Information */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
                 Contact Person
               </label>
               <input
                 type="text"
                 value={formData.contactPerson || ''}
+                disabled={!adminActionsEnabled}
                 onChange={(e) => handleChange('contactPerson', sanitizeTextOnly(e.target.value))}
                 placeholder="e.g., Juan Dela Cruz"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  !adminActionsEnabled ? 'bg-gray-100 border-gray-200 text-gray-600 cursor-not-allowed' : 'bg-white border-gray-300 text-gray-900'
+                }`}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">
                 Contact Number
               </label>
               <input
                 type="text"
                 inputMode="tel"
                 value={formData.contactNumber || ''}
+                disabled={!adminActionsEnabled}
                 onChange={(e) => handleChange('contactNumber', sanitizePhone(e.target.value))}
                 placeholder="e.g., 09XX-XXX-XXXX"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className={`w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  !adminActionsEnabled ? 'bg-gray-100 border-gray-200 text-gray-600 cursor-not-allowed' : 'bg-white border-gray-300 text-gray-900'
+                }`}
               />
             </div>
           </div>
@@ -446,33 +518,57 @@ export function EditLGUModal({
             )}
           </div>
 
-          {/* GPS Coordinates */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Latitude (GPS)
+          {/* Facility Geographic Location: Interactive Map Pinpoint Picker */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-orange-600" />
+                <span>Facility Map Location (Pinpoint)</span>
               </label>
-              <input
-                type="number"
-                step="any"
-                value={formData.latitude !== undefined && formData.latitude !== null ? formData.latitude : ''}
-                onChange={(e) => handleChange('latitude', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                placeholder="e.g. 10.7202"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
+              <span className="text-[11px] font-mono font-bold text-gray-700 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded-md">
+                {(Number(formData.latitude) || 10.7202).toFixed(5)}° N, {(Number(formData.longitude) || 122.5621).toFixed(5)}° E
+              </span>
             </div>
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Longitude (GPS)
-              </label>
-              <input
-                type="number"
-                step="any"
-                value={formData.longitude !== undefined && formData.longitude !== null ? formData.longitude : ''}
-                onChange={(e) => handleChange('longitude', e.target.value === '' ? '' : parseFloat(e.target.value))}
-                placeholder="e.g. 122.5621"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
+
+            <p className="text-xs text-gray-500">
+              {adminActionsEnabled
+                ? 'Click anywhere on the map or drag the orange marker to pinpoint the exact municipal distribution hub location.'
+                : 'Facility coordinates are locked. Enable Administrative Mode in Settings to modify pin.'}
+            </p>
+
+            <div className="h-64 w-full rounded-xl overflow-hidden border border-gray-300 relative shadow-inner z-0">
+              <MapContainer
+                center={[Number(formData.latitude) || 10.7202, Number(formData.longitude) || 122.5621]}
+                zoom={12}
+                scrollWheelZoom={false}
+                className="h-full w-full"
+              >
+                <TileLayer
+                  url={MAP_TILE_CONFIG.url}
+                  attribution={MAP_TILE_CONFIG.attribution}
+                  maxZoom={MAP_TILE_CONFIG.maxZoom}
+                />
+                <MapClickHandler
+                  disabled={!adminActionsEnabled}
+                  onPinChange={(lat, lng) => {
+                    handleChange('latitude', lat);
+                    handleChange('longitude', lng);
+                  }}
+                />
+                <RecenterMap lat={Number(formData.latitude) || 10.7202} lng={Number(formData.longitude) || 122.5621} />
+                <Marker
+                  position={[Number(formData.latitude) || 10.7202, Number(formData.longitude) || 122.5621]}
+                  draggable={adminActionsEnabled}
+                  icon={lguPinIcon}
+                  eventHandlers={{
+                    dragend(e) {
+                      const pos = e.target.getLatLng();
+                      handleChange('latitude', Number(pos.lat.toFixed(5)));
+                      handleChange('longitude', Number(pos.lng.toFixed(5)));
+                    }
+                  }}
+                />
+              </MapContainer>
             </div>
           </div>
 
@@ -486,7 +582,7 @@ export function EditLGUModal({
               onChange={(e) => handleChange('remarks', e.target.value)}
               placeholder="Add any additional notes about this LGU..."
               rows={3}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-xs"
             />
           </div>
 
@@ -503,16 +599,24 @@ export function EditLGUModal({
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+              className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 text-xs cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="flex-1 px-6 py-3 bg-orange-600 text-white font-semibold rounded-lg hover:bg-orange-700 transition-colors shadow-sm disabled:opacity-50"
+              disabled={isSubmitting || !adminActionsEnabled}
+              className={`flex-1 px-6 py-3 font-semibold rounded-lg shadow-sm transition-colors text-xs ${
+                !adminActionsEnabled
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-orange-600 hover:bg-orange-700 text-white cursor-pointer'
+              }`}
             >
-              {isSubmitting ? 'Updating...' : 'Update LGU Data'}
+              {!adminActionsEnabled
+                ? 'Admin Mode Required to Save'
+                : isSubmitting
+                  ? 'Updating...'
+                  : 'Update LGU Data'}
             </button>
           </div>
         </form>

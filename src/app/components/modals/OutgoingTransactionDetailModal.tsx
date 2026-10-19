@@ -13,6 +13,7 @@ import {
   ExternalLink,
   QrCode,
   ShieldCheck,
+  ShieldAlert,
   FileText,
   Maximize2,
   Minimize2,
@@ -34,6 +35,8 @@ interface OutgoingTransactionDetailModalProps {
   onEdit?: (release: OutgoingRelease) => void;
   onApprove?: (release: OutgoingRelease) => void;
   onCancel?: (release: OutgoingRelease) => void;
+  onEmergencyBypass?: (release: OutgoingRelease) => void;
+  adminActionsEnabled?: boolean;
   currentRole?: UserRole;
   escortProfiles?: EscortProfile[];
 }
@@ -45,7 +48,7 @@ const statusBadgeStyles: Record<OutgoingStatus, { badge: string; dot: string; la
   Packed: { badge: 'bg-indigo-50 text-indigo-800 border-indigo-200', dot: 'bg-indigo-500', label: 'Packed' },
   Released: { badge: 'bg-purple-50 text-purple-800 border-purple-200', dot: 'bg-purple-500', label: 'Released' },
   'In Transit': { badge: 'bg-amber-50 text-amber-800 border-amber-300', dot: 'bg-amber-500', label: 'In Transit' },
-  Delivered: { badge: 'bg-emerald-50 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500', label: 'Delivered' },
+  Delivered: { badge: 'bg-purple-50 text-purple-900 border-purple-200', dot: 'bg-purple-600', label: 'Dropped Off (Pending LGU Scan)' },
   Accepted: { badge: 'bg-green-50 text-green-800 border-green-200', dot: 'bg-green-500', label: 'Accepted' },
   Distributed: { badge: 'bg-teal-50 text-teal-800 border-teal-200', dot: 'bg-teal-500', label: 'Distributed' },
   'Correction Requested': { badge: 'bg-red-50 text-red-800 border-red-200', dot: 'bg-red-500', label: 'Correction Requested' },
@@ -60,6 +63,8 @@ export function OutgoingTransactionDetailModal({
   onEdit,
   onApprove,
   onCancel,
+  onEmergencyBypass,
+  adminActionsEnabled = false,
   currentRole = 'Admin',
   escortProfiles = []
 }: OutgoingTransactionDetailModalProps) {
@@ -775,6 +780,21 @@ export function OutgoingTransactionDetailModal({
                 className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-bold transition cursor-pointer"
               >
                 Edit Draft
+              </button>
+            )}
+
+            {onEmergencyBypass && adminActionsEnabled && ['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'].includes(release.deliveryStatus) && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEmergencyBypass(release);
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Emergency Administrative Bypass: Confirm LGU receipt without physical QR scan"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Emergency Bypass</span>
               </button>
             )}
 

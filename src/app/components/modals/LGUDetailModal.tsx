@@ -1066,11 +1066,8 @@ export function LGUDetailModal({
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-white/20 text-blue-100 border border-white/30">
-                  {lgu.id}
-                </span>
-                <h2 className="text-xl font-bold tracking-tight">{lgu.municipality}</h2>
-                <span className="text-sm text-blue-200">&bull; {lgu.province}</span>
+                <h2 className="text-xl font-bold tracking-tight">{lgu.lguName || lgu.municipality}</h2>
+                <span className="text-sm text-blue-200">&bull; {lgu.municipality}, {lgu.province}</span>
                 {lgu.isActive === false && (
                   <span className="px-2 py-0.5 text-xs font-bold bg-amber-400 text-amber-950 rounded">
                     Archived
@@ -1078,8 +1075,7 @@ export function LGUDetailModal({
                 )}
               </div>
               <p className="text-xs text-blue-100/90 mt-1">
-                {lgu.lguName}
-                {lgu.contactPerson ? ` &bull; Contact: ${lgu.contactPerson}` : ''}
+                {lgu.contactPerson ? `Contact: ${lgu.contactPerson}` : 'Designated Municipal Warehouse'}
                 {lgu.contactNumber ? ` (${lgu.contactNumber})` : ''}
               </p>
             </div>

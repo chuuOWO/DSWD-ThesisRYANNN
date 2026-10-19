@@ -257,3 +257,4 @@ select
   (select count(*) from public.inventory_batches where batch_token_id like 'BATCH-MNF-2026-%') as remaining_seed_batches,
   (select count(*) from public.lgu_stock) as remaining_lgu_stock,
   (select count(*) from public.outgoing_requests) as preserved_real_dispatches;
+

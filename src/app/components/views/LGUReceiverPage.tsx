@@ -15,7 +15,11 @@ import {
   ExternalLink,
   ShieldCheck,
   Menu,
-  MapPin
+  MapPin,
+  Search,
+  Calendar,
+  Clock,
+  Sparkles
 } from 'lucide-react';
 import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -25,6 +29,7 @@ import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { backendApi, type TruckLiveLocation, type LguRecord } from '../../services/backendApi';
 import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
+import { getLguStockForCategory, normalizeCategoryName } from '../../lib/lguSync';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { MobileSettingsModal } from '../modals/MobileSettingsModal';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
@@ -569,7 +574,20 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   const [isUpcomingDeliveriesOpen, setIsUpcomingDeliveriesOpen] = useState(false);
   const [isInventoryOpen, setIsInventoryOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [lguStock, setLguStock] = useState<{ foodPacks: number; hygieneKits: number; familyKits: number; lastReported?: string } | null>(null);
+  const [lguStock, setLguStock] = useState<{
+    foodPacks: number;
+    rtef: number;
+    hygieneKits: number;
+    sleepingKits: number;
+    kitchenKits: number;
+    familyKits: number;
+    laminatedSacks: number;
+    stockMap: Record<string, number>;
+    lastReported?: string;
+  } | null>(null);
+  const [lguBatches, setLguBatches] = useState<any[]>([]);
+  const [inventorySearchQuery, setInventorySearchQuery] = useState('');
+  const [inventoryCategoryFilter, setInventoryCategoryFilter] = useState<'All' | 'Food' | 'Non-Food'>('All');
 
   const [isDiscrepancyModalOpen, setIsDiscrepancyModalOpen] = useState(false);
   const [discrepancyTargetDr, setDiscrepancyTargetDr] = useState('');
@@ -579,59 +597,229 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   const loadLguStock = async () => {
     if (!targetMuni) return;
     try {
+      const stockMap: Record<string, number> = {};
+      let foodPacks = 0;
+      let rtef = 0;
+      let hygieneKits = 0;
+      let sleepingKits = 0;
+      let kitchenKits = 0;
+      let familyKits = 0;
+      let laminatedSacks = 0;
+      let lastReported: string | undefined;
+
       if (canonicalUserLgu?.id) {
-        const v3Stocks = await backendApi.getLguStock(canonicalUserLgu.id).catch(() => []);
+        const [v3Stocks, batches] = await Promise.all([
+          backendApi.getLguStock(canonicalUserLgu.id).catch(() => []),
+          backendApi.getInventoryBatches({ lguId: canonicalUserLgu.id }).catch(() => [])
+        ]);
+
+        if (batches && batches.length > 0) {
+          setLguBatches(batches);
+        }
+
         if (v3Stocks && v3Stocks.length > 0) {
-          let foodPacks = 0;
-          let hygieneKits = 0;
-          let familyKits = 0;
+          lastReported = v3Stocks[0]?.updatedAt;
           v3Stocks.forEach((item) => {
-            const name = (item.kitName || item.kitTypeId || '').toLowerCase();
+            const rawName = item.kitName || item.kitTypeId || '';
+            const canonical = normalizeCategoryName(rawName) || rawName;
             const qty = Number(item.quantity) || 0;
-            if (name.includes('food')) {
-              foodPacks += qty;
-            } else if (name.includes('hygiene')) {
-              hygieneKits += qty;
-            } else if (name.includes('family')) {
-              familyKits += qty;
-            } else {
-              foodPacks += qty;
-            }
+            stockMap[canonical] = (stockMap[canonical] || 0) + qty;
+            const nameLower = canonical.toLowerCase();
+            if (nameLower.includes('ready-to-eat') || nameLower.includes('rtef')) rtef += qty;
+            else if (nameLower.includes('food')) foodPacks += qty;
+            else if (nameLower.includes('hygiene')) hygieneKits += qty;
+            else if (nameLower.includes('sleeping')) sleepingKits += qty;
+            else if (nameLower.includes('kitchen')) kitchenKits += qty;
+            else if (nameLower.includes('family')) familyKits += qty;
+            else if (nameLower.includes('sack')) laminatedSacks += qty;
           });
-          setLguStock({
-            foodPacks,
-            hygieneKits,
-            familyKits,
-            lastReported: v3Stocks[0]?.updatedAt
-          });
-          return;
         }
       }
-      const reports = await backendApi.getLguPriorityReports(effectiveLguName);
-      const matched = reports.find(
-        (r) =>
-          (r.municipality && findMatchingLgu(dbLgus, r.municipality)?.municipality.toLowerCase() === targetMuni) ||
-          (r.lguName && findMatchingLgu(dbLgus, r.lguName)?.municipality.toLowerCase() === targetMuni) ||
-          (r.municipality && r.municipality.toLowerCase() === targetMuni) ||
-          (r.lguName && r.lguName.toLowerCase().includes(targetMuni))
-      );
-      if (matched) {
-        const fp = matched.foodPacks || 0;
-        const hk = matched.hygieneKits || 0;
-        const fk = matched.familyKits || 0;
-        setLguStock({
-          foodPacks: fp,
-          hygieneKits: hk,
-          familyKits: fk,
-          lastReported: matched.reportedAt
+
+      // Merge canonicalUserLgu currentStock if available
+      if (canonicalUserLgu?.currentStock) {
+        Object.entries(canonicalUserLgu.currentStock).forEach(([cat, val]) => {
+          const canonical = normalizeCategoryName(cat) || cat;
+          const qty = Number(val) || 0;
+          if (!stockMap[canonical]) {
+            stockMap[canonical] = qty;
+            const nameLower = canonical.toLowerCase();
+            if (nameLower.includes('ready-to-eat') || nameLower.includes('rtef')) rtef += qty;
+            else if (nameLower.includes('food')) foodPacks += qty;
+            else if (nameLower.includes('hygiene')) hygieneKits += qty;
+            else if (nameLower.includes('sleeping')) sleepingKits += qty;
+            else if (nameLower.includes('kitchen')) kitchenKits += qty;
+            else if (nameLower.includes('family')) familyKits += qty;
+            else if (nameLower.includes('sack')) laminatedSacks += qty;
+          }
         });
       }
+
+      // Fallback to priority reports if no stock rows found
+      if (Object.keys(stockMap).length === 0) {
+        const reports = await backendApi.getLguPriorityReports(effectiveLguName);
+        const matched = reports.find(
+          (r) =>
+            (r.municipality && findMatchingLgu(dbLgus, r.municipality)?.municipality.toLowerCase() === targetMuni) ||
+            (r.lguName && findMatchingLgu(dbLgus, r.lguName)?.municipality.toLowerCase() === targetMuni) ||
+            (r.municipality && r.municipality.toLowerCase() === targetMuni) ||
+            (r.lguName && r.lguName.toLowerCase().includes(targetMuni))
+        );
+        if (matched) {
+          foodPacks = matched.foodPacks || 0;
+          hygieneKits = matched.hygieneKits || 0;
+          familyKits = matched.familyKits || 0;
+          stockMap['Family Food Pack'] = foodPacks;
+          stockMap['Hygiene Kit'] = hygieneKits;
+          stockMap['Family Kit'] = familyKits;
+          lastReported = matched.reportedAt;
+        }
+      }
+
+      setLguStock({
+        foodPacks,
+        rtef,
+        hygieneKits,
+        sleepingKits,
+        kitchenKits,
+        familyKits,
+        laminatedSacks,
+        stockMap,
+        lastReported
+      });
     } catch {}
   };
 
   useEffect(() => {
     loadLguStock();
-  }, [targetMuni, effectiveLguName]);
+  }, [targetMuni, effectiveLguName, canonicalUserLgu?.id]);
+
+  const lguExpiryLots = useMemo(() => {
+    const list: Array<{
+      id: string;
+      batchTokenId: string;
+      commodityName: string;
+      quantity: number;
+      expirationDate: string;
+      daysRemaining: number;
+      status: 'expired' | 'critical' | 'warning' | 'moderate' | 'safe';
+      drNumber?: string;
+      source?: string;
+    }> = [];
+    const seen = new Set<string>();
+
+    const getDaysRemaining = (expStr?: string | null): number => {
+      if (!expStr) return 999;
+      const target = new Date(expStr).getTime();
+      const now = Date.now();
+      return Math.ceil((target - now) / (1000 * 60 * 60 * 24));
+    };
+
+    // 1. Live database inventory batches for this LGU
+    lguBatches.forEach((b) => {
+      const token = b.batchTokenId || b.id;
+      if (!token || seen.has(token)) return;
+      seen.add(token);
+      const exp = b.expirationDate;
+      const days = getDaysRemaining(exp);
+      const status = days <= 0 ? 'expired' : days <= 30 ? 'critical' : days <= 90 ? 'warning' : days <= 120 ? 'moderate' : 'safe';
+      list.push({
+        id: token,
+        batchTokenId: token,
+        commodityName: b.kitName || b.kitTypeId || 'Relief Commodity',
+        quantity: Number(b.remainingQuantity ?? b.initialQuantity ?? 0),
+        expirationDate: exp || 'No date recorded',
+        daysRemaining: days,
+        status,
+        source: 'LGU Warehouse Batch'
+      });
+    });
+
+    // 2. Batches delivered via verified accepted outgoing releases for this LGU
+    acceptedReleases.forEach((r) => {
+      let allocs: any = r.allocatedBatches;
+      if (typeof allocs === 'string') {
+        try { allocs = JSON.parse(allocs); } catch {}
+      }
+      if (Array.isArray(allocs) && allocs.length > 0) {
+        allocs.forEach((a: any, idx: number) => {
+          const token = a.batchTokenId || a.batchNumber || `${r.drNumber}-LOT-${idx + 1}`;
+          if (seen.has(token)) return;
+          seen.add(token);
+          const exp = a.expirationDate || (r as any).expirationDate;
+          const days = getDaysRemaining(exp);
+          const status = days <= 0 ? 'expired' : days <= 30 ? 'critical' : days <= 90 ? 'warning' : days <= 120 ? 'moderate' : 'safe';
+          list.push({
+            id: token,
+            batchTokenId: token,
+            commodityName: a.category || r.fnfiCategory || 'Relief Commodity',
+            quantity: Number(a.quantity || a.quantityAllocated || 0),
+            expirationDate: exp || 'No date recorded',
+            daysRemaining: days,
+            status,
+            drNumber: r.drNumber,
+            source: r.warehouseSource || 'Dispatched Consignment'
+          });
+        });
+      } else {
+        const token = `DELIVERY-${r.drNumber}`;
+        if (!seen.has(token)) {
+          seen.add(token);
+          const exp = (r as any).expirationDate;
+          const days = getDaysRemaining(exp);
+          const status = days <= 0 ? 'expired' : days <= 30 ? 'critical' : days <= 90 ? 'warning' : days <= 120 ? 'moderate' : 'safe';
+          list.push({
+            id: token,
+            batchTokenId: token,
+            commodityName: r.fnfiCategory || 'Relief Commodity',
+            quantity: Number(r.amountApproved || r.amountRequested || 0),
+            expirationDate: exp || 'No date recorded',
+            daysRemaining: days,
+            status,
+            drNumber: r.drNumber,
+            source: r.warehouseSource || 'Dispatched Consignment'
+          });
+        }
+      }
+    });
+
+    return list.sort((a, b) => a.daysRemaining - b.daysRemaining);
+  }, [lguBatches, acceptedReleases]);
+
+  const filteredExpiryLots = useMemo(() => {
+    return lguExpiryLots.filter((lot) => {
+      if (inventoryCategoryFilter === 'Food') {
+        const lower = lot.commodityName.toLowerCase();
+        if (!lower.includes('food') && !lower.includes('rtef')) return false;
+      } else if (inventoryCategoryFilter === 'Non-Food') {
+        const lower = lot.commodityName.toLowerCase();
+        if (lower.includes('food') || lower.includes('rtef')) return false;
+      }
+      if (inventorySearchQuery.trim()) {
+        const q = inventorySearchQuery.trim().toLowerCase();
+        return (
+          lot.batchTokenId.toLowerCase().includes(q) ||
+          lot.commodityName.toLowerCase().includes(q) ||
+          (lot.drNumber && lot.drNumber.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [lguExpiryLots, inventoryCategoryFilter, inventorySearchQuery]);
+
+  const expiryCounts = useMemo(() => {
+    let critical = 0;
+    let warning = 0;
+    let moderate = 0;
+    let safe = 0;
+    lguExpiryLots.forEach((lot) => {
+      if (lot.status === 'critical' || lot.status === 'expired') critical++;
+      else if (lot.status === 'warning') warning++;
+      else if (lot.status === 'moderate') moderate++;
+      else safe++;
+    });
+    return { critical, warning, moderate, safe, total: lguExpiryLots.length };
+  }, [lguExpiryLots]);
 
   // 5. Camera QR Scanner & Direct Inventory Acceptance
   const [isScanning, setIsScanning] = useState(false);
@@ -1666,27 +1854,212 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 })()}
               </div>
 
-              {/* Read-only Stock Display */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-                  <p className="text-lg font-black text-blue-900">
-                    {lguStock?.foodPacks?.toLocaleString() ?? 0}
-                  </p>
-                  <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide">Food Packs</p>
+              {/* 7 Commodities Stock Breakdown */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Commodity Balances</h4>
+                  <span className="text-[10px] text-gray-500 font-medium">
+                    Total On-Hand: {((lguStock?.foodPacks || 0) + (lguStock?.rtef || 0) + (lguStock?.hygieneKits || 0) + (lguStock?.sleepingKits || 0) + (lguStock?.kitchenKits || 0) + (lguStock?.familyKits || 0) + (lguStock?.laminatedSacks || 0)).toLocaleString()} units
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-left">
+                  <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-2.5">
+                    <p className="text-[10px] font-bold text-blue-700 uppercase tracking-wide truncate">Family Food Pack</p>
+                    <p className="text-base font-black text-blue-900 mt-0.5">
+                      {lguStock?.foodPacks?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-blue-600/80 font-medium">Food Relief</span>
+                  </div>
+
+                  <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-2.5">
+                    <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wide truncate">Ready-to-Eat Food</p>
+                    <p className="text-base font-black text-amber-900 mt-0.5">
+                      {lguStock?.rtef?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-amber-600/80 font-medium">Emergency Rations</span>
+                  </div>
+
+                  <div className="bg-teal-50/70 border border-teal-200/80 rounded-xl p-2.5">
+                    <p className="text-[10px] font-bold text-teal-700 uppercase tracking-wide truncate">Hygiene Kit</p>
+                    <p className="text-base font-black text-teal-900 mt-0.5">
+                      {lguStock?.hygieneKits?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-teal-600/80 font-medium">Sanitation</span>
+                  </div>
+
+                  <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-xl p-2.5">
+                    <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wide truncate">Sleeping Kit</p>
+                    <p className="text-base font-black text-indigo-900 mt-0.5">
+                      {lguStock?.sleepingKits?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-indigo-600/80 font-medium">Bedding & Mats</span>
+                  </div>
+
+                  <div className="bg-orange-50/70 border border-orange-200/80 rounded-xl p-2.5">
+                    <p className="text-[10px] font-bold text-orange-700 uppercase tracking-wide truncate">Kitchen Kit</p>
+                    <p className="text-base font-black text-orange-900 mt-0.5">
+                      {lguStock?.kitchenKits?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-orange-600/80 font-medium">Cooking Ware</span>
+                  </div>
+
+                  <div className="bg-purple-50/70 border border-purple-200/80 rounded-xl p-2.5">
+                    <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide truncate">Family Kit</p>
+                    <p className="text-base font-black text-purple-900 mt-0.5">
+                      {lguStock?.familyKits?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-purple-600/80 font-medium">Clothing & Living</span>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 col-span-2 sm:col-span-2">
+                    <p className="text-[10px] font-bold text-slate-700 uppercase tracking-wide truncate">Laminated Sacks</p>
+                    <p className="text-base font-black text-slate-900 mt-0.5">
+                      {lguStock?.laminatedSacks?.toLocaleString() ?? 0}
+                    </p>
+                    <span className="text-[9px] text-slate-600 font-medium">Shelter & Storage</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed FEFO Expiration & Batch Ledger */}
+              <div className="space-y-3 pt-2 border-t border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Clock size={14} className="text-[#2500ba]" />
+                    <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+                      FEFO Expiry & Batch Ledger
+                    </h4>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-medium">
+                    {filteredExpiryLots.length} lot{filteredExpiryLots.length === 1 ? '' : 's'} tracked
+                  </span>
                 </div>
 
-                <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
-                  <p className="text-lg font-black text-teal-900">
-                    {lguStock?.hygieneKits?.toLocaleString() ?? 0}
-                  </p>
-                  <p className="text-[10px] font-bold text-teal-700 uppercase tracking-wide">Hygiene</p>
+                {/* Expiry Risk Counter Badges */}
+                <div className="grid grid-cols-4 gap-1.5 text-center text-[10px]">
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg py-1 px-1.5">
+                    <p className="font-extrabold text-rose-700">{expiryCounts.critical}</p>
+                    <p className="text-[8px] font-semibold text-rose-600 truncate">&le; 30d Critical</p>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg py-1 px-1.5">
+                    <p className="font-extrabold text-amber-700">{expiryCounts.warning}</p>
+                    <p className="text-[8px] font-semibold text-amber-600 truncate">31-90d Warning</p>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg py-1 px-1.5">
+                    <p className="font-extrabold text-blue-700">{expiryCounts.moderate}</p>
+                    <p className="text-[8px] font-semibold text-blue-600 truncate">91-120d Moderate</p>
+                  </div>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg py-1 px-1.5">
+                    <p className="font-extrabold text-emerald-700">{expiryCounts.safe}</p>
+                    <p className="text-[8px] font-semibold text-emerald-600 truncate">&gt; 120d Safe</p>
+                  </div>
                 </div>
 
-                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
-                  <p className="text-lg font-black text-purple-900">
-                    {lguStock?.familyKits?.toLocaleString() ?? 0}
-                  </p>
-                  <p className="text-[10px] font-bold text-purple-700 uppercase tracking-wide">Family Kits</p>
+                {/* Search & Category Filter Controls */}
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search size={13} className="absolute left-2.5 top-2.5 text-gray-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={inventorySearchQuery}
+                      onChange={(e) => setInventorySearchQuery(e.target.value)}
+                      placeholder="Search batch token, commodity, or DR number..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba] focus:border-[#2500ba]"
+                    />
+                    {inventorySearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setInventorySearchQuery('')}
+                        className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 text-xs"
+                      >
+                        &times;
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {(['All', 'Food', 'Non-Food'] as const).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setInventoryCategoryFilter(cat)}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition ${
+                          inventoryCategoryFilter === cat
+                            ? 'bg-[#2500ba] text-white shadow-xs'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Batch Lots List */}
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
+                  {filteredExpiryLots.length === 0 ? (
+                    <div className="text-center py-6 border border-dashed border-gray-200 rounded-xl bg-gray-50/50">
+                      <Package size={22} className="mx-auto text-gray-300 mb-1" />
+                      <p className="text-xs font-semibold text-gray-500">No batch lots match current filters.</p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        Delivered consignments and recorded stock batches will show expiry details here.
+                      </p>
+                    </div>
+                  ) : (
+                    filteredExpiryLots.map((lot) => {
+                      const badgeColor =
+                        lot.status === 'expired' || lot.status === 'critical'
+                          ? 'bg-rose-100 text-rose-700 border-rose-200'
+                          : lot.status === 'warning'
+                          ? 'bg-amber-100 text-amber-700 border-amber-200'
+                          : lot.status === 'moderate'
+                          ? 'bg-blue-100 text-blue-700 border-blue-200'
+                          : 'bg-emerald-100 text-emerald-700 border-emerald-200';
+
+                      const countdownText =
+                        lot.daysRemaining <= 0
+                          ? 'EXPIRED'
+                          : lot.daysRemaining === 999
+                          ? 'No Date Set'
+                          : `${lot.daysRemaining}d remaining`;
+
+                      return (
+                        <div
+                          key={lot.id}
+                          className="p-2.5 rounded-xl border border-gray-200 bg-white hover:border-gray-300 transition space-y-1.5 shadow-xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-gray-900 text-xs truncate">
+                              {lot.commodityName}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black border uppercase tracking-wider shrink-0 ${badgeColor}`}>
+                              {countdownText}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[11px] text-gray-600">
+                            <div className="flex items-center gap-1 font-mono text-[10px] text-[#2500ba] font-bold truncate max-w-[60%] bg-blue-50/60 px-1.5 py-0.5 rounded border border-blue-100">
+                              <span>Lot:</span>
+                              <span className="truncate">{lot.batchTokenId}</span>
+                            </div>
+                            <span className="font-extrabold text-gray-900 shrink-0">
+                              {lot.quantity.toLocaleString()} units
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1 border-t border-gray-100">
+                            <span className="flex items-center gap-1 truncate">
+                              <Calendar size={11} className="text-gray-400 shrink-0" />
+                              <span>Exp: {lot.expirationDate}</span>
+                            </span>
+                            <span className="truncate text-[9px] text-gray-400">
+                              {lot.drNumber ? `DR: ${lot.drNumber}` : lot.source || 'Local Stock'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
@@ -1695,7 +2068,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   Designated Municipality: <span className="text-[#2500ba] font-bold">{effectiveLguName || 'Not specified'}</span>
                 </p>
                 <p className="text-[11px] text-gray-500">
-                  Accepted incoming shipments automatically increment these live amounts. LGU Receivers act strictly as endpoint recipients.
+                  Accepted incoming shipments automatically increment these live amounts. Follow FEFO (First-Expired, First-Out) protocols when distributing relief commodities to beneficiaries.
                 </p>
               </div>
 

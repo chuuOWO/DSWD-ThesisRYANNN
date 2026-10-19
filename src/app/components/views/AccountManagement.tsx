@@ -3096,52 +3096,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
               );
             })()}
 
-            {/* Convoy Truck Assignment (for Field Escort Receivers) */}
-            {selectedProfile.role === 'receiver' && selectedProfile.status !== 'pending' && (
-              <div className="space-y-3 p-4 rounded-2xl border border-purple-100 bg-purple-50/40">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-purple-950 flex items-center gap-1.5">
-                    <Truck className="w-3.5 h-3.5 text-purple-700" />
-                    Assigned Convoy Vehicle / Fleet Truck
-                  </label>
-                  {selectedProfile.truckId && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
-                      Current: {selectedProfile.truckId}
-                    </span>
-                  )}
-                </div>
 
-                <p className="text-[11px] text-purple-700/80">
-                  Select a registered DSWD relief truck for this escort officer. Mobile GPS telemetries and relief manifest custody transfers will be mapped to this vehicle.
-                </p>
-
-                <div className="flex items-center gap-3 flex-wrap pt-1">
-                  <select
-                    value={truckAssignments[selectedProfile.id] ?? (selectedProfile.truckId || '')}
-                    onChange={(e) => handleTruckAssignmentChange(selectedProfile.id, e.target.value)}
-                    disabled={savingTruckUserId === selectedProfile.id}
-                    className="flex-1 min-w-[240px] px-3 py-2 text-xs border border-gray-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-medium"
-                  >
-                    <option value="">No Truck Assigned (Unassigned Escort)</option>
-                    {trucksList.map((t) => (
-                      <option key={t.truckId} value={t.truckId}>
-                        {t.truckId} - {t.plateNumber} ({t.model})
-                      </option>
-                    ))}
-                  </select>
-
-                  <button
-                    type="button"
-                    disabled={savingTruckUserId === selectedProfile.id}
-                    onClick={() => handleSaveTruckAssignment(selectedProfile)}
-                    className="px-4 py-2 rounded-xl bg-purple-700 text-white hover:bg-purple-800 text-xs font-bold transition shadow-sm active:scale-95 disabled:opacity-50 cursor-pointer inline-flex items-center gap-1.5"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    {savingTruckUserId === selectedProfile.id ? 'Saving...' : 'Save Truck'}
-                  </button>
-                </div>
-              </div>
-            )}
 
             {/* Verification / Approval / Deletion Actions */}
             <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">

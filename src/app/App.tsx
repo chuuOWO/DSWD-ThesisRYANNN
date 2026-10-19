@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import { Shield, Loader2 } from 'lucide-react';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { AuthPage } from './components/auth/AuthPage';
@@ -67,7 +68,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<string>(getInitialAdminView);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
-  const { session, profile, isLoading, signOut } = useAuth();
+  const { session, profile, isLoading, isLoggingOut, signOut } = useAuth();
   const inventoryState = useInventoryState(Boolean(session), profile);
 
   const walletAddress = profile?.walletAddress || null;
@@ -284,6 +285,22 @@ export default function App() {
         }}
         onCancel={() => setIsLogoutConfirmOpen(false)}
       />
+
+      {/* Full-Screen Logout Loading Overlay */}
+      {isLoggingOut && (
+        <div className="fixed inset-0 z-[99999] bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center text-white animate-in fade-in duration-200">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#10069f] to-blue-500 flex items-center justify-center shadow-2xl shadow-blue-900/50 mb-5 animate-pulse">
+            <Shield className="w-8 h-8 text-white" />
+          </div>
+          <div className="flex items-center gap-3 mb-2">
+            <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+            <h3 className="text-lg font-black tracking-wide text-white">Signing Out Securely...</h3>
+          </div>
+          <p className="text-xs text-slate-400 font-medium tracking-wide">
+            Clearing active session and cryptographic key stores
+          </p>
+        </div>
+      )}
     </>
   );
 }

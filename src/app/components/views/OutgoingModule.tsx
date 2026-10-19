@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { AlertCircle, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Edit, Filter, Loader2, MapPin, Maximize2, Minimize2, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { AlertCircle, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Edit, Filter, Loader2, MapPin, Maximize2, Minimize2, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldAlert, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { parseIncidentInfo, resolveDisasterReason, getDisasterReasonStyle, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
@@ -32,6 +32,8 @@ interface InventoryState {
   senderSignAndRelease: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
   markInTransit: (drNumber: string) => void;
   receiverAcceptWithGps: (drNumber: string, actorRole?: UserRole) => Promise<{ ok: boolean; message: string }>;
+  adminEmergencyBypassAccept?: (drNumber: string, reason: string) => Promise<{ ok: boolean; message: string; txHash?: string }>;
+  adminActionsEnabled?: boolean;
   requestOutgoingCorrection: (drNumber: string, note: string) => void;
 }
 
@@ -47,7 +49,7 @@ const statusStyles: Record<OutgoingStatus, string> = {
   Packed: 'bg-indigo-50 text-indigo-800 border border-indigo-200',
   Released: 'bg-purple-50 text-purple-800 border border-purple-200',
   'In Transit': 'bg-amber-50 text-amber-800 border border-amber-300',
-  Delivered: 'bg-emerald-50 text-emerald-800 border border-emerald-200',
+  Delivered: 'bg-purple-50 text-purple-900 border border-purple-200 font-semibold',
   Accepted: 'bg-green-50 text-green-800 border border-green-200',
   Distributed: 'bg-teal-50 text-teal-800 border border-teal-200',
   'Correction Requested': 'bg-red-50 text-red-800 border border-red-200',
@@ -56,7 +58,7 @@ const statusStyles: Record<OutgoingStatus, string> = {
 
 const editableStatuses: OutgoingStatus[] = ['Draft', 'Allocating', 'Approved', 'Packed'];
 
-type ReleaseAction = 'senderSign' | 'inTransit' | 'receiverAccept' | 'correction' | 'message';
+type ReleaseAction = 'senderSign' | 'inTransit' | 'receiverAccept' | 'correction' | 'message' | 'adminBypass';
 
 interface ReleaseActionModalState {
   type: ReleaseAction;
@@ -162,10 +164,24 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [detailRelease, setDetailRelease] = useState<OutgoingRelease | null>(null);
   const autoCloseDelayMs = 1800;
 
-  const warehouseOptions = useMemo(() => {
-    if (warehousesList.length > 0) return warehousesList.map(w => w.name);
-    return ['Oton Main Warehouse', 'Pototan Main Warehouse'];
-  }, [warehousesList]);
+  const sourceOptions = useMemo(() => {
+    const warehouses = warehousesList.length > 0 ? warehousesList.map(w => w.name) : ['Oton Main Warehouse', 'Pototan Main Warehouse'];
+    const lguSources = new Set<string>();
+    (outgoingReleasesList || []).forEach(r => {
+      if (r.warehouseSource && !warehouses.includes(r.warehouseSource)) {
+        lguSources.add(r.warehouseSource);
+      }
+    });
+    (lgusList || []).forEach(l => {
+      if (l.lguName && !warehouses.includes(l.lguName)) {
+        lguSources.add(l.lguName);
+      }
+    });
+    return {
+      warehouses,
+      lguSites: Array.from(lguSources).sort()
+    };
+  }, [warehousesList, outgoingReleasesList, lgusList]);
 
   const handleAddRelease = (newRelease: ReleaseForm) => {
     addOutgoingRelease({
@@ -308,6 +324,20 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
       if (actionModal.type === 'receiverAccept') {
         const result = await receiverAcceptWithGps(release.drNumber, currentRole);
+        showResult(result.message, result.ok);
+        return;
+      }
+
+      if (actionModal.type === 'adminBypass') {
+        if (!inventoryState.adminEmergencyBypassAccept) {
+          showResult('Emergency bypass handler not configured.', false);
+          return;
+        }
+        if (!actionModal.note || !actionModal.note.trim()) {
+          showResult('Emergency authorization reason is required.', false);
+          return;
+        }
+        const result = await inventoryState.adminEmergencyBypassAccept(release.drNumber, actionModal.note.trim());
         showResult(result.message, result.ok);
         return;
       }
@@ -696,7 +726,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               {/* Column 4: Delivery Status & Telemetry */}
               <td className="px-4 py-3.5">
                 <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold border ${statusStyle}`}>
-                  {release.deliveryStatus}
+                  {release.deliveryStatus === 'Delivered' ? 'Dropped Off (Pending LGU Scan)' : release.deliveryStatus}
                 </span>
 
                 <div className="mt-2 space-y-1 text-xs text-gray-600">
@@ -820,23 +850,40 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     </span>
                   )}
                   {['In Transit', 'Delivered'].includes(release.deliveryStatus) && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openReleaseAction('receiverAccept', release);
-                      }}
-                      disabled={currentRole !== 'LGUReceiver'}
-                      title={currentRole !== 'LGUReceiver' ? 'RBAC: LGUReceiver privileges required to confirm receipt.' : 'Confirm receipt with LGUReceiver account.'}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition ${
-                        currentRole === 'LGUReceiver'
-                          ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
-                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <MapPin className="w-3 h-3" />
-                      <span>Confirm</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openReleaseAction('receiverAccept', release);
+                        }}
+                        disabled={currentRole !== 'LGUReceiver'}
+                        title={currentRole !== 'LGUReceiver' ? 'RBAC: LGUReceiver privileges required to confirm receipt.' : 'Confirm receipt with LGUReceiver account.'}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition ${
+                          currentRole === 'LGUReceiver'
+                            ? 'bg-green-600 text-white hover:bg-green-700 cursor-pointer'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <MapPin className="w-3 h-3" />
+                        <span>Confirm</span>
+                      </button>
+
+                      {inventoryState.adminActionsEnabled && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openReleaseAction('adminBypass', release);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition cursor-pointer shadow-2xs"
+                          title="Emergency Administrative Bypass: Confirm LGU receipt without mobile QR scan."
+                        >
+                          <ShieldAlert className="w-3 h-3" />
+                          <span>Bypass QR</span>
+                        </button>
+                      )}
+                    </>
                   )}
                   {['Accepted', 'Distributed', 'Correction Requested'].includes(release.deliveryStatus) && (
                     <button
@@ -1001,9 +1048,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           </select>
         </div>
 
-        {/* Warehouse */}
+        {/* Origin / Source Facility */}
         <div>
-          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">Source Warehouse</label>
+          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">Source Facility / Origin</label>
           <select
             value={selectedWarehouse}
             onChange={(e) => {
@@ -1012,10 +1059,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             }}
             className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
           >
-            <option value="All">All Warehouses</option>
-            {warehouseOptions.map(wh => (
-              <option key={wh} value={wh}>{wh}</option>
-            ))}
+            <option value="All">All Sources (Warehouses & LGU Sites)</option>
+            <optgroup label="Regional Warehouses">
+              {sourceOptions.warehouses.map((wh) => (
+                <option key={wh} value={wh}>{wh}</option>
+              ))}
+            </optgroup>
+            {sourceOptions.lguSites.length > 0 && (
+              <optgroup label="LGU Preposition Sites">
+                {sourceOptions.lguSites.map((site) => (
+                  <option key={site} value={site}>{site}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
 
@@ -1497,10 +1553,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     }}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
                   >
-                    <option value="All">All Warehouses</option>
-                    {warehouseOptions.map((wh) => (
-                      <option key={wh} value={wh}>{wh}</option>
-                    ))}
+                    <option value="All">All Sources (Warehouses & LGU Sites)</option>
+                    <optgroup label="Regional Warehouses">
+                      {sourceOptions.warehouses.map((wh) => (
+                        <option key={wh} value={wh}>{wh}</option>
+                      ))}
+                    </optgroup>
+                    {sourceOptions.lguSites.length > 0 && (
+                      <optgroup label="LGU Preposition Sites">
+                        {sourceOptions.lguSites.map((site) => (
+                          <option key={site} value={site}>{site}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
 
                   <select
@@ -1752,6 +1817,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   {actionModal.type === 'senderSign' && 'Sign Warehouse Release'}
                   {actionModal.type === 'inTransit' && 'Mark as In Transit'}
                   {actionModal.type === 'receiverAccept' && 'Confirm LGU Receipt'}
+                  {actionModal.type === 'adminBypass' && 'Emergency Administrative Bypass'}
                   {actionModal.type === 'correction' && 'File Correction Record'}
                 </h2>
                 {actionModal.release && (
@@ -1779,6 +1845,32 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                 <p className="text-sm text-gray-700">Confirm LGU receipt and record the receiving location details?</p>
               )}
 
+              {actionModal.type === 'adminBypass' && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Administrative Override Protocol</p>
+                      <p className="mt-0.5 text-amber-800 leading-relaxed">
+                        This action bypasses the mandatory recipient physical QR scan. Goods will be directly finalized as Accepted in the inventory ledger. Reserved for power outages, disaster site network collapse, or emergency handovers.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">
+                      Emergency Authorization Reason / Incident Note <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      value={actionModal.note || ''}
+                      onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 min-h-24 font-sans text-gray-900 placeholder-gray-400"
+                      placeholder="e.g. Total cellular communication outage in Tubungan; manual paper signed RIS received from CDRRMO officer."
+                    />
+                  </div>
+                </div>
+              )}
+
               {actionModal.type === 'correction' && (
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details</label>
@@ -1803,8 +1895,12 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               <button
                 type="button"
                 onClick={handleConfirmReleaseAction}
-                disabled={isSubmittingAction}
-                className="flex-1 px-5 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isSubmittingAction || (actionModal.type === 'adminBypass' && !actionModal.note?.trim())}
+                className={`flex-1 px-5 py-3 text-white font-semibold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer ${
+                  actionModal.type === 'adminBypass'
+                    ? 'bg-amber-600 hover:bg-amber-700'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
               >
                 {isSubmittingAction ? (
                   <>
@@ -1812,7 +1908,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     <span>Processing...</span>
                   </>
                 ) : (
-                  'Confirm'
+                  actionModal.type === 'adminBypass' ? 'Confirm Emergency Bypass' : 'Confirm'
                 )}
               </button>
             </div>
@@ -1894,6 +1990,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           onEdit={(rel) => setEditingRelease(rel)}
           onApprove={(rel) => openApprovalModal(rel)}
           onCancel={(rel) => setCancellingRelease(rel)}
+          onEmergencyBypass={(rel) => openReleaseAction('adminBypass', rel)}
+          adminActionsEnabled={inventoryState.adminActionsEnabled}
           currentRole={currentRole}
           escortProfiles={escortProfiles}
         />
