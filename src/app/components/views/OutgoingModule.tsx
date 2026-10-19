@@ -60,7 +60,7 @@ const statusStyles: Record<OutgoingStatus, string> = {
 
 const editableStatuses: OutgoingStatus[] = ['Draft', 'Allocating', 'Approved', 'Packed'];
 
-type ReleaseAction = 'senderSign' | 'inTransit' | 'receiverAccept' | 'correction' | 'message' | 'adminBypass';
+type ReleaseAction = 'senderSign' | 'inTransit' | 'receiverAccept' | 'message' | 'adminBypass';
 
 interface ReleaseActionModalState {
   type: ReleaseAction;
@@ -343,11 +343,6 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         const result = await inventoryState.adminEmergencyBypassAccept(release.drNumber, actionModal.note.trim());
         showResult(result.message, result.ok);
         return;
-      }
-
-      if (actionModal.type === 'correction') {
-        if (actionModal.note) requestOutgoingCorrection(release.drNumber, actionModal.note);
-        closeActionModal();
       }
     } finally {
       setIsSubmittingAction(false);
@@ -884,19 +879,6 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                         </button>
                       )}
                     </>
-                  )}
-                  {['Accepted', 'Distributed', 'Correction Requested'].includes(release.deliveryStatus) && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openReleaseAction('correction', release);
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Correction</span>
-                    </button>
                   )}
                 </div>
               </td>
@@ -1822,7 +1804,6 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   {actionModal.type === 'inTransit' && 'Mark as In Transit'}
                   {actionModal.type === 'receiverAccept' && 'Confirm LGU Receipt'}
                   {actionModal.type === 'adminBypass' && 'Emergency Administrative Bypass'}
-                  {actionModal.type === 'correction' && 'File Correction Record'}
                 </h2>
                 {actionModal.release && (
                   <p className="text-sm text-gray-500 mt-1">
@@ -1872,18 +1853,6 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       placeholder="e.g. Total cellular communication outage in Tubungan; manual paper signed RIS received from CDRRMO officer."
                     />
                   </div>
-                </div>
-              )}
-
-              {actionModal.type === 'correction' && (
-                <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details</label>
-                  <textarea
-                    value={actionModal.note || ''}
-                    onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 min-h-28"
-                    placeholder="Describe the quantity, location, or delivery issue."
-                  />
                 </div>
               )}
             </div>

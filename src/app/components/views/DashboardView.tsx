@@ -230,7 +230,7 @@ const MONTH_NAMES = [
 ];
 
 export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefresh }: DashboardViewProps) {
-  const { showDescriptions, toggleDescriptions } = useGuideMode();
+  const { showDescriptions } = useGuideMode();
   const {
     inventory = [],
     incomingGoodsList = [],
@@ -2161,19 +2161,6 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             <h1 className="text-2xl font-bold tracking-tight">Relief Goods Logistics & Analytics Dashboard</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleDescriptions}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm border flex items-center gap-1.5 cursor-pointer ${
-                showDescriptions
-                  ? 'bg-blue-600 text-white border-blue-400'
-                  : 'bg-slate-800/80 text-blue-200 hover:text-white border-slate-700/60'
-              }`}
-              title="Toggle instructions and explanatory descriptions"
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span>Instructions: {showDescriptions ? 'ON' : 'OFF'}</span>
-            </button>
             <button
               type="button"
               onClick={() => onNavigate('outgoing')}

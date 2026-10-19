@@ -31,7 +31,8 @@ import {
   Eye,
   EyeOff,
   Mail,
-  HelpCircle
+  HelpCircle,
+  Edit
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useGuideMode } from '../../contexts/GuideContext';
@@ -2754,7 +2755,7 @@ export function SettingsModal({
                         </span>
                       </div>
                       <p className="text-xs text-gray-600 mt-1 leading-relaxed max-w-xl">
-                        Enables privileged emergency actions on the LGU Monitor. When toggled on, authorized personnel can perform emergency recounts and manual stock corrections for relief goods.
+                        Enables privileged administrative actions across the platform. When toggled on, authorized personnel can perform emergency recounts and manual stock corrections for LGUs, as well as directly edit and file corrections for incoming goods intake shipments.
                       </p>
                     </div>
                   </div>
@@ -2820,9 +2821,18 @@ export function SettingsModal({
               {/* Scope of Administrative Actions */}
               <div className="rounded-2xl border border-gray-200 bg-gray-50/60 p-5 space-y-3">
                 <h5 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-                  Affected Controls in LGU Monitor
+                  Affected Controls in Platform
                 </h5>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-700">
+                  <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
+                    <p className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <Edit className="w-4 h-4 text-amber-600" />
+                      Incoming Shipment Editing & Correction
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Unlocks direct transaction editing and administrative correction filing for incoming shipment records.
+                    </p>
+                  </div>
                   <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
                     <p className="font-bold text-gray-900 flex items-center gap-1.5">
                       <ShieldAlert className="w-4 h-4 text-red-600" />
@@ -2848,15 +2858,6 @@ export function SettingsModal({
                     </p>
                     <p className="text-[11px] text-gray-500">
                       Direct row action icons for fast emergency stock corrections.
-                    </p>
-                  </div>
-                  <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-2xs space-y-1">
-                    <p className="font-bold text-gray-900 flex items-center gap-1.5">
-                      <RefreshCw className="w-4 h-4 text-emerald-600" />
-                      Audit Trail Compliance
-                    </p>
-                    <p className="text-[11px] text-gray-500">
-                      All emergency recounts require a mandatory justification and are logged.
                     </p>
                   </div>
                 </div>

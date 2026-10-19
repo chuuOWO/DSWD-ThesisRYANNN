@@ -60,7 +60,10 @@ const statusLabels: Record<IncomingStatus, string> = {
   Cancelled: 'Cancelled'
 };
 
-const canEdit = (status: IncomingStatus) => ['Draft', 'Pending Verification', 'Correction Requested'].includes(status);
+const canEdit = (status: IncomingStatus, adminActionsEnabled = false) => {
+  if (adminActionsEnabled) return true;
+  return ['Draft', 'Pending Verification'].includes(status);
+};
 
 const friendlyResult = (message: string) =>
   message
@@ -361,7 +364,14 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       <div className="bg-gradient-to-r from-blue-700 to-indigo-700 rounded-xl p-6 text-white shadow-md">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">Incoming Goods Receiving</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold">Incoming Goods Receiving</h1>
+              {inventoryState.adminActionsEnabled && (
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-100 border border-emerald-400/30 text-xs font-bold">
+                  Administrative Mode Active
+                </span>
+              )}
+            </div>
             {showDescriptions && (
               <p className="text-sm text-blue-100 mt-1">
                 Record deliveries, inspect physical shipments, and add verified supplies to warehouse inventory.
@@ -594,19 +604,11 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex flex-wrap gap-2">
-                      {canEdit(item.status) && (
+                      {canEdit(item.status, inventoryState.adminActionsEnabled) && (
                         <button
-                          onClick={() => {
-                            if (!canEdit(item.status)) {
-                              setActionModal({
-                                type: 'message',
-                                message: 'This verified batch record can no longer be edited directly. Please file a correction record.'
-                              });
-                              return;
-                            }
-                            setEditingIncoming(item);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+                          onClick={() => setEditingIncoming(item)}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer"
+                          title="Edit incoming transaction details"
                         >
                           <Edit className="w-3 h-3" /> Edit
                         </button>
@@ -629,8 +631,12 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           <X className="w-3.5 h-3.5" /> Cancel
                         </button>
                       )}
-                      {['Verified', 'Correction Requested'].includes(item.status) && (
-                        <button onClick={() => openActionModal('correction', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer">
+                      {inventoryState.adminActionsEnabled && ['Verified', 'Correction Requested'].includes(item.status) && (
+                        <button
+                          onClick={() => openActionModal('correction', item)}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer"
+                          title="File an administrative correction record"
+                        >
                           <RotateCcw className="w-3 h-3" /> Correction
                         </button>
                       )}
