@@ -43,6 +43,7 @@ import { LGUReportPdfModal } from './LGUReportPdfModal';
 export interface LGUTransaction {
   id: string;
   type: 'Incoming' | 'Outgoing';
+  flowLabel?: string;
   referenceCode: string;
   category: string;
   quantity: number;
@@ -337,6 +338,7 @@ export function LGUDetailModal({
         list.push({
           id: `IN-${r.id || r.drNumber || Math.random()}`,
           type: 'Incoming',
+          flowLabel: 'Inbound Delivery (DR)',
           referenceCode: r.drNumber || r.id || 'N/A',
           category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
           quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
@@ -369,6 +371,7 @@ export function LGUDetailModal({
           list.push({
             id: `INC-DIRECT-${inc.id}`,
             type: 'Incoming',
+            flowLabel: 'Intake (RIS)',
             referenceCode: inc.incidentCode || inc.id,
             category: normalizeCategoryName(inc.fnfiCategory) || inc.fnfiCategory || 'Relief Goods',
             quantity: Number(inc.quantity) || 0,
@@ -396,6 +399,7 @@ export function LGUDetailModal({
           list.push({
             id: `OUT-${r.id || r.drNumber || Math.random()}`,
             type: 'Outgoing',
+            flowLabel: 'Outbound Release',
             referenceCode: r.drNumber || r.id || 'N/A',
             category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
             quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
@@ -472,6 +476,13 @@ export function LGUDetailModal({
       let sourceName = `${lgu.municipality} LGU`;
       let destName = 'Local Relief Distribution';
 
+      let ledgerFlowLabel = isIncoming ? 'Intake (RIS)' : 'Outbound Release';
+      if (row.reference_dr_id || refCode.startsWith('DR-')) {
+        ledgerFlowLabel = 'Inbound Delivery (DR)';
+      } else if (mvType === 'MUTUAL_AID_OUT') {
+        ledgerFlowLabel = 'Mutual Aid Out';
+      }
+
       if (isIncoming) {
         sourceName = mvType === 'AID_RECEIVED' ? 'DSWD Regional Relief Hub' : 'Local Stock / Intake';
         destName = `${lgu.municipality} LGU`;
@@ -485,6 +496,7 @@ export function LGUDetailModal({
       list.push({
         id: `DB-LEDGER-${row.id}`,
         type: isIncoming ? 'Incoming' : 'Outgoing',
+        flowLabel: ledgerFlowLabel,
         referenceCode: refCode,
         category: normalizeCategoryName(kitName) || kitName,
         quantity: Math.abs(delta),
@@ -749,12 +761,13 @@ export function LGUDetailModal({
         const q = searchQuery.toLowerCase().trim();
         const matchCode = tx.referenceCode.toLowerCase().includes(q);
         const matchCat = tx.category.toLowerCase().includes(q);
+        const matchFlow = (tx.flowLabel || '').toLowerCase().includes(q);
         const matchSource = tx.source.toLowerCase().includes(q);
         const matchDest = tx.destination.toLowerCase().includes(q);
         const matchMode = (tx.deliveryMode || '').toLowerCase().includes(q);
         const matchStatus = tx.status.toLowerCase().includes(q);
         const matchExp = (tx.expirationDate || '').toLowerCase().includes(q);
-        if (!matchCode && !matchCat && !matchSource && !matchDest && !matchMode && !matchStatus && !matchExp) return;
+        if (!matchCode && !matchCat && !matchFlow && !matchSource && !matchDest && !matchMode && !matchStatus && !matchExp) return;
       }
 
       allCount++;
@@ -809,6 +822,7 @@ export function LGUDetailModal({
         const q = searchQuery.toLowerCase().trim();
         const matchCode = tx.referenceCode.toLowerCase().includes(q);
         const matchCat = tx.category.toLowerCase().includes(q);
+        const matchFlow = (tx.flowLabel || '').toLowerCase().includes(q);
         const matchSource = tx.source.toLowerCase().includes(q);
         const matchDest = tx.destination.toLowerCase().includes(q);
         const matchMode = (tx.deliveryMode || '').toLowerCase().includes(q);
@@ -816,7 +830,7 @@ export function LGUDetailModal({
         const matchExp = (tx.expirationDate || '').toLowerCase().includes(q);
         const matchBatch = (tx.batchTokenId || '').toLowerCase().includes(q);
 
-        if (!matchCode && !matchCat && !matchSource && !matchDest && !matchMode && !matchStatus && !matchExp && !matchBatch) {
+        if (!matchCode && !matchCat && !matchFlow && !matchSource && !matchDest && !matchMode && !matchStatus && !matchExp && !matchBatch) {
           return false;
         }
       }
@@ -1559,15 +1573,20 @@ export function LGUDetailModal({
                       (paginatedItems as LGUTransaction[]).map((tx) => (
                         <tr key={tx.id} className="hover:bg-gray-50/80 transition-colors">
                           <td className="px-4 py-3 whitespace-nowrap">
-                            {tx.type === 'Incoming' ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-800">
-                                <ArrowDownLeft className="w-3 h-3 text-green-600" />
-                                Incoming
+                            {tx.flowLabel === 'Inbound Delivery (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-')) ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
+                                <Truck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                Inbound Delivery (DR)
+                              </span>
+                            ) : tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && tx.type === 'Incoming') ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                                <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                Intake (RIS)
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                                <ArrowUpRight className="w-3 h-3 text-blue-600" />
-                                Outgoing
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
+                                <ArrowUpRight className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                {tx.flowLabel || 'Outbound Release'}
                               </span>
                             )}
                           </td>

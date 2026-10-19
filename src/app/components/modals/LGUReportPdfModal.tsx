@@ -510,15 +510,17 @@ export function LGUReportPdfModal({
                     <tbody className="divide-y divide-gray-100 text-[11px]">
                       {allTransactions.slice(0, 10).map((tx) => (
                         <tr key={tx.id} className="hover:bg-gray-50/50">
-                          <td className="px-3 py-1.5">
+                          <td className="px-3 py-1.5 whitespace-nowrap">
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold ${
-                                tx.type === 'Incoming'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-blue-100 text-blue-800'
+                                tx.flowLabel === 'Inbound Delivery (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-'))
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && tx.type === 'Incoming')
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-purple-100 text-purple-800'
                               }`}
                             >
-                              {tx.type}
+                              {tx.flowLabel || (tx.type === 'Incoming' ? 'Intake (RIS)' : 'Outbound Release')}
                             </span>
                           </td>
                           <td className="px-3 py-1.5 font-mono font-bold text-gray-900">{tx.referenceCode}</td>
