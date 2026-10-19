@@ -3097,7 +3097,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             })()}
 
             {/* Convoy Truck Assignment (for Field Escort Receivers) */}
-            {selectedProfile.role === 'receiver' && (
+            {selectedProfile.role === 'receiver' && selectedProfile.status !== 'pending' && (
               <div className="space-y-3 p-4 rounded-2xl border border-purple-100 bg-purple-50/40">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-bold text-purple-950 flex items-center gap-1.5">

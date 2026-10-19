@@ -3218,8 +3218,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                       <h3 className="text-xs font-black text-gray-900 leading-tight truncate max-w-[150px]">
                         {profile?.fullName || 'Relief Escort Officer'}
                       </h3>
-                      <p className="text-[10px] text-gray-500 font-mono">
-                        Vehicle: {truckPlateNumber || activeTruckId || 'Pending'}
+                      <p className="text-[10px] text-gray-500 font-medium truncate max-w-[150px]">
+                        {profile?.email || 'Relief Escort'}
                       </p>
                     </div>
                   </div>
@@ -3230,57 +3230,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   >
                     <X size={18} />
                   </button>
-                </div>
-
-                {/* Transport Vehicle Details */}
-                <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-left space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Truck size={14} className="text-[#2500ba]" />
-                    <span className="text-[10px] font-bold text-gray-700 uppercase tracking-wide">
-                      Transport Vehicle Details
-                    </span>
-                  </div>
-                  <div>
-                    <label className="block text-[9.5px] font-semibold text-gray-500 mb-0.5">
-                      Plate Number
-                    </label>
-                    <input
-                      type="text"
-                      value={truckPlateNumber}
-                      onChange={(e) => {
-                        const val = e.target.value.toUpperCase();
-                        setTruckPlateNumber(val);
-                        setActiveTruckId(val);
-                        setSelectedTruckId(val);
-                        try {
-                          localStorage.setItem(`escort_truck_plate_${receiverId}`, val);
-                        } catch {}
-                        if (profile?.id) {
-                          void authApi.updateProfile(profile.id, { truckId: val }).catch(() => {});
-                        }
-                      }}
-                      placeholder="e.g. SAA-1001 or ABC-1234"
-                      className="w-full text-xs font-mono font-bold py-1.5 px-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#2500ba]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[9.5px] font-semibold text-gray-500 mb-0.5">
-                      Vehicle Model / Type
-                    </label>
-                    <input
-                      type="text"
-                      value={truckModel}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setTruckModel(val);
-                        try {
-                          localStorage.setItem(`escort_truck_model_${receiverId}`, val);
-                        } catch {}
-                      }}
-                      placeholder="e.g. Isuzu Elf 6-Wheeler"
-                      className="w-full text-xs py-1.5 px-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#2500ba]"
-                    />
-                  </div>
                 </div>
 
                 {/* Smart Account Card */}
