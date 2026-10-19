@@ -58,3 +58,4 @@ export function GuideProvider({ children }: { children: React.ReactNode }) {
 export function useGuideMode() {
   return useContext(GuideContext);
 }
+

@@ -26,6 +26,7 @@ export type LguSortField =
   | 'province'
   | 'status'
   | 'current_stock'
+  | 'currentStock'
   | 'capacity'
   | 'percentage'
   | 'variance'
@@ -588,6 +589,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           break;
         }
         case 'current_stock':
+        case 'currentStock':
           diff = effStockA - effStockB;
           break;
         case 'capacity':
