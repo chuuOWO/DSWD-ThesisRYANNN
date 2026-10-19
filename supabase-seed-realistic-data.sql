@@ -519,20 +519,7 @@ where m.manifest_number like 'MNF-2026-%'
   );
 
 -- ------------------------------------------------------------------------------
--- SECTION 10: RECLAIM STORAGE PAGES & MEMORY
--- ------------------------------------------------------------------------------
-
-vacuum analyze public.stock_ledger;
-vacuum analyze public.inventory_batches;
-vacuum analyze public.incoming_manifests;
-vacuum analyze public.lgu_inventory_reports;
-vacuum analyze public.lgu_stock;
-vacuum analyze public.warehouse_stock;
-vacuum analyze public.lgus;
-vacuum analyze public.warehouses;
-
--- ------------------------------------------------------------------------------
--- SECTION 11: VERIFICATION & SUMMARY DIAGNOSTIC AUDIT
+-- SECTION 10: VERIFICATION & SUMMARY DIAGNOSTIC AUDIT
 -- ------------------------------------------------------------------------------
 
 select

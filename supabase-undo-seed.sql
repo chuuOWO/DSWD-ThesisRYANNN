@@ -75,15 +75,8 @@ update public.warehouses set
   laminated_sacks = 0,
   current_stock = '{}'::jsonb;
 
--- 8. Run VACUUM ANALYZE to reclaim storage pages and optimize database memory
-vacuum analyze public.stock_ledger;
-vacuum analyze public.inventory_batches;
-vacuum analyze public.incoming_manifests;
-vacuum analyze public.lgu_inventory_reports;
-vacuum analyze public.lgu_stock;
-vacuum analyze public.warehouse_stock;
-vacuum analyze public.lgus;
-vacuum analyze public.warehouses;
+-- Note: In Supabase, background autovacuum manages dead tuples automatically.
+-- VACUUM cannot be run inside multi-statement queries in the Supabase SQL editor.
 
 -- ------------------------------------------------------------------------------
 -- VERIFICATION AUDIT (Confirm all heavy seed data is cleared)
