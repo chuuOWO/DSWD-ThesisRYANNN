@@ -1348,7 +1348,18 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       actorProfileId: currentActor.id
     }).catch(err => console.warn('appendStockLedger TRANSFER_IN error:', err));
 
-    // 6. Record in incoming_goods table (Verified intake, strictly zero blockchain minting)
+    // 6. Deduct specific batch lot if allocated
+    if (payload.batchTokenId) {
+      setInventoryBatchesList(prev => prev.map(b =>
+        b.batchTokenId === payload.batchTokenId
+          ? { ...b, remainingQuantity: Math.max(0, b.remainingQuantity - payload.quantity) }
+          : b
+      ));
+      backendApi.allocateBatchesToRequest(cleanId, [{ batchTokenId: payload.batchTokenId, quantity: payload.quantity }])
+        .catch(err => console.warn('allocateBatchesToRequest error:', err));
+    }
+
+    // 7. Record in incoming_goods table (Verified intake, strictly zero blockchain minting)
     const goodsWithId: IncomingGoods = {
       id: cleanId,
       manifestNumber: cleanId,
@@ -1363,9 +1374,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       destinationLguId: destLgu?.id,
       status: 'Verified',
       verifiedBy: currentActor.name,
-      manifestHash: `OFFCHAIN-TRF-${Date.now()}`,
+      manifestHash: `OFFCHAIN-RIS-${Date.now()}`,
       auditTrail: [
-        audit('Stock Replenished & Transferred', `Internal transfer of ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} from ${payload.sourceName} to ${payload.destinationMunicipality} verified and stocked by ${currentActor.name}.`)
+        audit('Stock Replenished', `Replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName} (Exp: ${payload.expirationDate}) verified and stocked by ${currentActor.name}.`)
       ]
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
@@ -1383,30 +1394,32 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       destinationLguId: destLgu?.id,
       status: 'Verified',
       manifestHash: goodsWithId.manifestHash
-    }).catch(err => console.warn('createIncoming transfer error:', err));
+    }).catch(err => console.warn('createIncoming error:', err));
 
     backendApi.logActivity({
       action: 'LGU_REPLENISHED',
-      entityType: 'TransferMovement',
+      entityType: 'Replenishment',
       entityId: cleanId,
       actorId: currentActor.id,
       actorName: currentActor.name,
       actorEmail: currentActor.email,
       actorRole: currentActor.role,
       actorWallet: currentActor.wallet,
-      details: `Replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName}.`,
+      details: `Replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName} (Exp: ${payload.expirationDate}).`,
       metadata: {
         manifestNumber: cleanId,
         source: payload.sourceName,
         destination: payload.destinationMunicipality,
         quantity: payload.quantity,
-        fnfiCategory: payload.fnfiCategory
+        fnfiCategory: payload.fnfiCategory,
+        expirationDate: payload.expirationDate,
+        batchTokenId: payload.batchTokenId
       }
     }).catch(() => {});
 
     return {
       ok: true,
-      message: `Successfully transferred ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName} to ${payload.destinationMunicipality}.`
+      message: `Successfully replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName}.`
     };
   };
 
