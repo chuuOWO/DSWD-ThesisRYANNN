@@ -333,8 +333,13 @@ on conflict (lgu_id, kit_type_id) do update set
 -- ------------------------------------------------------------------------------
 -- SECTION 4: SITUATIONAL ASSESSMENT REPORTS (public.lgu_inventory_reports)
 -- ------------------------------------------------------------------------------
--- Seed fresh reports for all 101 LGUs matching their prioritized situation
+-- Seed fresh reports for all 101 LGUs matching their prioritized situation.
+-- Idempotent: cleans prior automated seed reports (reported_by_profile_id is null)
+-- so running this script multiple times will never duplicate rows.
 -- ------------------------------------------------------------------------------
+
+delete from public.lgu_inventory_reports
+where reported_by_profile_id is null;
 
 insert into public.lgu_inventory_reports (
   lgu_id,
@@ -545,6 +550,7 @@ select
   m.manifest_hash,
   m.created_at
 from public.incoming_manifests m
+where m.manifest_number like 'MNF-2026-%'
 on conflict (batch_token_id) do update set
   initial_quantity = excluded.initial_quantity,
   remaining_quantity = excluded.remaining_quantity,
@@ -579,10 +585,11 @@ select
   m.id,
   m.created_at
 from public.incoming_manifests m
-where not exists (
-  select 1 from public.stock_ledger sl
-  where sl.reference_manifest_id = m.id
-);
+where m.manifest_number like 'MNF-2026-%'
+  and not exists (
+    select 1 from public.stock_ledger sl
+    where sl.reference_manifest_id = m.id
+  );
 
 -- ------------------------------------------------------------------------------
 -- SECTION 9: VERIFICATION & SUMMARY DIAGNOSTIC AUDIT
@@ -602,3 +609,4 @@ select
   (select count(*) from public.inventory_batches) as total_inventory_batches,
   (select count(*) from public.inventory_batches where expiration_date <= current_date + interval '90 days') as batches_expiring_90d,
   (select count(*) from public.inventory_batches where expiration_date > current_date + interval '90 days' and expiration_date <= current_date + interval '120 days') as batches_expiring_120d;
+
