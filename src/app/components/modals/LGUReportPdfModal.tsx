@@ -600,3 +600,4 @@ export function LGUReportPdfModal({
 
   return typeof document !== 'undefined' ? createPortal(portalContent, document.body) : null;
 }
+

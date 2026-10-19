@@ -23,9 +23,10 @@ import {
   ChevronRight,
   X,
   ExternalLink,
-  UserCheck
+  UserCheck,
+  CheckCircle2
 } from 'lucide-react';
-import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 
@@ -62,7 +63,7 @@ interface BarcodeDetectorWindow extends Window {
   BarcodeDetector?: BarcodeDetectorConstructor;
 }
 
-type Step = 'pickup' | 'scan' | 'select_truck' | 'sign_custody' | 'verify' | 'inventory' | 'success' | 'arrived' | 'profile';
+type Step = 'pickup' | 'scan' | 'select_truck' | 'sign_custody' | 'verify' | 'inventory' | 'success' | 'arrived' | 'profile' | 'verify_dropoff' | 'sign_dropoff' | 'dropoff_success';
 type Inventory = { batchTokenId: string; category: string; quantity: number; status: string; remarks: string };
 type PhoneLocation = { latitude: number; longitude: number; accuracy?: number | null; timestamp: string };
 type QrPayload = {
@@ -88,6 +89,7 @@ const initialInventory: Inventory = {
 };
 
 const DEFAULT_PANAY_BOUNDS_CENTER: [number, number] = [10.9000, 122.5000];
+const GEOFENCE_RADIUS_METERS = 600; // 600 meters drop-off geofence radius
 
 const createDestinationPinIcon = (isSelectedOrLabel?: boolean | string, maybeSelected?: boolean) => {
   return L.divIcon({
@@ -869,6 +871,14 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const [isDeliveryHistoryOpen, setIsDeliveryHistoryOpen] = useState(false);
   const [transitRemarks, setTransitRemarks] = useState('');
   const [isGpsWeak, setIsGpsWeak] = useState(false);
+  const [dropOffTarget, setDropOffTarget] = useState<{
+    payload: QrPayload;
+    location: PhoneLocation;
+    matchingRelease?: ReceiverReleaseRecord;
+    distanceMeters?: number;
+  } | null>(null);
+  const [dropOffRemarks, setDropOffRemarks] = useState('');
+  const [dropOffTxHash, setDropOffTxHash] = useState<string | null>(null);
 
   const occupiedTruckIds = useMemo(() => {
     const occupied = new Set<string>();
@@ -1071,6 +1081,15 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const isInTransit = activePackages.length > 0;
   const totalQuantity = useMemo(() => activePackages.reduce((sum, p) => sum + (Number(p.quantity) || 0), 0), [activePackages]);
 
+  const distanceToActiveDropoff = useMemo(() => {
+    if (!currentPosition || !destinationPosition || !isValidCoordinate(currentPosition) || !isValidCoordinate(destinationPosition)) {
+      return null;
+    }
+    return getDistanceMeters(currentPosition[0], currentPosition[1], destinationPosition[0], destinationPosition[1]);
+  }, [currentPosition, destinationPosition]);
+
+  const isNearActiveDropoff = distanceToActiveDropoff !== null && distanceToActiveDropoff <= GEOFENCE_RADIUS_METERS;
+
   const saveLocationState = (nextLoc: PhoneLocation) => {
     lastProcessedLocRef.current = nextLoc;
     setLocation(nextLoc);
@@ -1266,6 +1285,210 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     setStep(nextStep);
   };
 
+  const handleInitiateDropOff = (
+    payloadToDrop: QrPayload,
+    matchingReleaseOverride?: ReceiverReleaseRecord,
+    distMetersOverride?: number
+  ) => {
+    stopCamera();
+    const matchingDb = matchingReleaseOverride || allReleases.find((r) => r.dr_number.toUpperCase() === payloadToDrop.drNumber.toUpperCase());
+    const pkgDest = allPackageDestinations.find((d) => d.drNumber.toUpperCase() === payloadToDrop.drNumber.toUpperCase());
+    const curPos = currentPosition || (location ? [location.latitude, location.longitude] : null);
+    
+    let dist = distMetersOverride;
+    if (dist === undefined && curPos && pkgDest?.position && isValidCoordinate(curPos) && isValidCoordinate(pkgDest.position)) {
+      dist = getDistanceMeters(curPos[0], curPos[1], pkgDest.position[0], pkgDest.position[1]);
+    }
+    if (dist === undefined) {
+      dist = distanceToActiveDropoff ?? 0;
+    }
+
+    const curLoc: PhoneLocation = location || {
+      latitude: curPos ? curPos[0] : 10.7202,
+      longitude: curPos ? curPos[1] : 122.5621,
+      accuracy: null,
+      timestamp: new Date().toISOString()
+    };
+
+    setDropOffTarget({
+      payload: payloadToDrop,
+      location: curLoc,
+      matchingRelease: matchingDb,
+      distanceMeters: dist
+    });
+    setVerifiedQuantity(payloadToDrop.quantity);
+    setDropOffRemarks('');
+    setSignError(null);
+    nav('verify_dropoff');
+  };
+
+  const handleExecuteDropOff = async () => {
+    if (!dropOffTarget) return;
+    const { payload, location: nextLoc, matchingRelease } = dropOffTarget;
+    const effectiveQty = (verifiedQuantity && verifiedQuantity > 0) ? verifiedQuantity : payload.quantity;
+
+    setIsSubmittingProof(true);
+    setSignStage('wallet');
+    setSignError(null);
+    setStep('sign_dropoff');
+
+    try {
+      let activeWalletAddr = profile?.walletAddress || '';
+      if (!activeWalletAddr || activeWalletAddr === '0xReceiverWallet') {
+        try {
+          activeWalletAddr = await provisionSmartAccountAddress(profile?.id || receiverId, profile?.email || `${receiverId}@dswd.gov.ph`);
+        } catch {
+          activeWalletAddr = '0xReceiverWallet';
+        }
+      }
+
+      const resolvedContractId = matchingRelease?.handover_contract_id ||
+        payload.handoverContractId ||
+        (payload.drNumber.toUpperCase().startsWith('DR-') ? `HANDOVER-${payload.drNumber.toUpperCase()}` : `HANDOVER-DR-${payload.drNumber}`);
+
+      const destinationText = matchingRelease?.destination_address || matchingRelease?.lgu_name || matchingRelease?.municipality || payload.to || 'Assigned LGU';
+      const gpsString = `${nextLoc.latitude.toFixed(6)}, ${nextLoc.longitude.toFixed(6)}`;
+
+      // Confirm receipt on Sepolia blockchain
+      const proof = await blockchain.confirmReceipt({
+        drNumber: payload.drNumber,
+        handoverContractId: resolvedContractId,
+        destination: destinationText,
+        gps: gpsString,
+        signerWallet: activeWalletAddr && activeWalletAddr !== '0xReceiverWallet' ? activeWalletAddr : undefined
+      }, (stage, txHash) => {
+        setSignStage(stage);
+        if (txHash) {
+          setDropOffTxHash(txHash);
+        }
+      });
+
+      const activeTxHash = proof.hash;
+      setDropOffTxHash(activeTxHash);
+
+      // Record direct custody acceptance in Supabase via backendApi.recordLguReceipt
+      const targetMuni = matchingRelease?.municipality || matchingRelease?.lgu_name || payload.to || 'LGU';
+      await backendApi.recordLguReceipt({
+        drNumber: payload.drNumber,
+        lguName: targetMuni,
+        municipality: targetMuni,
+        category: payload.category,
+        quantity: effectiveQty,
+        receiverGps: gpsString,
+        receiverSignature: activeTxHash || `RECEIVER-DROPOFF-${Date.now()}`,
+        txHash: activeTxHash
+      }).catch((e) => console.warn('recordLguReceipt error:', e));
+
+      // Update outgoing_requests: delivery_status = 'Accepted'
+      await backendApi.updateOutgoing(payload.drNumber, {
+        deliveryStatus: 'Accepted',
+        receiverGps: gpsString,
+        txHash: activeTxHash,
+        handoverContractId: resolvedContractId,
+        receiverSignature: activeTxHash,
+        walletAddress: proof.walletAddress || activeWalletAddr,
+        receivedByProfileId: profile?.id,
+        amountApproved: effectiveQty
+      }).catch((e) => console.warn('updateOutgoing error:', e));
+
+      // Report discrepancy if verified quantity differs or remarks entered
+      if (dropOffRemarks.trim() || effectiveQty !== payload.quantity) {
+        const noteText = [
+          effectiveQty !== payload.quantity ? `Drop-off verified count ${effectiveQty} vs manifest ${payload.quantity}.` : '',
+          dropOffRemarks.trim()
+        ].filter(Boolean).join(' ');
+
+        await backendApi.createDiscrepancyReport({
+          reportType: 'Outgoing',
+          drNumber: payload.drNumber,
+          note: noteText,
+          reportedByRole: 'Escort',
+          reportedByWallet: profile?.walletAddress || undefined,
+          reportedByProfileId: profile?.id
+        }).catch(() => {});
+      }
+
+      // Record final hop in custody_hops
+      const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);
+      const nextSequence = (existingHops.length || 0) + 1;
+      await backendApi.recordCustodyHop({
+        outgoingRequestId: matchingRelease?.id || payload.drNumber,
+        sequence: nextSequence,
+        fromDriverProfileId: profile?.id,
+        fromTruckId: activeTruckId,
+        gpsCoordinates: gpsString,
+        blockchainTxHash: activeTxHash,
+        notes: `Final drop-off verified inside drop-off geofence at ${destinationText}. Delivered ${effectiveQty} units.`
+      }).catch(() => {});
+
+      // Record LGU_RECEIVED movement in stock_ledger
+      await backendApi.appendStockLedger({
+        movementType: 'LGU_RECEIVED',
+        outgoingRequestId: matchingRelease?.id,
+        drNumber: payload.drNumber,
+        destinationLguId: matchingRelease?.destination_lgu_id || matchingRelease?.lgu_id,
+        quantityChange: effectiveQty,
+        referenceTable: 'lgu_inventory_reports',
+        referenceId: payload.drNumber,
+        gpsCoordinates: gpsString,
+        blockchainTxHash: activeTxHash,
+        performedByProfileId: profile?.id,
+        notes: `Drop-off verified at ${destinationText}. Handover completed on Sepolia.`
+      }).catch(() => {});
+
+      // Clean up truck live location since delivery is finalized
+      await backendApi.markTruckLiveLocationDoneByDr(payload.drNumber).catch(() => {});
+      if (activeTruckId) {
+        await backendApi.markTruckLiveLocationDone(activeTruckId, payload.drNumber).catch(() => {});
+      }
+
+      // Activity log
+      await backendApi.logActivity({
+        actorId: profile?.id,
+        actorName: profile?.fullName || receiverId,
+        actorEmail: profile?.email,
+        actorRole: 'escort',
+        actorWallet: proof.walletAddress || activeWalletAddr,
+        action: 'DELIVERY_DROPOFF_COMPLETED',
+        entityType: 'outgoing_request',
+        entityId: payload.drNumber,
+        details: `Relief delivery ${payload.drNumber} dropped off inside geofence at ${destinationText}. Recorded to Sepolia testnet.`,
+        metadata: {
+          drNumber: payload.drNumber,
+          truckId: activeTruckId,
+          destination: destinationText,
+          quantity: effectiveQty,
+          gps: gpsString,
+          txHash: activeTxHash
+        },
+        txHash: activeTxHash
+      }).catch(() => {});
+
+      // Remove from active packages
+      const remaining = activePackages.filter((p) => p.drNumber.toUpperCase() !== payload.drNumber.toUpperCase());
+      setActivePackages(remaining);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(remaining));
+      } catch {}
+
+      // Refresh releases list
+      backendApi.getReceiverReleases().then((rows) => {
+        setAllReleases(rows);
+      }).catch(() => {});
+
+      setHandoverToast(`Drop-off confirmed on Sepolia for ${payload.drNumber}! Delivery finalized.`);
+      setTimeout(() => setHandoverToast(null), 8000);
+      setStep('dropoff_success');
+    } catch (err: any) {
+      console.error('Drop-off error:', err);
+      const msg = formatUserErrorMessage(err, 'Drop-off blockchain confirmation failed on Sepolia.');
+      setSignError(msg);
+    } finally {
+      setIsSubmittingProof(false);
+      setSignStage('idle');
+    }
+  };
+
   const handleInitiateCustody = async (payload: QrPayload) => {
     stopCamera();
     setSignError(null);
@@ -1274,19 +1497,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     setVerifiedQuantity(payload.quantity);
     setSelectedTruckId(activeTruckId || profile?.truckId || trucksList[0]?.truckId || 'TRUCK-01');
 
-    // Dismiss camera instantly to eliminate camera freeze and show Cargo Verification first
-    nav('verify');
-
     try {
-      // 1. Same-user double-scan guard: already in this driver's active cargo
-      if (activePackages.some((p) => p.drNumber.toUpperCase() === payload.drNumber.toUpperCase())) {
-        setHandoverToast(`Already in Cargo: Shipment ${payload.drNumber} is already in your active cargo list.`);
-        setTimeout(() => setHandoverToast(null), 6000);
-        nav('pickup');
-        return;
-      }
-
-      // 2. Terminal endpoint guard: check if already accepted by destination LGU
+      // 1. Terminal endpoint guard: check if already accepted by destination LGU
       let matchingDbRelease = allReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
       if (!matchingDbRelease) {
         try {
@@ -1302,11 +1514,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         return;
       }
 
-      // 3. Driver-to-driver handover notice (if previously in transit with another vehicle)
-      if (matchingDbRelease && matchingDbRelease.assigned_truck_id && matchingDbRelease.assigned_truck_id !== receiverId && matchingDbRelease.delivery_status === 'In Transit') {
-        console.log(`Custody handover detected: Transferring shipment ${payload.drNumber} from ${matchingDbRelease.assigned_truck_id} to ${receiverId}.`);
-      }
-
       // Auto-attach pinned GPS from Supabase if not present in scanned QR
       if (!payload.destinationCoords) {
         if (matchingDbRelease?.receiver_gps) {
@@ -1315,6 +1522,55 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             payload = { ...payload, destinationCoords: [parts[0], parts[1]] };
           }
         }
+      }
+
+      if (!payload.destinationCoords) {
+        const lguLookup = findMatchingLgu(
+          dbLgus,
+          matchingDbRelease?.destination_address ||
+          matchingDbRelease?.lgu_name ||
+          matchingDbRelease?.municipality ||
+          payload.to || '',
+          matchingDbRelease?.province || undefined
+        );
+        if (lguLookup && typeof lguLookup.latitude === 'number' && typeof lguLookup.longitude === 'number') {
+          payload = { ...payload, destinationCoords: [lguLookup.latitude, lguLookup.longitude] };
+        }
+      }
+
+      // Geofencing Check: Is carrier currently inside the drop-off zone?
+      const curPos: [number, number] | null = currentPosition || (location ? [location.latitude, location.longitude] : null);
+      let distToDropoff: number | null = null;
+      if (curPos && payload.destinationCoords && isValidCoordinate(payload.destinationCoords)) {
+        distToDropoff = getDistanceMeters(curPos[0], curPos[1], payload.destinationCoords[0], payload.destinationCoords[1]);
+      }
+
+      const isInsideDropoffGeofence = (distToDropoff !== null && distToDropoff <= GEOFENCE_RADIUS_METERS) || isNearActiveDropoff;
+      const isAlreadyInActiveCargo = activePackages.some((p) => p.drNumber.toUpperCase() === payload.drNumber.toUpperCase());
+
+      // If inside geofence OR if already carrying this package near drop-off: TRIGGER DROP-OFF FLOW
+      if (isInsideDropoffGeofence || (isAlreadyInActiveCargo && isNearActiveDropoff)) {
+        console.log(`[Drop-Off Mode] Inside geofence (${Math.round(distToDropoff ?? 0)}m). Transitioning ${payload.drNumber} to drop-off flow.`);
+        setIsSigning(false);
+        handleInitiateDropOff(payload, matchingDbRelease, distToDropoff ?? undefined);
+        return;
+      }
+
+      // If outside geofence and already in cargo:
+      if (isAlreadyInActiveCargo) {
+        setIsSigning(false);
+        setHandoverToast(`Already in Cargo: Shipment ${payload.drNumber} is in your active cargo. Navigate to destination drop-off geofence to drop off.`);
+        setTimeout(() => setHandoverToast(null), 6000);
+        nav('pickup');
+        return;
+      }
+
+      // Dismiss camera and show Cargo Verification for standard pickup
+      nav('verify');
+
+      // Driver-to-driver handover notice (if previously in transit with another vehicle)
+      if (matchingDbRelease && matchingDbRelease.assigned_truck_id && matchingDbRelease.assigned_truck_id !== receiverId && matchingDbRelease.delivery_status === 'In Transit') {
+        console.log(`Custody handover detected: Transferring shipment ${payload.drNumber} from ${matchingDbRelease.assigned_truck_id} to ${receiverId}.`);
       }
 
       // Ensure on-chain batch tokens from database are used if available
@@ -1895,8 +2151,41 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               {isInTransit && allPackageDestinations.map((pkgDest) => {
                 if (!pkgDest.position || !isValidCoordinate(pkgDest.position)) return null;
                 const isSelected = pkgDest.isSelected;
+                const dist = (currentPosition && isValidCoordinate(currentPosition))
+                  ? getDistanceMeters(currentPosition[0], currentPosition[1], pkgDest.position[0], pkgDest.position[1])
+                  : null;
+                const isInside = dist !== null && dist <= GEOFENCE_RADIUS_METERS;
+
                 return (
                   <Fragment key={pkgDest.drNumber}>
+                    {/* Authorized Drop-Off Geofence Circle */}
+                    <Circle
+                      center={pkgDest.position}
+                      radius={GEOFENCE_RADIUS_METERS}
+                      pathOptions={{
+                        color: isInside ? '#059669' : (isSelected ? '#2500ba' : '#7c3aed'),
+                        fillColor: isInside ? '#10b981' : (isSelected ? '#3b82f6' : '#a855f7'),
+                        fillOpacity: isInside ? 0.22 : 0.10,
+                        weight: isInside ? 2.5 : 1.5,
+                        dashArray: '6, 6'
+                      }}
+                    >
+                      <Popup>
+                        <div className="text-center font-sans p-1">
+                          <p className="text-[10px] font-extrabold uppercase text-emerald-700">
+                            Drop-Off Geofence ({GEOFENCE_RADIUS_METERS}m)
+                          </p>
+                          <p className="text-xs font-bold text-gray-900 mt-0.5">{pkgDest.name}</p>
+                          <p className="text-[10px] font-mono text-gray-500 mt-0.5">DR #{pkgDest.drNumber}</p>
+                          <p className="text-[9.5px] font-bold mt-1 text-blue-700">
+                            {dist !== null
+                              ? (isInside ? `Inside Zone (${Math.round(dist)}m to pin)` : `Distance: ${Math.round(dist)}m`)
+                              : 'Drop-Off Facility'}
+                          </p>
+                        </div>
+                      </Popup>
+                    </Circle>
+
                     <Marker
                       position={pkgDest.position}
                       icon={createDestinationPinIcon(isSelected ? 'LGU DESTINATION' : `DR #${pkgDest.drNumber}`, isSelected)}
@@ -1986,6 +2275,38 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             </div>
           )}
 
+          {/* Drop-Off Geofence Arrival Banner */}
+          {isNearActiveDropoff && activePayload && (
+            <div className="absolute top-16 left-3 right-3 z-20 rounded-2xl bg-emerald-600 text-white p-2.5 shadow-xl flex items-center justify-between gap-2 border border-emerald-400 backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                  <MapPin size={16} className="text-white animate-bounce" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[8.5px] font-black uppercase tracking-wider bg-white/25 px-1.5 py-0.5 rounded">
+                      Drop-Off Geofence
+                    </span>
+                    <span className="text-[9.5px] font-bold text-emerald-100">
+                      ±{Math.round(distanceToActiveDropoff ?? 0)}m
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-black truncate">
+                    Arrived at {destinationName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleInitiateDropOff(activePayload)}
+                className="px-2.5 py-1.5 rounded-xl bg-white text-emerald-800 font-extrabold text-[11px] shadow-md hover:bg-emerald-50 active:scale-95 transition shrink-0 flex items-center gap-1 cursor-pointer"
+              >
+                <Check size={13} />
+                <span>Drop Off</span>
+              </button>
+            </div>
+          )}
+
           {/* Active Custody Floating Popup (When carrying 1 or more packages) */}
           {isInTransit && activePackages.length > 0 && (
             <div className="absolute left-3 right-3 top-3 z-10 max-h-[300px] overflow-hidden rounded-2xl bg-white/95 p-3 shadow-xl border-2 border-emerald-500/40 backdrop-blur-md transition-all">
@@ -2034,12 +2355,18 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     const matchingRel = allReleases.find((r) => r.dr_number === pkg.drNumber);
                     const isHeld = Boolean(matchingRel?.is_held);
                     const hasCoords = Boolean(pkgDest?.position);
+                    const distToThis = (currentPosition && pkgDest?.position && isValidCoordinate(currentPosition) && isValidCoordinate(pkgDest.position))
+                      ? getDistanceMeters(currentPosition[0], currentPosition[1], pkgDest.position[0], pkgDest.position[1])
+                      : null;
+                    const isInsideThis = distToThis !== null && distToThis <= GEOFENCE_RADIUS_METERS;
 
                     return (
                       <div
                         key={pkg.drNumber || idx}
                         className={`rounded-xl border p-2.5 text-left text-xs transition relative ${
-                          isSelected
+                          isInsideThis
+                            ? 'border-emerald-500 bg-emerald-50/80 shadow-xs'
+                            : isSelected
                             ? 'border-[#2500ba] bg-blue-50/90 shadow-sm'
                             : isHeld
                             ? 'border-amber-200 bg-amber-50/60'
@@ -2049,7 +2376,11 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-[#2500ba] text-[10.5px]">DR #{pkg.drNumber}</span>
-                            {isHeld ? (
+                            {isInsideThis ? (
+                              <span className="rounded bg-emerald-600 text-white px-1.5 py-0.5 text-[8px] font-extrabold uppercase">
+                                In Drop-Off Geofence
+                              </span>
+                            ) : isHeld ? (
                               <span className="rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[8px] font-extrabold uppercase">
                                 On Hold (Admin)
                               </span>
@@ -2072,11 +2403,15 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             <MapPin size={11} className={hasCoords ? 'text-red-500 flex-shrink-0' : 'text-gray-400 flex-shrink-0'} />
                             <span className="truncate font-medium">To: {pkg.to}</span>
                           </div>
-                          {!hasCoords && (
+                          {!hasCoords ? (
                             <span className="text-[8.5px] font-bold text-red-600 bg-red-50 px-1 rounded flex-shrink-0">
                               Pin Missing
                             </span>
-                          )}
+                          ) : distToThis !== null ? (
+                            <span className={`text-[8.5px] font-mono font-bold ${isInsideThis ? 'text-emerald-700' : 'text-gray-500'}`}>
+                              ±{Math.round(distToThis)}m
+                            </span>
+                          ) : null}
                         </div>
                         {(() => {
                           const rel = allReleases.find(r => r.dr_number === pkg.drNumber);
@@ -2098,6 +2433,27 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             </div>
                           );
                         })()}
+
+                        {/* Direct Drop-Off Button when within Geofence */}
+                        {isInsideThis && (
+                          <div className="mt-2 pt-1.5 border-t border-emerald-200/80 flex items-center justify-between gap-1.5">
+                            <span className="text-[9px] font-bold text-emerald-800 flex items-center gap-1">
+                              <CheckCircle2 size={11} className="text-emerald-600" />
+                              <span>Ready to drop off ({Math.round(distToThis)}m)</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleInitiateDropOff(pkg);
+                              }}
+                              className="py-1 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[9.5px] flex items-center gap-1 shadow-xs cursor-pointer transition active:scale-95"
+                            >
+                              <Check size={11} />
+                              <span>Drop Off</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -2158,6 +2514,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               videoRef={videoRef}
               message={cameraMessage}
               isSigning={isSigning}
+              isDropOff={isNearActiveDropoff}
+              destinationName={destinationName}
             />
           )}
 
@@ -2560,6 +2918,254 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             </Modal>
           )}
 
+          {/* Geofence Drop-Off Verification Modal (Matching Receiving Layout) */}
+          {step === 'verify_dropoff' && dropOffTarget && (
+            <Modal
+              title="Confirm Drop-Off & Receiving"
+              icon={<CheckCircle2 size={24} className="text-emerald-600" />}
+              onClose={() => {
+                setDropOffTarget(null);
+                nav('pickup');
+              }}
+            >
+              <div className="space-y-3 text-left mt-1">
+                {/* Geofence Status Badge */}
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900">
+                  <div className="flex items-center gap-2">
+                    <MapPin size={16} className="text-emerald-600 shrink-0" />
+                    <div>
+                      <p className="font-bold">Within Drop-Off Geofence</p>
+                      <p className="text-[10px] text-emerald-700 font-mono">
+                        GPS Verified • ±{Math.round(dropOffTarget.distanceMeters ?? 0)}m to destination pin
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-extrabold text-[9.5px] uppercase tracking-wide">
+                    Geofenced
+                  </span>
+                </div>
+
+                {/* Package & Shipment Details Card */}
+                <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-blue-950 text-xs tracking-tight">
+                      Shipment {dropOffTarget.payload.drNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-200/80 text-blue-900 font-bold text-[10px]">
+                      {dropOffTarget.payload.category}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10.5px] text-blue-900">
+                    <MapPin size={12} className="text-red-500 shrink-0" />
+                    <span className="truncate font-semibold">
+                      Destination: {dropOffTarget.matchingRelease?.destination_address || dropOffTarget.matchingRelease?.lgu_name || dropOffTarget.payload.to || 'Assigned LGU'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 truncate">
+                    Origin: {dropOffTarget.matchingRelease?.warehouse_source || dropOffTarget.payload.from || 'DSWD Logistics Hub'}
+                  </p>
+                  <p className="text-[10px] text-gray-500 truncate">
+                    Carrier Convoy: {activeTruckId} • Escort: {profile?.fullName || receiverId}
+                  </p>
+                  {dropOffTarget.payload.batchTokenIds && dropOffTarget.payload.batchTokenIds.length > 0 && (
+                    <div className="pt-1 flex flex-wrap gap-1">
+                      <span className="text-[9.5px] text-gray-500 font-medium self-center">Batches:</span>
+                      {dropOffTarget.payload.batchTokenIds.map((bid) => (
+                        <span key={bid} className="px-1.5 py-0.5 rounded bg-white/90 border border-blue-200 font-mono text-[9px] text-blue-900 font-semibold">
+                          {bid}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Physical Package Count Verification */}
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 text-center">
+                  <label className="block text-[11px] font-bold text-gray-800 mb-0.5">
+                    Verified Drop-Off Package Count
+                  </label>
+                  <p className="text-[9.5px] text-gray-500 mb-2">
+                    Manifest: {dropOffTarget.payload.quantity} units. Confirm physical items handed over to LGU.
+                  </p>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setVerifiedQuantity((prev) => Math.max(1, prev - 1))}
+                      className="w-10 h-10 rounded-xl bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 font-extrabold text-xl flex items-center justify-center shadow-xs transition active:scale-95 cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={verifiedQuantity || ''}
+                      onChange={(e) => {
+                        const cleaned = sanitizeNumbersOnly(e.target.value);
+                        const val = cleaned ? parseInt(cleaned, 10) : 0;
+                        setVerifiedQuantity(val);
+                      }}
+                      className="w-24 text-center font-mono font-extrabold text-xl py-2 px-2 border-2 border-emerald-600 rounded-xl text-emerald-800 bg-white focus:outline-hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setVerifiedQuantity((prev) => prev + 1)}
+                      className="w-10 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xl flex items-center justify-center shadow-md transition active:scale-95 cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Delivery Handover Remarks */}
+                <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-left">
+                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                    Delivery Handover Remarks (Optional)
+                  </label>
+                  <p className="text-[9.5px] text-gray-500 mb-1.5">
+                    Record receiving officer name, good packaging condition, or any inspection notes.
+                  </p>
+                  <textarea
+                    rows={2}
+                    value={dropOffRemarks}
+                    onChange={(e) => setDropOffRemarks(e.target.value)}
+                    placeholder="e.g. Received in good order by LGU MSWDO staff. Outer seals verified."
+                    className="w-full text-xs p-2 rounded-lg border border-gray-300 bg-white text-gray-800 placeholder-gray-400 focus:outline-hidden focus:border-emerald-600 resize-none"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDropOffTarget(null);
+                      nav('pickup');
+                    }}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleExecuteDropOff()}
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                  >
+                    <Check size={14} />
+                    <span>Confirm Drop-Off & Sign Blockchain</span>
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          )}
+
+          {/* 5-Dots Loading Modal during Blockchain Drop-Off execution */}
+          {step === 'sign_dropoff' && (
+            <FiveDotsLoadingModal
+              isOpen={step === 'sign_dropoff'}
+              title={
+                signStage === 'mining'
+                  ? 'Confirming Drop-Off on Blockchain...'
+                  : 'Recording Drop-Off Proof (Gasless)...'
+              }
+              subtitle={
+                signStage === 'mining'
+                  ? 'Transaction broadcast! Waiting for Sepolia block confirmation...'
+                  : signError
+                  ? signError
+                  : 'Broadcasting final receipt via Sepolia Relayer...'
+              }
+              onRetry={isSubmittingProof ? undefined : () => void handleExecuteDropOff()}
+              onClose={() => {
+                if (isSubmittingProof && signStage === 'mining') {
+                  return;
+                }
+                setIsSubmittingProof(false);
+                setStep('verify_dropoff');
+              }}
+            />
+          )}
+
+          {/* Final Drop-Off Completed Success Screen */}
+          {step === 'dropoff_success' && (
+            <Modal
+              title="Drop-Off Completed"
+              icon={<ShieldCheck size={26} className="text-emerald-600" />}
+              onClose={() => {
+                setDropOffTarget(null);
+                setDropOffTxHash(null);
+                setDropOffRemarks('');
+                nav('pickup');
+              }}
+            >
+              <div className="text-center mt-1 space-y-3">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide">
+                  <ShieldCheck size={14} className="text-emerald-700" />
+                  <span>End of Transaction • Recorded on Blockchain</span>
+                </div>
+
+                <div>
+                  <p className="text-base font-extrabold text-gray-900">
+                    {dropOffTarget?.payload.drNumber}
+                  </p>
+                  <p className="text-xs text-gray-600 font-semibold mt-0.5">
+                    {verifiedQuantity || dropOffTarget?.payload.quantity} {dropOffTarget?.payload.category}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-gray-50 border border-gray-200 p-3 space-y-1.5 text-[11px] text-left">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Delivered to:</span>
+                    <span className="font-bold text-gray-800 truncate max-w-[180px]">
+                      {dropOffTarget?.matchingRelease?.destination_address || dropOffTarget?.matchingRelease?.lgu_name || dropOffTarget?.payload.to}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Delivery Status:</span>
+                    <span className="font-bold text-emerald-700">Accepted / Delivered</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 font-medium">Escort / Carrier:</span>
+                    <span className="font-semibold text-gray-700">
+                      {profile?.fullName || receiverId} ({activeTruckId})
+                    </span>
+                  </div>
+                </div>
+
+                {dropOffTxHash && (
+                  <div className="flex justify-center pt-1">
+                    <a
+                      href={`https://sepolia.etherscan.io/tx/${dropOffTxHash}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Sepolia: {dropOffTxHash.slice(0, 8)}...{dropOffTxHash.slice(-6)}</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                    </a>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDropOffTarget(null);
+                      setDropOffTxHash(null);
+                      setDropOffRemarks('');
+                      nav('pickup');
+                    }}
+                    className="w-full rounded-xl bg-[#2500ba] py-3 text-xs font-bold text-white shadow-md hover:bg-blue-800 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Check size={16} />
+                    <span>Finish & Return to Live Tracking</span>
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          )}
+
         </div>
 
         {/* Bottom Navigation Bar */}
@@ -2574,8 +3180,13 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
           <button
             onClick={() => nav('scan')}
-            aria-label="Scan"
-            className="-mt-7 flex h-14 w-14 items-center justify-center rounded-full bg-[#2500ba] text-white shadow-lg ring-4 ring-white active:scale-95 transition cursor-pointer"
+            aria-label={isNearActiveDropoff ? "Scan to Drop Off Package" : "Scan"}
+            title={isNearActiveDropoff ? "Drop-Off Geofence Active: Scan to Drop Off" : "Scan Package"}
+            className={`-mt-7 flex h-14 w-14 items-center justify-center rounded-full text-white shadow-lg ring-4 active:scale-95 transition cursor-pointer ${
+              isNearActiveDropoff
+                ? 'bg-emerald-600 ring-emerald-300 animate-pulse'
+                : 'bg-[#2500ba] ring-white'
+            }`}
           >
             <ScanLine size={26} />
           </button>
@@ -2793,7 +3404,9 @@ function ScanModal({
   closeCamera,
   videoRef,
   message,
-  isSigning
+  isSigning,
+  isDropOff,
+  destinationName
 }: {
   onClose: () => void;
   onStart: () => void;
@@ -2802,6 +3415,8 @@ function ScanModal({
   videoRef: RefObject<HTMLVideoElement | null>;
   message: string;
   isSigning: boolean;
+  isDropOff?: boolean;
+  destinationName?: string;
 }) {
   useEffect(() => {
     if (!cameraOpen) {
@@ -2818,12 +3433,21 @@ function ScanModal({
     <div className="absolute inset-0 z-50 flex flex-col justify-between overflow-hidden bg-black p-4 text-white animate-in fade-in duration-150">
       <div className="flex items-center justify-between pt-2">
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-full bg-white/20 flex items-center justify-center">
+          <div className={`h-7 w-7 rounded-full flex items-center justify-center ${isDropOff ? 'bg-emerald-500/30 text-emerald-400' : 'bg-white/20 text-white'}`}>
             <ScanLine size={16} />
           </div>
           <div>
-            <p className="text-xs font-bold">QR Camera Scanner</p>
-            <p className="text-[10px] text-white/70">Point at package QR payload</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-xs font-bold">{isDropOff ? 'Drop-Off QR Scanner' : 'QR Camera Scanner'}</p>
+              {isDropOff && (
+                <span className="px-1.5 py-0.2 rounded bg-emerald-500/30 text-emerald-300 font-extrabold text-[8px] uppercase tracking-wide border border-emerald-400/40">
+                  Geofence
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-white/70">
+              {isDropOff ? `Scan package QR to verify drop-off at ${destinationName || 'destination'}` : 'Point at package QR payload'}
+            </p>
           </div>
         </div>
         <button
@@ -2847,15 +3471,22 @@ function ScanModal({
 
         <div className="relative z-10 w-56 h-56 border-2 border-white/80 rounded-2xl pointer-events-none flex items-center justify-center shadow-2xl">
           <div className="w-48 h-48 border border-white/40 rounded-xl animate-pulse" />
-          <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-amber-400" />
-          <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-amber-400" />
-          <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-amber-400" />
-          <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-amber-400" />
+          <div className={`absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 ${isDropOff ? 'border-emerald-400' : 'border-amber-400'}`} />
+          <div className={`absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 ${isDropOff ? 'border-emerald-400' : 'border-amber-400'}`} />
+          <div className={`absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 ${isDropOff ? 'border-emerald-400' : 'border-amber-400'}`} />
+          <div className={`absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 ${isDropOff ? 'border-emerald-400' : 'border-amber-400'}`} />
+          {isDropOff && (
+            <div className="absolute -top-3 bg-emerald-600 text-white text-[8.5px] font-black uppercase px-2 py-0.5 rounded-full shadow-md tracking-wider">
+              Drop-Off Geofence Active
+            </div>
+          )}
         </div>
       </div>
 
       <div className="space-y-3 pb-2 text-center">
-        <p className="text-xs font-medium text-white/80">{message}</p>
+        <p className="text-xs font-medium text-white/80">
+          {message || (isDropOff ? `Within Drop-Off Geofence: Point camera at package QR to verify drop-off.` : 'Point your camera at the QR code.')}
+        </p>
         <button
           type="button"
           onClick={handleCancel}

@@ -16,7 +16,7 @@ import {
   ShieldCheck,
   Menu
 } from 'lucide-react';
-import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
+import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 
@@ -748,14 +748,13 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         return;
       }
 
-      // STRICT CHAIN OF CUSTODY VALIDATION:
-      // Manifest MUST pass from Central Admin -> Assigned Receiver -> LGU Receiver.
-      // Direct Admin -> LGU scan is strictly prohibited.
+      // CHAIN OF CUSTODY VALIDATION:
+      // Allow shipments In Transit / Delivered, as well as direct LGU pickup (Released / Approved / Packed)
       if (matchingRelease) {
-        const allowedTransitStatuses = ['In Transit', 'Delivered'];
+        const allowedTransitStatuses = ['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'];
         if (!allowedTransitStatuses.includes(matchingRelease.deliveryStatus)) {
           throw new Error(
-            `Chain of Custody Violation: Shipment ${canonicalDrNumber} is currently "${matchingRelease.deliveryStatus}". It must be picked up and scanned into transit by the designated receiver before the LGU can accept it.`
+            `Shipment ${canonicalDrNumber} is currently "${matchingRelease.deliveryStatus}". It cannot be accepted in its current state.`
           );
         }
       }
@@ -1030,63 +1029,103 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 recenterKey={recenterTrigger}
               />
 
-              {/* Admin Drop-Off Pins (strictly receiverGps placed by admin) */}
-              {incomingAdminPins.map(({ release, coords }) => (
-                <Marker
-                  key={`admin-pin-${release.drNumber}`}
-                  position={coords}
-                  icon={destinationPinIcon}
-                >
-                  <Popup>
-                    <div className="text-xs space-y-1">
-                      <p className="font-bold text-[#2500ba]">Admin Drop-off Location</p>
-                      <p className="font-semibold text-gray-800">{release.drNumber}</p>
-                      <p className="text-[11px] text-gray-700">
-                        {(release.amountApproved || release.amountRequested || 0).toLocaleString()} {release.fnfiCategory}
-                      </p>
-                      <p className="text-[10.5px] text-gray-500">
-                        {release.destinationAddress || release.municipality || effectiveLguName}
-                      </p>
-                      <p className="text-[9.5px] font-mono text-gray-400">
-                        {coords[0].toFixed(5)}, {coords[1].toFixed(5)}
-                      </p>
-                      <p className="text-[9.5px] font-bold text-indigo-700">
-                        Status: {release.deliveryStatus}
-                      </p>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+              {/* LGU Destination Geofence Zone Circle */}
+              {lguDestinationCoords && (
+                <Circle
+                  center={lguDestinationCoords}
+                  radius={600}
+                  pathOptions={{
+                    color: '#059669',
+                    fillColor: '#10b981',
+                    fillOpacity: 0.10,
+                    dashArray: '6, 6',
+                    weight: 2
+                  }}
+                />
+              )}
 
-              {/* Active En Route Trucks Delivering to this LGU */}
-              {incomingTrucks.map(({ release, truckId, coords, dropOffCoords }) => (
-                <React.Fragment key={`truck-${release.drNumber}-${truckId}`}>
+              {/* Admin Drop-Off Pins & Geofence Circles (strictly receiverGps placed by admin) */}
+              {incomingAdminPins.map(({ release, coords }) => (
+                <React.Fragment key={`admin-pin-${release.drNumber}`}>
+                  <Circle
+                    center={coords}
+                    radius={600}
+                    pathOptions={{
+                      color: '#2500ba',
+                      fillColor: '#3b82f6',
+                      fillOpacity: 0.12,
+                      dashArray: '6, 6',
+                      weight: 2
+                    }}
+                  >
+                    <Popup>
+                      <div className="text-center font-sans p-1">
+                        <p className="text-[10px] font-bold text-emerald-700 uppercase">Drop-Off Geofence Zone (600m)</p>
+                        <p className="text-xs font-bold text-gray-900 mt-0.5">{release.destinationAddress || release.municipality || effectiveLguName}</p>
+                        <p className="text-[10px] text-gray-500 font-mono">DR #{release.drNumber}</p>
+                      </div>
+                    </Popup>
+                  </Circle>
                   <Marker
                     position={coords}
-                    icon={truckMarkerIcon}
+                    icon={destinationPinIcon}
                   >
                     <Popup>
                       <div className="text-xs space-y-1">
-                        <p className="font-bold text-sky-800">Relief Truck: {truckId}</p>
+                        <p className="font-bold text-[#2500ba]">Admin Drop-off Location</p>
                         <p className="font-semibold text-gray-800">{release.drNumber}</p>
                         <p className="text-[11px] text-gray-700">
                           {(release.amountApproved || release.amountRequested || 0).toLocaleString()} {release.fnfiCategory}
                         </p>
-                        <p className="text-[10px] font-mono text-gray-500">Live GPS position</p>
-                        <p className="text-[9.5px] font-bold text-emerald-600">
-                          En Route to {effectiveLguName || 'Destination'}
+                        <p className="text-[10.5px] text-gray-500">
+                          {release.destinationAddress || release.municipality || effectiveLguName}
+                        </p>
+                        <p className="text-[9.5px] font-mono text-gray-400">
+                          {coords[0].toFixed(5)}, {coords[1].toFixed(5)}
+                        </p>
+                        <p className="text-[9.5px] font-bold text-indigo-700">
+                          Status: {release.deliveryStatus}
                         </p>
                       </div>
                     </Popup>
                   </Marker>
-                  {dropOffCoords && (
-                    <RoadLockedDeliveryRoute
-                      currentPosition={coords}
-                      destinationPosition={dropOffCoords}
-                    />
-                  )}
                 </React.Fragment>
               ))}
+
+              {/* Active En Route Trucks Delivering to this LGU */}
+              {incomingTrucks.map(({ release, truckId, coords, dropOffCoords }) => {
+                const isNearDropOff = dropOffCoords
+                  ? getDistanceMeters(coords[0], coords[1], dropOffCoords[0], dropOffCoords[1]) <= 600
+                  : false;
+                return (
+                  <React.Fragment key={`truck-${release.drNumber}-${truckId}`}>
+                    <Marker
+                      position={coords}
+                      icon={truckMarkerIcon}
+                    >
+                      <Popup>
+                        <div className="text-xs space-y-1">
+                          <p className="font-bold text-sky-800">Relief Truck: {truckId}</p>
+                          <p className="font-semibold text-gray-800">{release.drNumber}</p>
+                          <p className="text-[11px] text-gray-700">
+                            {(release.amountApproved || release.amountRequested || 0).toLocaleString()} {release.fnfiCategory}
+                          </p>
+                          <p className="text-[10px] font-mono text-gray-500">Live GPS position</p>
+                          <p className={`text-[9.5px] font-bold ${isNearDropOff ? 'text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded' : 'text-emerald-600'}`}>
+                            {isNearDropOff ? 'Inside Drop-Off Geofence' : `En Route to ${effectiveLguName || 'Destination'}`}
+                          </p>
+                        </div>
+                      </Popup>
+                    </Marker>
+                    {dropOffCoords && (
+                      <RoadLockedDeliveryRoute
+                        currentPosition={coords}
+                        destinationPosition={dropOffCoords}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </MapContainer>
           </div>
 

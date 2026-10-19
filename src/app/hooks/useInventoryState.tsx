@@ -1942,12 +1942,12 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }
     }
 
-    // Strict Chain of Custody Validation:
-    // LGU cannot receive shipments directly from Admin without Receiver transit
-    if (!['In Transit', 'Delivered'].includes(release.deliveryStatus)) {
+    // Chain of Custody Validation:
+    // Allow In Transit / Delivered shipments, as well as Direct LGU Pickup (Released / Approved / Packed)
+    if (!['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'].includes(release.deliveryStatus)) {
       return {
         ok: false,
-        message: `Chain of Custody Violation: Shipment ${canonicalDr} is currently "${release.deliveryStatus}". It must be picked up and scanned into transit by the designated receiver before the LGU can accept it.`
+        message: `Shipment ${canonicalDr} is currently "${release.deliveryStatus}". It cannot be accepted in its current state.`
       };
     }
 
@@ -1970,7 +1970,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return { ok: false, message: msg };
     }
 
-    setOutgoingReleasesList(prev => prev.map(item => item.drNumber.trim().toUpperCase() === targetDrUpper && ['In Transit', 'Delivered'].includes(item.deliveryStatus)
+    setOutgoingReleasesList(prev => prev.map(item => item.drNumber.trim().toUpperCase() === targetDrUpper && ['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'].includes(item.deliveryStatus)
       ? {
           ...item,
           deliveryStatus: 'Accepted',
