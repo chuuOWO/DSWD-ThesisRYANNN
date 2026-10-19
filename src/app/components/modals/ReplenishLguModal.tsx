@@ -286,7 +286,6 @@ export function ReplenishLguModal({
               daysToExpiry: 44,
               quantityAvailable: q1,
               kitName: fnfiCategory,
-              sourceType,
               warehouseName: sourceName
             }
           ];
@@ -299,7 +298,6 @@ export function ReplenishLguModal({
               daysToExpiry: 94,
               quantityAvailable: q2,
               kitName: fnfiCategory,
-              sourceType,
               warehouseName: sourceName
             });
           }
@@ -312,7 +310,6 @@ export function ReplenishLguModal({
               daysToExpiry: 180,
               quantityAvailable: q3,
               kitName: fnfiCategory,
-              sourceType,
               warehouseName: sourceName
             });
           }
