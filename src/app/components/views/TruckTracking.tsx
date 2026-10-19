@@ -931,9 +931,23 @@ export function TruckTracking({
         .catch((err) => console.warn('Failed to load custody hops:', err));
     };
 
-    refreshReleases();
-    refreshTrucks();
-    refreshHops();
+    let isRefreshing = false;
+    const safeRefreshAll = async () => {
+      if (isRefreshing) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      isRefreshing = true;
+      try {
+        await Promise.all([
+          refreshReleases(),
+          refreshTrucks(),
+          refreshHops()
+        ]);
+      } finally {
+        isRefreshing = false;
+      }
+    };
+
+    safeRefreshAll();
 
     const unsubTrucks = backendApi.subscribeTruckLiveLocations(
       (location) => {
@@ -955,16 +969,22 @@ export function TruckTracking({
       refreshReleases();
     });
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        safeRefreshAll();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const pollTimer = setInterval(() => {
-      refreshReleases();
-      refreshTrucks();
-      refreshHops();
-    }, 3500);
+      safeRefreshAll();
+    }, 20000);
 
     return () => {
       unsubTrucks();
       unsubDashboard();
       clearInterval(pollTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 

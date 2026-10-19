@@ -216,9 +216,17 @@ export function LGUDetailModal({
       .subscribe();
 
     // Heartbeat poll ensures live updates remain synchronized
-    const pollTimer = setInterval(() => {
-      if (isSubscribed) fetchAllData();
-    }, 4000);
+    let isFetchingModal = false;
+    const pollTimer = setInterval(async () => {
+      if (isSubscribed && typeof document !== 'undefined' && !document.hidden && !isFetchingModal) {
+        isFetchingModal = true;
+        try {
+          await fetchAllData();
+        } finally {
+          isFetchingModal = false;
+        }
+      }
+    }, 20000);
 
     return () => {
       isSubscribed = false;

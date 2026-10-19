@@ -2562,45 +2562,22 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   useEffect(() => {
     if (!enabled) return undefined;
 
-    const loadDashboard = () => {
-      backendApi.getDashboard()
-        .then(({ incoming, outgoing, discrepancyReports: discrepancyRows, trucks, incidents, warehouseStock, lguStock, batches }) => {
-          const discList = (discrepancyRows ?? []).map(mapDiscrepancyReport);
-          setDiscrepancyReports(discList);
-          if (trucks && trucks.length > 0) setTrucksList(trucks);
-          if (incidents && incidents.length > 0) setIncidentsList(incidents);
-          if (warehouseStock) setWarehouseStockList(warehouseStock);
-          if (lguStock) setLguStockList(lguStock);
-          if (batches) setInventoryBatchesList(batches);
-          setIncomingGoodsList(incoming.map(row => {
-            const mapped = mapIncomingManifest(row);
-            if (!mapped.correctionNote) {
-              const matchedDisc = discList.find(d => d.reportType === 'Incoming' && (d.manifestNumber === mapped.id || d.manifestNumber === row.manifest_number));
-              if (matchedDisc) mapped.correctionNote = matchedDisc.note;
-            }
-            return mapped;
-          }));
-          setOutgoingReleasesList(outgoing.map(row => {
-            const mapped = mapOutgoingRequest(row);
-            if (!mapped.correctionNote) {
-              const matchedDisc = discList.find(d => d.reportType === 'Outgoing' && (d.drNumber === mapped.drNumber || d.drNumber === row.dr_number));
-              if (matchedDisc) mapped.correctionNote = matchedDisc.note;
-            }
-            return mapped;
-          }));
-          setIntegrationMode('backend');
-        })
-        .catch(() => setIntegrationMode('mock'));
+    let isMasterDataLoaded = false;
+    let isFetching = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
-      Promise.all([
-        backendApi.getLgus(),
-        backendApi.getProvinces(),
-        backendApi.getWarehouses(),
-        backendApi.getSupplySources(),
-        backendApi.getKitTypes(),
-        backendApi.getTrucks(),
-        backendApi.getIncidents()
-      ]).then(([lgus, provinces, warehouses, sources, kits, trucks, incidents]) => {
+    const loadMasterDataOnce = async () => {
+      if (isMasterDataLoaded) return;
+      try {
+        const [lgus, provinces, warehouses, sources, kits, trucks, incidents] = await Promise.all([
+          backendApi.getLgus(),
+          backendApi.getProvinces(),
+          backendApi.getWarehouses(),
+          backendApi.getSupplySources(),
+          backendApi.getKitTypes(),
+          backendApi.getTrucks(),
+          backendApi.getIncidents()
+        ]);
         const resolvedLgus = (lgus && lgus.length > 0) ? lgus : DEFAULT_PANAY_LGUS;
         setLgusList(resolvedLgus);
         if (provinces && provinces.length > 0) setProvincesList(provinces);
@@ -2655,16 +2632,80 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           };
         });
         setLguPriorityReports(reportsFromLgus);
-      }).catch(err => console.warn('Failed to load master tables:', err));
+        isMasterDataLoaded = true;
+      } catch (err) {
+        console.warn('Failed to load master tables:', err);
+      }
     };
 
-    loadDashboard();
-    const unsubscribe = backendApi.subscribeDashboard(loadDashboard);
-    const pollTimer = setInterval(loadDashboard, 5000);
+    const loadLiveInventory = async () => {
+      if (isFetching) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+
+      isFetching = true;
+      try {
+        const { incoming, outgoing, discrepancyReports: discrepancyRows, trucks, incidents, warehouseStock, lguStock, batches } = await backendApi.getDashboard();
+        const discList = (discrepancyRows ?? []).map(mapDiscrepancyReport);
+        setDiscrepancyReports(discList);
+        if (trucks && trucks.length > 0) setTrucksList(trucks);
+        if (incidents && incidents.length > 0) setIncidentsList(incidents);
+        if (warehouseStock) setWarehouseStockList(warehouseStock);
+        if (lguStock) setLguStockList(lguStock);
+        if (batches) setInventoryBatchesList(batches);
+        setIncomingGoodsList(incoming.map(row => {
+          const mapped = mapIncomingManifest(row);
+          if (!mapped.correctionNote) {
+            const matchedDisc = discList.find(d => d.reportType === 'Incoming' && (d.manifestNumber === mapped.id || d.manifestNumber === row.manifest_number));
+            if (matchedDisc) mapped.correctionNote = matchedDisc.note;
+          }
+          return mapped;
+        }));
+        setOutgoingReleasesList(outgoing.map(row => {
+          const mapped = mapOutgoingRequest(row);
+          if (!mapped.correctionNote) {
+            const matchedDisc = discList.find(d => d.reportType === 'Outgoing' && (d.drNumber === mapped.drNumber || d.drNumber === row.dr_number));
+            if (matchedDisc) mapped.correctionNote = matchedDisc.note;
+          }
+          return mapped;
+        }));
+        setIntegrationMode('backend');
+      } catch {
+        setIntegrationMode('mock');
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    const debouncedRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        void loadLiveInventory();
+      }, 600);
+    };
+
+    void loadMasterDataOnce();
+    void loadLiveInventory();
+
+    const unsubscribe = backendApi.subscribeDashboard(debouncedRefresh);
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        void loadLiveInventory();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    const pollTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        void loadLiveInventory();
+      }
+    }, 45000);
 
     return () => {
       unsubscribe();
       clearInterval(pollTimer);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [enabled]);
 
