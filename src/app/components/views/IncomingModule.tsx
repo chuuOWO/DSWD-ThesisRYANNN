@@ -35,6 +35,7 @@ interface InventoryState {
   verifyIncomingReceipt: (id: string) => void;
   cancelIncomingGoods?: (id: string) => Promise<{ ok: boolean; message?: string }> | void;
   requestIncomingCorrection: (id: string, note: string) => void;
+  adminActionsEnabled?: boolean;
 }
 
 interface IncomingModuleProps {
