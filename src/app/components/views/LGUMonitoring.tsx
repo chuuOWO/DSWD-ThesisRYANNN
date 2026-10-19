@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, ChevronRight, LayoutGrid, List, ShieldAlert, Package, Lock } from 'lucide-react';
+import { Search, MapPin, TrendingUp, CheckCircle, Clock, Edit, ChevronLeft, ChevronRight, LayoutGrid, List, ShieldAlert, Package, Lock, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import type { LGUPriorityReport, UserRole, OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { EditLGUModal } from '../modals/EditLGUModal';
 import { EmergencyStockCorrectionModal } from '../modals/EmergencyStockCorrectionModal';
@@ -19,6 +19,19 @@ import { supabase } from '../../lib/supabase';
 import { getDaysRemaining } from '../../lib/expiryConstants';
 
 export type LGUDelivery = SynchronizedLgu;
+
+export type LguSortField =
+  | 'name'
+  | 'province'
+  | 'status'
+  | 'current_stock'
+  | 'capacity'
+  | 'percentage'
+  | 'variance'
+  | 'expiring90'
+  | 'expiring120';
+
+export type SortDirection = 'asc' | 'desc';
 
 interface RecentActivity {
   id: string;
@@ -59,7 +72,55 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [selectedProvinceTab, setSelectedProvinceTab] = useState('All');
   const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('dswd_lgu_view_mode');
+      if (stored === 'table' || stored === 'cards') return stored;
+    }
+    return 'cards';
+  });
+
+  const handleSetViewMode = (mode: 'cards' | 'table') => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('dswd_lgu_view_mode', mode);
+    }
+  };
+
+  useEffect(() => {
+    const handleViewSwitch = (e: any) => {
+      if (e.detail?.mode === 'table' || e.detail?.mode === 'cards') {
+        setViewMode(e.detail.mode);
+      }
+    };
+    window.addEventListener('dswd_switch_lgu_view_mode', handleViewSwitch);
+    return () => window.removeEventListener('dswd_switch_lgu_view_mode', handleViewSwitch);
+  }, []);
+
+  const [sortBy, setSortBy] = useState<LguSortField>('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+
+  const handleSortToggle = (field: LguSortField) => {
+    if (sortBy === field) {
+      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(field);
+      setSortDirection(field === 'name' || field === 'province' ? 'asc' : 'desc');
+    }
+    setCurrentPage(1);
+  };
+
+  const renderSortIcon = (field: LguSortField) => {
+    if (sortBy !== field) {
+      return <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-60 inline shrink-0 ml-1" />;
+    }
+    return sortDirection === 'asc' ? (
+      <ChevronUp className="w-3.5 h-3.5 text-blue-600 inline shrink-0 ml-1" />
+    ) : (
+      <ChevronDown className="w-3.5 h-3.5 text-blue-600 inline shrink-0 ml-1" />
+    );
+  };
+
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = viewMode === 'table' ? 18 : 12;
 
@@ -93,9 +154,12 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     let isSubscribed = true;
     const fetchBatches = async () => {
       try {
-        const { data } = await supabase.from('inventory_batches').select('*');
+        const { data } = await supabase.from('inventory_batches').select('*, kit_types(name, category)');
         if (isSubscribed && data) {
-          setDbBatches(data);
+          setDbBatches(data.map((b: any) => ({
+            ...b,
+            kit_name: b.kit_types?.name || b.kit_name || b.kit_type_id
+          })));
         }
       } catch (err) {
         console.warn('Failed to load inventory_batches in LGUMonitoring:', err);
@@ -273,12 +337,6 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       return matchesSearch && matchesProvince;
     });
   }, [baseLguList, searchTerm, selectedProvinceTab, showArchived]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredLGUs.length / pageSize));
-  const paginatedLGUs = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredLGUs.slice(start, start + pageSize);
-  }, [filteredLGUs, currentPage, pageSize]);
 
   const totalLGUs = baseLguList.length;
   const totalItemsReleased = baseLguList.reduce((sum, lgu) => sum + (Number(lgu?.totalItemsReleased) || 0), 0);
@@ -471,6 +529,93 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
     return map;
   }, [baseLguList, dbBatches, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, commodityTypeFilter, selectedCategory]);
+
+  // Master sorted list of LGUs based on active sortBy and sortDirection
+  const sortedLGUs = useMemo(() => {
+    const list = [...filteredLGUs];
+    const statusWeight = (label: string) => {
+      switch (label) {
+        case 'DEPLETED': return 4;
+        case 'CRITICAL': return 3;
+        case 'MODERATE': return 2;
+        case 'ADEQUATE': return 1;
+        default: return 0;
+      }
+    };
+
+    return list.sort((a, b) => {
+      const capsA = getLguCapacities(a);
+      const capsB = getLguCapacities(b);
+      const stockA = getLguCommodityStock(a);
+      const stockB = getLguCommodityStock(b);
+
+      const effCapA = selectedCategory !== 'All'
+        ? (isFoodItem(selectedCategory) ? capsA.food : capsA.nonFood)
+        : capsA.forFilter(commodityTypeFilter);
+      const effCapB = selectedCategory !== 'All'
+        ? (isFoodItem(selectedCategory) ? capsB.food : capsB.nonFood)
+        : capsB.forFilter(commodityTypeFilter);
+
+      const effStockA = selectedCategory !== 'All'
+        ? getLguStockForCategory(a, selectedCategory)
+        : stockA.forFilter(commodityTypeFilter);
+      const effStockB = selectedCategory !== 'All'
+        ? getLguStockForCategory(b, selectedCategory)
+        : stockB.forFilter(commodityTypeFilter);
+
+      const pctA = effCapA > 0 ? (effStockA / effCapA) * 100 : 0;
+      const pctB = effCapB > 0 ? (effStockB / effCapB) * 100 : 0;
+      const varA = Math.max(0, effCapA - effStockA);
+      const varB = Math.max(0, effCapB - effStockB);
+
+      const expA = lguExpiryBreakdown.get(a.id) || { expiring90: 0, expiring120: 0 };
+      const expB = lguExpiryBreakdown.get(b.id) || { expiring90: 0, expiring120: 0 };
+
+      let diff = 0;
+      switch (sortBy) {
+        case 'name':
+          diff = (a.municipality || '').localeCompare(b.municipality || '');
+          break;
+        case 'province':
+          diff = (a.province || '').localeCompare(b.province || '') || (a.municipality || '').localeCompare(b.municipality || '');
+          break;
+        case 'status': {
+          const wA = statusWeight(getLguStatusConfig(effStockA, effCapA).label);
+          const wB = statusWeight(getLguStatusConfig(effStockB, effCapB).label);
+          diff = wA - wB;
+          break;
+        }
+        case 'current_stock':
+          diff = effStockA - effStockB;
+          break;
+        case 'capacity':
+          diff = effCapA - effCapB;
+          break;
+        case 'percentage':
+          diff = pctA - pctB;
+          break;
+        case 'variance':
+          diff = varA - varB;
+          break;
+        case 'expiring90':
+          diff = expA.expiring90 - expB.expiring90;
+          break;
+        case 'expiring120':
+          diff = expA.expiring120 - expB.expiring120;
+          break;
+        default:
+          diff = 0;
+      }
+
+      return sortDirection === 'asc' ? diff : -diff;
+    });
+  }, [filteredLGUs, sortBy, sortDirection, commodityTypeFilter, selectedCategory, lguExpiryBreakdown]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedLGUs.length / pageSize));
+  const paginatedLGUs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return sortedLGUs.slice(start, start + pageSize);
+  }, [sortedLGUs, currentPage, pageSize]);
 
   // Table summary totals (sum of all filtered records)
   const tableTotals = useMemo(() => {
@@ -721,7 +866,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
       {/* Search, Category Filter, and View Mode Toggle */}
       <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 flex-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -762,6 +907,32 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
+
+          <select
+            value={`${sortBy}-${sortDirection}`}
+            onChange={(e) => {
+              const [f, d] = e.target.value.split('-');
+              setSortBy(f as LguSortField);
+              setSortDirection(d as SortDirection);
+              setCurrentPage(1);
+            }}
+            className="px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-white text-xs text-gray-700"
+            title="Sort LGUs"
+          >
+            <option value="name-asc">Sort: Name (A to Z)</option>
+            <option value="name-desc">Sort: Name (Z to A)</option>
+            <option value="province-asc">Sort: Province (A to Z)</option>
+            <option value="status-desc">Sort: Status (Critical first)</option>
+            <option value="status-asc">Sort: Status (Adequate first)</option>
+            <option value="currentStock-desc">Sort: Current Stock (High to Low)</option>
+            <option value="currentStock-asc">Sort: Current Stock (Low to High)</option>
+            <option value="percentage-asc">Sort: Percentage (Lowest first)</option>
+            <option value="percentage-desc">Sort: Percentage (Highest first)</option>
+            <option value="capacity-desc">Sort: Capacity (High to Low)</option>
+            <option value="variance-desc">Sort: Shortage/Variance (High to Low)</option>
+            <option value="expiring90-desc">Sort: Expiring ≤ 90 Days (Most first)</option>
+            <option value="expiring120-desc">Sort: Expiring 91-120 Days (Most first)</option>
+          </select>
         </div>
 
         {/* View mode & Archive toggles */}
@@ -782,7 +953,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg border border-gray-200">
             <button
               type="button"
-              onClick={() => setViewMode('cards')}
+              onClick={() => handleSetViewMode('cards')}
               className={`p-2 rounded-md transition-all ${viewMode === 'cards' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
               title="Card View"
             >
@@ -790,7 +961,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('table')}
+              onClick={() => handleSetViewMode('table')}
               className={`p-2 rounded-md transition-all ${viewMode === 'table' ? 'bg-white text-blue-600 shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
               title="Table View"
             >
@@ -994,15 +1165,25 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 <tr>
                   <th
                     rowSpan={2}
-                    className="px-4 py-3 text-center border-b border-r border-gray-200 align-middle w-28"
+                    onClick={() => handleSortToggle('status')}
+                    className="px-4 py-3 text-center border-b border-r border-gray-200 align-middle w-28 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    title="Click to sort by status"
                   >
-                    STATUS
+                    <div className="flex items-center justify-center gap-1">
+                      <span>STATUS</span>
+                      {renderSortIcon('status')}
+                    </div>
                   </th>
                   <th
                     rowSpan={2}
-                    className="px-5 py-3 text-left border-b border-r border-gray-200 align-middle min-w-[200px]"
+                    onClick={() => handleSortToggle('name')}
+                    className="px-5 py-3 text-left border-b border-r border-gray-200 align-middle min-w-[200px] cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    title="Click to sort by municipality name"
                   >
-                    LGU / MUNICIPALITY
+                    <div className="flex items-center justify-between">
+                      <span>LGU / MUNICIPALITY</span>
+                      {renderSortIcon('name')}
+                    </div>
                   </th>
                   <th
                     colSpan={4}
@@ -1011,18 +1192,32 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     {commodityHeaderLabel}
                   </th>
                   <th
-                    className="px-4 py-2 text-center border-b border-r border-rose-200 bg-rose-50/70 text-rose-900 font-extrabold whitespace-nowrap min-w-[130px]"
+                    onClick={() => handleSortToggle('expiring90')}
+                    className="px-4 py-2 text-center border-b border-r border-rose-200 bg-rose-50/70 text-rose-900 font-extrabold whitespace-nowrap min-w-[130px] cursor-pointer hover:bg-rose-100/80 transition-colors select-none"
+                    title="Click to sort by expiring in ≤ 90 days"
                   >
-                    <span className="block text-[9px] opacity-75 font-semibold">EXPIRING</span>
-                    <span className="block text-xs font-black">≤ 90 DAYS</span>
-                    <span className="block text-[9px] font-medium normal-case opacity-75">(≤ 3 Months)</span>
+                    <div className="flex items-center justify-center gap-1">
+                      <div>
+                        <span className="block text-[9px] opacity-75 font-semibold">EXPIRING</span>
+                        <span className="block text-xs font-black">≤ 90 DAYS</span>
+                        <span className="block text-[9px] font-medium normal-case opacity-75">(≤ 3 Months)</span>
+                      </div>
+                      {renderSortIcon('expiring90')}
+                    </div>
                   </th>
                   <th
-                    className="px-4 py-2 text-center border-b border-r border-amber-200 bg-amber-50/70 text-amber-900 font-extrabold whitespace-nowrap min-w-[130px]"
+                    onClick={() => handleSortToggle('expiring120')}
+                    className="px-4 py-2 text-center border-b border-r border-amber-200 bg-amber-50/70 text-amber-900 font-extrabold whitespace-nowrap min-w-[130px] cursor-pointer hover:bg-amber-100/80 transition-colors select-none"
+                    title="Click to sort by expiring in 91–120 days"
                   >
-                    <span className="block text-[9px] opacity-75 font-semibold">EXPIRING</span>
-                    <span className="block text-xs font-black">91–120 DAYS</span>
-                    <span className="block text-[9px] font-medium normal-case opacity-75">(4–6 Months)</span>
+                    <div className="flex items-center justify-center gap-1">
+                      <div>
+                        <span className="block text-[9px] opacity-75 font-semibold">EXPIRING</span>
+                        <span className="block text-xs font-black">91–120 DAYS</span>
+                        <span className="block text-[9px] font-medium normal-case opacity-75">(4–6 Months)</span>
+                      </div>
+                      {renderSortIcon('expiring120')}
+                    </div>
                   </th>
                   <th
                     rowSpan={2}
@@ -1032,17 +1227,45 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                   </th>
                 </tr>
                 <tr>
-                  <th className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
-                    PERCENTAGE
+                  <th
+                    onClick={() => handleSortToggle('percentage')}
+                    className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    title="Click to sort by capacity percentage"
+                  >
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <span>PERCENTAGE</span>
+                      {renderSortIcon('percentage')}
+                    </span>
                   </th>
-                  <th className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
-                    CURRENT
+                  <th
+                    onClick={() => handleSortToggle('currentStock')}
+                    className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    title="Click to sort by current stock"
+                  >
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <span>CURRENT</span>
+                      {renderSortIcon('currentStock')}
+                    </span>
                   </th>
-                  <th className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
-                    CAPACITY
+                  <th
+                    onClick={() => handleSortToggle('capacity')}
+                    className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    title="Click to sort by capacity limit"
+                  >
+                    <span className="inline-flex items-center justify-end gap-1">
+                      <span>CAPACITY</span>
+                      {renderSortIcon('capacity')}
+                    </span>
                   </th>
-                  <th className="px-3 py-2 text-center border-b border-r border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
-                    VARIANCE
+                  <th
+                    onClick={() => handleSortToggle('variance')}
+                    className="px-3 py-2 text-center border-b border-r border-gray-200 bg-gray-50/90 text-gray-600 font-bold cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    title="Click to sort by shortage variance"
+                  >
+                    <span className="inline-flex items-center justify-center gap-1">
+                      <span>VARIANCE</span>
+                      {renderSortIcon('variance')}
+                    </span>
                   </th>
                 </tr>
               </thead>

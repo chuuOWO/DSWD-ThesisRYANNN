@@ -26,7 +26,8 @@ import {
   Activity,
   AlertCircle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ExternalLink
 } from 'lucide-react';
 import {
   BarChart,
@@ -1477,9 +1478,26 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             subtitle="Priority ranking based on stock rate, disaster impact, and relief dispatch urgency"
             icon={<ShieldAlert className="w-5 h-5 text-red-600" />}
             badge={
-              <span className="text-xs font-mono font-bold text-gray-700 bg-gray-100 border border-gray-200 px-2.5 py-0.5 rounded-full">
-                {filteredLguPriorities.length} of {effectiveLguPriorities.length} LGUs
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold text-gray-700 bg-gray-100 border border-gray-200 px-2.5 py-0.5 rounded-full">
+                  {filteredLguPriorities.length} of {effectiveLguPriorities.length} LGUs
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('dswd_lgu_view_mode', 'table');
+                      window.dispatchEvent(new CustomEvent('dswd_switch_lgu_view_mode', { detail: { mode: 'table' } }));
+                    }
+                    onNavigate?.('lgu-monitoring');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1 bg-[#2500ba] hover:bg-[#1e0096] text-white text-xs font-bold rounded-lg transition shadow-xs cursor-pointer"
+                  title="Open Municipal LGU Inventory & Aging Ledger (Table View)"
+                >
+                  <span>Open Full</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+              </div>
             }
             isCollapsed={isCollapsed}
             canMoveUp={canMoveUp}
@@ -1662,6 +1680,23 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     No municipalities found matching the selected priority filter.
                   </div>
                 )}
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('dswd_lgu_view_mode', 'table');
+                        window.dispatchEvent(new CustomEvent('dswd_switch_lgu_view_mode', { detail: { mode: 'table' } }));
+                      }
+                      onNavigate?.('lgu-monitoring');
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition border border-blue-200 cursor-pointer shadow-2xs"
+                  >
+                    <span>Open Municipal LGU Inventory &amp; Aging Ledger (Table View)</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           </DashboardSectionWrapper>
