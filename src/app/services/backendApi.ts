@@ -2549,18 +2549,20 @@ export const backendApi = {
   async getNextDrIndex(): Promise<number> {
     try {
       const [counterRes, outReqsRes, onChainCount] = await Promise.all([
-        supabase
-          .from('app_counters')
-          .select('value')
-          .eq('key', 'dr_index')
-          .maybeSingle()
-          .catch(() => ({ data: null })),
-        supabase
-          .from('outgoing_requests')
-          .select('dr_number')
-          .order('created_at', { ascending: false })
-          .limit(50)
-          .catch(() => ({ data: null })),
+        Promise.resolve(
+          supabase
+            .from('app_counters')
+            .select('value')
+            .eq('key', 'dr_index')
+            .maybeSingle()
+        ).catch(() => ({ data: null })),
+        Promise.resolve(
+          supabase
+            .from('outgoing_requests')
+            .select('dr_number')
+            .order('created_at', { ascending: false })
+            .limit(50)
+        ).catch(() => ({ data: null })),
         blockchain.getCurrentHandoverCount().catch(() => 0n)
       ]);
 
@@ -2584,11 +2586,11 @@ export const backendApi = {
 
       const nextValue = Math.max(maxIndex, 0) + 1;
       // Background the counter upsert so it does not block the caller
-      supabase
-        .from('app_counters')
-        .upsert({ key: 'dr_index', value: nextValue, updated_at: new Date().toISOString() })
-        .then(() => {})
-        .catch((err) => console.warn('Counter upsert notice:', err));
+      Promise.resolve(
+        supabase
+          .from('app_counters')
+          .upsert({ key: 'dr_index', value: nextValue, updated_at: new Date().toISOString() })
+      ).catch((err) => console.warn('Counter upsert notice:', err));
 
       return nextValue;
     } catch {

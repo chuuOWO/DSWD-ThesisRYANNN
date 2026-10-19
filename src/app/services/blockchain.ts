@@ -809,15 +809,15 @@ export const blockchain = {
 
       // If disambiguated on-chain, sync back to Supabase
       if (isDisambiguated) {
-        supabase
-          .from('outgoing_requests')
-          .update({
-            dr_number: effectiveDrNumber,
-            handover_contract_id: effectiveContractId
-          })
-          .eq('dr_number', input.drNumber.trim())
-          .then(() => {})
-          .catch((syncErr) => console.warn('[Blockchain] Supabase sync after disambiguation warning:', syncErr));
+        Promise.resolve(
+          supabase
+            .from('outgoing_requests')
+            .update({
+              dr_number: effectiveDrNumber,
+              handover_contract_id: effectiveContractId
+            })
+            .eq('dr_number', input.drNumber.trim())
+        ).catch((syncErr) => console.warn('[Blockchain] Supabase sync after disambiguation warning:', syncErr));
       }
 
       return {
