@@ -13,6 +13,8 @@ import { formatUserErrorMessage } from '../lib/errorUtils';
 import { parseIncidentInfo } from '../lib/incidentHelper';
 import { blockchain } from './blockchain';
 
+export type IncomingRecordStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected' | 'Cancelled';
+
 export interface IncomingPayload {
   manifestNumber: string;
   dateReceived: string;
@@ -28,14 +30,14 @@ export interface IncomingPayload {
   kitTypeId?: string;
   destinationWarehouseId?: string;
   destinationLguId?: string;
-  status?: 'Draft' | 'Pending Verification' | 'Verified';
+  status?: IncomingRecordStatus;
   manifestHash?: string;
   txHash?: string;
   walletAddress?: string;
 }
 
 export interface IncomingUpdatePayload {
-  status?: 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected';
+  status?: IncomingRecordStatus;
   manifestHash?: string;
   txHash?: string;
   batchTokenId?: string;
