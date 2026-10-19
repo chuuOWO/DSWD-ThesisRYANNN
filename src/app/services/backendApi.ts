@@ -2617,7 +2617,7 @@ export const backendApi = {
             model: 'DSWD Relief Cargo Truck',
             capacity_kg: 5000,
             is_active: true
-          }, { onConflict: 'truck_id' }).catch(() => {});
+          }, { onConflict: 'truck_id' });
         }
       } catch {}
 
