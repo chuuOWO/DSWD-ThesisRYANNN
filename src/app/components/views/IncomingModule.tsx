@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle, ArrowRight, Clock } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
+import { ReplenishLguModal, type LguReplenishPayload } from '../modals/ReplenishLguModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import type { DiscrepancyReport, IncomingGoods, IncomingStatus, UserRole, WarehouseName } from '../../hooks/useInventoryState';
 import type { WarehouseRecord, SupplySourceRecord, KitTypeRecord, LguRecord, ProvinceRecord, InventoryBatchRecord } from '../../services/backendApi';
@@ -26,6 +27,8 @@ interface InventoryState {
   lgusList?: LguRecord[];
   provincesList?: ProvinceRecord[];
   addIncomingGoods: (data: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => void;
+  replenishLguTransfer?: (payload: LguReplenishPayload) => Promise<{ ok: boolean; message?: string }> | void;
+  getAvailableStock?: (category: string, warehouse: WarehouseName) => number;
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
@@ -84,6 +87,8 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     incomingGoodsList,
     inventoryBatchesList = [],
     addIncomingGoods,
+    replenishLguTransfer,
+    getAvailableStock,
     updateIncomingGoods,
     verifyIncomingReceipt,
     cancelIncomingGoods,
@@ -96,6 +101,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   } = inventoryState;
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showReplenishModal, setShowReplenishModal] = useState(false);
   const [editingIncoming, setEditingIncoming] = useState<IncomingGoods | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
@@ -149,6 +155,18 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     addIncomingGoods(newGoods);
     setShowAddModal(false);
     showResult(`Incoming shipment of ${newGoods.quantity.toLocaleString()} ${newGoods.unitType} of ${newGoods.fnfiCategory} has been recorded successfully.`);
+  };
+
+  const handleReplenishSubmit = async (payload: LguReplenishPayload) => {
+    if (replenishLguTransfer) {
+      const res = await replenishLguTransfer(payload);
+      setShowReplenishModal(false);
+      if (res && res.message) {
+        showResult(res.message);
+      } else {
+        showResult(`Successfully replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName}.`);
+      }
+    }
   };
 
   const handleEditGoods = (updatedGoods: IncomingGoodsForm) => {
@@ -348,13 +366,25 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               </p>
             )}
           </div>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center justify-center gap-2 bg-white text-blue-700 px-6 py-3 rounded-lg font-semibold hover:bg-blue-50 transition-all shadow-sm"
-          >
-            <Plus className="w-5 h-5" />
-            Add Incoming Delivery
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowReplenishModal(true)}
+              className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-emerald-700 transition-all shadow-sm cursor-pointer"
+              title="Replenish LGU from warehouse or another LGU"
+            >
+              <TruckIcon className="w-5 h-5" />
+              Replenish LGU
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center justify-center gap-2 bg-white text-blue-700 px-5 py-3 rounded-lg font-semibold hover:bg-blue-50 transition-all shadow-sm cursor-pointer"
+            >
+              <Plus className="w-5 h-5" />
+              Add Incoming Delivery
+            </button>
+          </div>
         </div>
       </div>
 
@@ -835,10 +865,26 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
         </div>
       </div>
 
+      {showReplenishModal && (
+        <ReplenishLguModal
+          onClose={() => setShowReplenishModal(false)}
+          onSubmit={handleReplenishSubmit}
+          warehousesList={warehousesList}
+          kitTypesList={kitTypesList}
+          lgusList={lgusList}
+          provincesList={provincesList}
+          getAvailableWarehouseStock={getAvailableStock}
+        />
+      )}
+
       {showAddModal && (
         <AddIncomingGoodsModal
           onClose={() => setShowAddModal(false)}
           onSubmit={handleAddGoods}
+          onSwitchToReplenish={() => {
+            setShowAddModal(false);
+            setShowReplenishModal(true);
+          }}
           mode="add"
           supplySourcesList={supplySourcesList}
           warehousesList={warehousesList}

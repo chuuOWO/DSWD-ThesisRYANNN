@@ -29,6 +29,8 @@ import {
 } from '../lib/lguMatching';
 import { parseIncidentInfo } from '../lib/incidentHelper';
 import { evaluatePriorityIndicator, type PriorityColor, type PriorityLevel } from '../lib/priorityLogic';
+import type { LguReplenishPayload } from '../components/modals/ReplenishLguModal';
+import { getLguCategoryStock } from '../components/modals/ReplenishLguModal';
 
 export interface InventoryItem {
   category: string;
@@ -1005,6 +1007,83 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     });
   };
 
+  const deductLguStock = (municipality: string, category: string, quantity: number, province?: string): boolean => {
+    const targetNorm = normalizeLguName(municipality);
+    const catLower = category.toLowerCase();
+    const canonical = normalizeCategoryName(category);
+
+    setLgusList(prev => prev.map(lgu => {
+      const lguNorm = normalizeLguName(lgu.municipality);
+      const matchMuni = lgu.municipality.toLowerCase() === municipality.toLowerCase()
+        || (targetNorm.length > 0 && lguNorm.length > 0 && targetNorm === lguNorm)
+        || lgu.municipality.toLowerCase().includes(targetNorm)
+        || targetNorm.includes(lgu.municipality.toLowerCase());
+      const matchProv = !province || lgu.province.toLowerCase() === province.toLowerCase();
+      if (!matchMuni || !matchProv) return lgu;
+
+      const updated = { ...lgu };
+      if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = Math.max(0, (updated.rtef || 0) - quantity);
+      else if (canonical === 'Family Food Pack' || canonical === 'Food Pack' || catLower.includes('food pack')) updated.foodPacks = Math.max(0, (updated.foodPacks || 0) - quantity);
+      else if (catLower.includes('hygiene') || canonical === 'Hygiene Kit') updated.hygieneKits = Math.max(0, (updated.hygieneKits || 0) - quantity);
+      else if (catLower.includes('family') || canonical === 'Family Kit') updated.familyKits = Math.max(0, (updated.familyKits || 0) - quantity);
+      else if (catLower.includes('sleeping') || canonical === 'Sleeping Kit') updated.sleepingKits = Math.max(0, (updated.sleepingKits || 0) - quantity);
+      else if (catLower.includes('kitchen') || canonical === 'Kitchen Kit') updated.kitchenKits = Math.max(0, (updated.kitchenKits || 0) - quantity);
+      else if (catLower.includes('sack') || canonical === 'Laminated Sacks' || canonical === 'Laminated Sack') updated.laminatedSacks = Math.max(0, (updated.laminatedSacks || 0) - quantity);
+      else updated.foodPacks = Math.max(0, (updated.foodPacks || 0) - quantity);
+
+      const currentMap = { ...(updated.currentStock || {}) };
+      const canonicalKey = canonical || category;
+      currentMap[canonicalKey] = Math.max(0, (currentMap[canonicalKey] || 0) - quantity);
+      if (category !== canonicalKey) {
+        currentMap[category] = currentMap[canonicalKey];
+      }
+      updated.currentStock = currentMap;
+      return updated;
+    }));
+
+    setLguPriorityReports(prev => prev.map(rep => {
+      const repNorm = normalizeLguName(rep.municipality);
+      const matchMuni = rep.municipality.toLowerCase() === municipality.toLowerCase()
+        || (targetNorm.length > 0 && repNorm.length > 0 && targetNorm === repNorm)
+        || rep.municipality.toLowerCase().includes(targetNorm)
+        || targetNorm.includes(rep.municipality.toLowerCase());
+      const matchProv = !province || rep.province.toLowerCase() === province.toLowerCase();
+      if (!matchMuni || !matchProv) return rep;
+
+      const isFood = (canonical === 'Family Food Pack' || canonical === 'Food Pack' || catLower.includes('food pack')) && !catLower.includes('rtef') && !catLower.includes('ready-to-eat');
+      const updatedFood = isFood ? Math.max(0, (rep.foodPacks || 0) - quantity) : rep.foodPacks;
+      const updatedHygiene = (catLower.includes('hygiene') || canonical === 'Hygiene Kit') ? Math.max(0, (rep.hygieneKits || 0) - quantity) : rep.hygieneKits;
+      const updatedFamily = (catLower.includes('family') || canonical === 'Family Kit') ? Math.max(0, (rep.familyKits || 0) - quantity) : rep.familyKits;
+      const maxStock = Number(rep.maxStock) > 0 ? Number(rep.maxStock) : 3000;
+
+      const evalRes = evaluatePriorityIndicator({
+        foodPacks: updatedFood,
+        affectedFamilies: rep.affectedFamilies,
+        targetQuota: maxStock
+      });
+
+      return {
+        ...rep,
+        foodPacks: updatedFood,
+        hygieneKits: updatedHygiene,
+        familyKits: updatedFamily,
+        urgencyScore: evalRes.urgencyScore,
+        priorityColor: evalRes.priorityColor,
+        priorityLevel: evalRes.priorityLevel,
+        stockRate: evalRes.stockRate,
+        completionRate: evalRes.completionRate,
+        effectiveRate: evalRes.effectiveRate,
+        systemResponse: evalRes.systemResponse
+      };
+    }));
+
+    backendApi.deductLguStock(municipality, category, quantity).catch(err => {
+      console.warn('backendApi.deductLguStock error:', err);
+    });
+
+    return true;
+  };
+
   const editLgu = async (id: string, updates: Partial<LguInput>): Promise<{ ok: boolean; message: string }> => {
     try {
       setLgusList(prev => prev.map(lgu => {
@@ -1195,6 +1274,142 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         destination: newGoods.destination
       }
     }).catch(() => {});
+  };
+
+  const replenishLguTransfer = async (payload: LguReplenishPayload): Promise<{ ok: boolean; message?: string }> => {
+    const rawRis = (payload.manifestNumber || '').trim();
+    if (!rawRis) {
+      return { ok: false, message: 'Transfer RIS control number is strictly required.' };
+    }
+    const cleanId = rawRis.toUpperCase();
+
+    // 1. Same-LGU prevention check
+    if (payload.sourceType === 'LGU' && payload.sourceName.trim().toLowerCase() === payload.destinationMunicipality.trim().toLowerCase()) {
+      return { ok: false, message: 'Source and Destination cannot be the same LGU.' };
+    }
+
+    if (payload.quantity <= 0) {
+      return { ok: false, message: 'Transfer quantity must be greater than 0.' };
+    }
+
+    // 2. Validate source stock availability
+    if (payload.sourceType === 'Warehouse') {
+      const whStock = getAvailableStock(payload.fnfiCategory, payload.sourceName as WarehouseName);
+      if (payload.quantity > whStock) {
+        return { ok: false, message: `Insufficient stock at ${payload.sourceName}. Only ${whStock.toLocaleString()} available.` };
+      }
+    } else {
+      const srcLgu = lgusList.find(l => l.municipality.toLowerCase() === payload.sourceName.toLowerCase());
+      const lguStock = getLguCategoryStock(srcLgu, payload.fnfiCategory);
+      if (payload.quantity > lguStock) {
+        return { ok: false, message: `Insufficient stock at ${payload.sourceName}. Only ${lguStock.toLocaleString()} available.` };
+      }
+    }
+
+    // 3. Deduct from Source (Pure Off-Chain Database & Local State)
+    if (payload.sourceType === 'Warehouse') {
+      deductStock(payload.fnfiCategory, payload.sourceName as WarehouseName, payload.quantity);
+    } else {
+      deductLguStock(payload.sourceName, payload.fnfiCategory, payload.quantity, payload.sourceProvince);
+    }
+
+    // 4. Add to Destination (Pure Off-Chain Database & Local State)
+    addLguStock(payload.destinationMunicipality, payload.fnfiCategory, payload.quantity, payload.destinationProvince);
+
+    // 5. Append Stock Ledger double-entry records
+    const sourceWh = payload.sourceType === 'Warehouse' ? warehousesList.find(w => w.name.toLowerCase() === payload.sourceName.toLowerCase()) : undefined;
+    const sourceLgu = payload.sourceType === 'LGU' ? lgusList.find(l => l.municipality.toLowerCase() === payload.sourceName.toLowerCase()) : undefined;
+    const destLgu = lgusList.find(l => l.municipality.toLowerCase() === payload.destinationMunicipality.toLowerCase());
+    const matchedKit = kitTypesList.find(k => k.name.toLowerCase() === payload.fnfiCategory.toLowerCase());
+    const kitTypeId = matchedKit?.id || payload.fnfiCategory;
+
+    // Outflow from Source
+    backendApi.appendStockLedger({
+      facilityType: payload.sourceType,
+      warehouseId: sourceWh?.id,
+      lguId: sourceLgu?.id,
+      kitTypeId: kitTypeId,
+      deltaQuantity: -payload.quantity,
+      movementType: 'TRANSFER_OUT',
+      referenceManifestId: cleanId,
+      manifestNumber: cleanId,
+      actorProfileId: currentActor.id
+    }).catch(err => console.warn('appendStockLedger TRANSFER_OUT error:', err));
+
+    // Inflow to Destination
+    backendApi.appendStockLedger({
+      facilityType: 'LGU',
+      lguId: destLgu?.id,
+      kitTypeId: kitTypeId,
+      deltaQuantity: payload.quantity,
+      movementType: 'TRANSFER_IN',
+      referenceManifestId: cleanId,
+      manifestNumber: cleanId,
+      actorProfileId: currentActor.id
+    }).catch(err => console.warn('appendStockLedger TRANSFER_IN error:', err));
+
+    // 6. Record in incoming_goods table (Verified intake, strictly zero blockchain minting)
+    const goodsWithId: IncomingGoods = {
+      id: cleanId,
+      manifestNumber: cleanId,
+      dateReceived: payload.transferDate,
+      fnfiCategory: payload.fnfiCategory,
+      quantity: payload.quantity,
+      unitType: payload.unitType || 'packs',
+      expirationDate: payload.expirationDate,
+      source: payload.sourceType === 'Warehouse' ? payload.sourceName : `${payload.sourceName} LGU Prepositioned Site`,
+      destinationType: 'LGU',
+      destination: payload.destinationMunicipality,
+      destinationLguId: destLgu?.id,
+      status: 'Verified',
+      verifiedBy: currentActor.name,
+      manifestHash: `OFFCHAIN-TRF-${Date.now()}`,
+      auditTrail: [
+        audit('Stock Replenished & Transferred', `Internal transfer of ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} from ${payload.sourceName} to ${payload.destinationMunicipality} verified and stocked by ${currentActor.name}.`)
+      ]
+    };
+    setIncomingGoodsList(prev => [goodsWithId, ...prev]);
+
+    backendApi.createIncoming({
+      manifestNumber: cleanId,
+      dateReceived: payload.transferDate,
+      fnfiCategory: payload.fnfiCategory,
+      quantity: payload.quantity,
+      unitType: payload.unitType || 'packs',
+      expirationDate: payload.expirationDate,
+      source: payload.sourceType === 'Warehouse' ? payload.sourceName : `${payload.sourceName} LGU Prepositioned Site`,
+      destinationType: 'LGU',
+      destination: payload.destinationMunicipality,
+      destinationLguId: destLgu?.id,
+      status: 'Verified',
+      verifiedBy: currentActor.name,
+      verifiedByProfileId: currentActor.id,
+      notes: payload.remarks || `Inter-facility replenishment from ${payload.sourceName} to ${payload.destinationMunicipality}`
+    }).catch(err => console.warn('createIncoming transfer error:', err));
+
+    backendApi.logActivity({
+      action: 'LGU_REPLENISHED',
+      entityType: 'TransferMovement',
+      entityId: cleanId,
+      actorId: currentActor.id,
+      actorName: currentActor.name,
+      actorEmail: currentActor.email,
+      actorRole: currentActor.role,
+      actorWallet: currentActor.wallet,
+      details: `Replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName}.`,
+      metadata: {
+        manifestNumber: cleanId,
+        source: payload.sourceName,
+        destination: payload.destinationMunicipality,
+        quantity: payload.quantity,
+        fnfiCategory: payload.fnfiCategory
+      }
+    }).catch(() => {});
+
+    return {
+      ok: true,
+      message: `Successfully transferred ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName} to ${payload.destinationMunicipality}.`
+    };
   };
 
   const updateIncomingGoods = (id: string, patch: Partial<IncomingGoods>) => {
@@ -2535,10 +2750,12 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     refreshInventoryBatches,
     addStock,
     addLguStock,
+    deductLguStock,
     emergencyCorrectLguStock,
     deductStock,
     getAvailableStock,
     addIncomingGoods,
+    replenishLguTransfer,
     updateIncomingGoods,
     submitIncomingForVerification,
     verifyIncomingReceipt,

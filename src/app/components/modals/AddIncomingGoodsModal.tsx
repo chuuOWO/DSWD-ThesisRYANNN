@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, Package, AlertCircle, Building2 } from 'lucide-react';
+import { X, Calendar, Package, AlertCircle, Building2, Truck } from 'lucide-react';
 import { sanitizeNumbersOnly, sanitizeSlipReference } from '../../lib/inputValidation';
 import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES, DEFAULT_PANAY_LGUS, REGIONAL_PROVINCES } from '../../lib/lguMatching';
@@ -25,6 +25,7 @@ export interface IncomingGoodsForm {
 interface AddIncomingGoodsModalProps {
   onClose: () => void;
   onSubmit: (data: IncomingGoodsForm) => void;
+  onSwitchToReplenish?: () => void;
   initialData?: IncomingGoodsForm;
   mode?: 'add' | 'edit';
   supplySourcesList?: SupplySourceRecord[];
@@ -37,6 +38,7 @@ interface AddIncomingGoodsModalProps {
 export function AddIncomingGoodsModal({
   onClose,
   onSubmit,
+  onSwitchToReplenish,
   initialData,
   mode = 'add',
   supplySourcesList,
@@ -295,6 +297,26 @@ export function AddIncomingGoodsModal({
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
+
+        {mode === 'add' && onSwitchToReplenish && (
+          <div className="flex border-b border-gray-200 bg-gray-50/80 px-6 pt-2 gap-2">
+            <button
+              type="button"
+              className="px-4 py-2 text-xs font-bold border-b-2 border-blue-600 text-blue-700 bg-white rounded-t-lg -mb-px flex items-center gap-1.5 shadow-xs"
+            >
+              <Package className="w-3.5 h-3.5" />
+              Standard Supplier Intake
+            </button>
+            <button
+              type="button"
+              onClick={onSwitchToReplenish}
+              className="px-4 py-2 text-xs font-semibold text-gray-500 hover:text-emerald-700 hover:bg-gray-100 rounded-t-lg transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Truck className="w-3.5 h-3.5" />
+              Replenish LGU / Stock Transfer
+            </button>
+          </div>
+        )}
 
         {/* Scrollable Form Body with Enter key guard */}
         <form
