@@ -21,23 +21,37 @@
 -- - Only removes seed manifests matching 'MNF-2026-%' to protect any real user data.
 -- ==============================================================================
 
--- 1. Remove double-entry stock ledger journal records for seeded manifests
+-- 1. Remove double-entry stock ledger journal records for seeded manifests (if not allocated)
 delete from public.stock_ledger
 where movement_type = 'INTAKE_VERIFIED'
   and reference_manifest_id in (
-    select id from public.incoming_manifests where manifest_number like 'MNF-2026-%'
+    select id from public.incoming_manifests
+    where manifest_number like 'MNF-2026-%'
+      and id not in (
+        select incoming_manifest_id from public.inventory_batches
+        where incoming_manifest_id is not null
+          and batch_token_id in (select batch_token_id from public.outgoing_batch_allocations where batch_token_id is not null)
+      )
   );
 
--- 2. Remove seeded inventory lot batches
+-- 2. Remove unallocated seeded inventory lot batches
 delete from public.inventory_batches
-where batch_token_id like 'BATCH-MNF-2026-%'
+where (batch_token_id like 'BATCH-MNF-2026-%'
    or incoming_manifest_id in (
      select id from public.incoming_manifests where manifest_number like 'MNF-2026-%'
-   );
+   ))
+  and batch_token_id not in (
+    select batch_token_id from public.outgoing_batch_allocations where batch_token_id is not null
+  );
 
--- 3. Remove seeded incoming logistics manifests
+-- 3. Remove unallocated seeded incoming logistics manifests
 delete from public.incoming_manifests
-where manifest_number like 'MNF-2026-%';
+where manifest_number like 'MNF-2026-%'
+  and id not in (
+    select incoming_manifest_id from public.inventory_batches
+    where incoming_manifest_id is not null
+      and batch_token_id in (select batch_token_id from public.outgoing_batch_allocations where batch_token_id is not null)
+  );
 
 -- 4. Remove automated baseline reports (preserves reports created by real user profiles)
 delete from public.lgu_inventory_reports

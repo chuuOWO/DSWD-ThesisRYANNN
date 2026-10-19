@@ -64,40 +64,30 @@ where w.province_id is null and lower(trim(w.province)) = lower(trim(p.name));
 -- ------------------------------------------------------------------------------
 -- SECTION 2: PURGE NON-NEARBY RECORDS TO MINIMIZE SUPABASE MEMORY & STORAGE
 -- ------------------------------------------------------------------------------
+-- Strictly foreign-key safe:
+-- 1. Resets stock and urgency scores to 0 (Green) for retained non-nearby LGUs.
+-- 2. Only deletes seed batches (BATCH-MNF-2026-%) not referenced in outgoing_batch_allocations.
+-- 3. Only deletes seed manifests (MNF-2026-%) not referenced by allocated batches.
+-- 4. Cleans double-entry stock_ledger entries only for seed manifests.
+-- 5. Only deletes lgu_stock for non-nearby LGUs (safe: unreferenced leaf table).
+-- 6. Purges non-nearby LGUs only if completely unreferenced across all DB tables.
+-- ------------------------------------------------------------------------------
 
-delete from public.stock_ledger
-where lgu_id in (select id from public.lgus where municipality not in (
-  'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
-  'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
-  'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
-  'Dingle', 'Janiuay'
-));
-
-delete from public.inventory_batches
-where lgu_id in (select id from public.lgus where municipality not in (
-  'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
-  'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
-  'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
-  'Dingle', 'Janiuay'
-));
-
-delete from public.incoming_manifests
-where destination_lgu_id in (select id from public.lgus where municipality not in (
-  'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
-  'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
-  'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
-  'Dingle', 'Janiuay'
-));
-
-delete from public.lgu_stock
-where lgu_id in (select id from public.lgus where municipality not in (
-  'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
-  'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
-  'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
-  'Dingle', 'Janiuay'
-));
-
-delete from public.lgu_inventory_reports
+-- 1. Reset stock counters to clean baseline 0 for any non-nearby LGUs
+update public.lgus set
+  food_packs = 0,
+  rtef = 0,
+  hygiene_kits = 0,
+  sleeping_kits = 0,
+  kitchen_kits = 0,
+  family_kits = 0,
+  laminated_sacks = 0,
+  current_stock = '{}'::jsonb,
+  affected_families = 0,
+  damage_index = 0,
+  urgency_score = 0,
+  priority_color = 'Green',
+  recommendation = 'Baseline zero stock; normal operations.'
 where municipality not in (
   'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
   'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
@@ -105,7 +95,57 @@ where municipality not in (
   'Dingle', 'Janiuay'
 );
 
--- Delete non-nearby LGUs unless linked to an active user profile
+-- 2. Clean double-entry ledger only for seed manifests
+delete from public.stock_ledger
+where movement_type = 'INTAKE_VERIFIED'
+  and reference_manifest_id in (
+    select id from public.incoming_manifests
+    where manifest_number like 'MNF-2026-%'
+      and id not in (
+        select incoming_manifest_id from public.inventory_batches
+        where incoming_manifest_id is not null
+          and batch_token_id in (select batch_token_id from public.outgoing_batch_allocations where batch_token_id is not null)
+      )
+  );
+
+-- 3. Delete unallocated seed inventory batches (NEVER delete user batches like BATCH-RIS-%)
+delete from public.inventory_batches
+where batch_token_id like 'BATCH-MNF-2026-%'
+  and batch_token_id not in (
+    select batch_token_id from public.outgoing_batch_allocations where batch_token_id is not null
+  );
+
+-- 4. Delete unallocated seed manifests (NEVER delete user manifests like RIS-%)
+delete from public.incoming_manifests
+where manifest_number like 'MNF-2026-%'
+  and id not in (
+    select incoming_manifest_id from public.inventory_batches
+    where incoming_manifest_id is not null
+      and batch_token_id in (select batch_token_id from public.outgoing_batch_allocations where batch_token_id is not null)
+  );
+
+-- 5. Delete normalized stock for non-nearby LGUs (safe: no foreign keys reference lgu_stock)
+delete from public.lgu_stock
+where lgu_id in (
+  select id from public.lgus where municipality not in (
+    'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
+    'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
+    'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
+    'Dingle', 'Janiuay'
+  )
+);
+
+-- 6. Delete automated baseline reports for non-nearby LGUs (preserves real user reports)
+delete from public.lgu_inventory_reports
+where reported_by_profile_id is null
+  and municipality not in (
+    'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
+    'Tigbauan', 'Cabatuan', 'Alimodian', 'New Lucena', 'Dumangas', 'Guimbal', 'Leon',
+    'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
+    'Dingle', 'Janiuay'
+  );
+
+-- 7. Purge unreferenced non-nearby LGUs (Guaranteed safe: checks every foreign key in the database)
 delete from public.lgus
 where municipality not in (
   'Iloilo City', 'Pavia', 'Leganes', 'Oton', 'Santa Barbara', 'San Miguel', 'Zarraga',
@@ -113,7 +153,15 @@ where municipality not in (
   'Barotac Nuevo', 'Maasin', 'Tubungan', 'Pototan', 'Mina', 'Miag-ao', 'Badiangan',
   'Dingle', 'Janiuay'
 )
-and id not in (select lgu_id from public.profiles where lgu_id is not null);
+and id not in (select lgu_id from public.profiles where lgu_id is not null)
+and id not in (select lgu_id from public.warehouses where lgu_id is not null)
+and id not in (select lgu_id from public.outgoing_requests where lgu_id is not null)
+and id not in (select destination_lgu_id from public.outgoing_requests where destination_lgu_id is not null)
+and id not in (select source_lgu_id from public.outgoing_requests where source_lgu_id is not null)
+and id not in (select destination_lgu_id from public.incoming_manifests where destination_lgu_id is not null)
+and id not in (select lgu_id from public.inventory_batches where lgu_id is not null)
+and id not in (select lgu_id from public.lgu_inventory_reports where lgu_id is not null)
+and id not in (select lgu_id from public.stock_ledger where lgu_id is not null);
 
 -- ------------------------------------------------------------------------------
 -- SECTION 3: SEED THE 23 NEARBY ILOILO LGUS & SITUATIONAL BUFFER STOCK
