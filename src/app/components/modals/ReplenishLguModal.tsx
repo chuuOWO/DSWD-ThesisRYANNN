@@ -24,7 +24,7 @@ export interface LguReplenishPayload {
 
 interface ReplenishLguModalProps {
   onClose: () => void;
-  onSubmit: (data: LguReplenishPayload) => Promise<{ ok: boolean; message?: string }> | void;
+  onSubmit: (data: LguReplenishPayload) => Promise<{ ok: boolean; message?: string } | void> | void;
   warehousesList?: WarehouseRecord[];
   kitTypesList?: KitTypeRecord[];
   lgusList?: LguRecord[];

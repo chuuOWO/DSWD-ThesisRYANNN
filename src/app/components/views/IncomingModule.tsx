@@ -166,6 +166,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       } else {
         showResult(`Successfully replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName}.`);
       }
+      return res;
     }
   };
 

@@ -1382,9 +1382,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       destination: payload.destinationMunicipality,
       destinationLguId: destLgu?.id,
       status: 'Verified',
-      verifiedBy: currentActor.name,
-      verifiedByProfileId: currentActor.id,
-      notes: payload.remarks || `Inter-facility replenishment from ${payload.sourceName} to ${payload.destinationMunicipality}`
+      manifestHash: goodsWithId.manifestHash
     }).catch(err => console.warn('createIncoming transfer error:', err));
 
     backendApi.logActivity({
