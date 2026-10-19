@@ -89,7 +89,7 @@ const initialInventory: Inventory = {
 };
 
 const DEFAULT_PANAY_BOUNDS_CENTER: [number, number] = [10.9000, 122.5000];
-const GEOFENCE_RADIUS_METERS = 600; // 600 meters drop-off geofence radius
+const GEOFENCE_RADIUS_METERS = 500; // 500 meters drop-off geofence radius
 
 const createDestinationPinIcon = (isSelectedOrLabel?: boolean | string, maybeSelected?: boolean) => {
   return L.divIcon({
@@ -1324,7 +1324,16 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
   const handleExecuteDropOff = async () => {
     if (!dropOffTarget) return;
-    const { payload, location: nextLoc, matchingRelease } = dropOffTarget;
+    const { payload, location: nextLoc, matchingRelease, distanceMeters } = dropOffTarget;
+
+    // Strict 500m Geofence Check: Must be within designated drop-off radius
+    if (distanceMeters !== undefined && distanceMeters > GEOFENCE_RADIUS_METERS) {
+      setSignError(`Geofence Location Check Failed: You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated area to complete drop-off. Current distance is ${Math.round(distanceMeters)}m.`);
+      setIsSubmittingProof(false);
+      setStep('verify_dropoff');
+      return;
+    }
+
     const effectiveQty = (verifiedQuantity && verifiedQuantity > 0) ? verifiedQuantity : payload.quantity;
 
     setIsSubmittingProof(true);
@@ -1550,7 +1559,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
       // If inside geofence OR if already carrying this package near drop-off: TRIGGER DROP-OFF FLOW
       if (isInsideDropoffGeofence || (isAlreadyInActiveCargo && isNearActiveDropoff)) {
-        console.log(`[Drop-Off Mode] Inside geofence (${Math.round(distToDropoff ?? 0)}m). Transitioning ${payload.drNumber} to drop-off flow.`);
+        console.log(`[Drop-Off Mode] Inside ${GEOFENCE_RADIUS_METERS}m geofence (${Math.round(distToDropoff ?? 0)}m). Transitioning ${payload.drNumber} to drop-off flow.`);
         setIsSigning(false);
         handleInitiateDropOff(payload, matchingDbRelease, distToDropoff ?? undefined);
         return;
@@ -1559,7 +1568,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       // If outside geofence and already in cargo:
       if (isAlreadyInActiveCargo) {
         setIsSigning(false);
-        setHandoverToast(`Already in Cargo: Shipment ${payload.drNumber} is in your active cargo. Navigate to destination drop-off geofence to drop off.`);
+        const distMsg = distToDropoff !== null ? ` Current distance: ${Math.round(distToDropoff)}m.` : '';
+        setHandoverToast(`Outside 500m Geofence: Shipment ${payload.drNumber} is in your active cargo. You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated drop-off area to complete drop-off.${distMsg}`);
         setTimeout(() => setHandoverToast(null), 6000);
         nav('pickup');
         return;
@@ -2452,6 +2462,14 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                               <Check size={11} />
                               <span>Drop Off</span>
                             </button>
+                          </div>
+                        )}
+
+                        {/* Distance Indicator when outside 500m Geofence */}
+                        {!isInsideThis && distToThis !== null && (
+                          <div className="mt-2 pt-1.5 border-t border-gray-100 flex items-center justify-between text-[9px] text-gray-500">
+                            <span className="font-semibold text-gray-600">Drop-Off Geofence:</span>
+                            <span className="font-mono font-bold text-gray-700">{Math.round(distToThis)}m to destination ({Math.max(0, Math.round(distToThis - GEOFENCE_RADIUS_METERS))}m outside 500m geofence)</span>
                           </div>
                         )}
                       </div>

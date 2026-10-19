@@ -14,7 +14,8 @@ import {
   X,
   ExternalLink,
   ShieldCheck,
-  Menu
+  Menu,
+  MapPin
 } from 'lucide-react';
 import { Circle, MapContainer, Marker, Polyline, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -54,6 +55,8 @@ interface BarcodeDetectorWindow extends Window {
 }
 
 const DEFAULT_PANAY_CENTER: [number, number] = [10.7202, 122.5621];
+const GEOFENCE_RADIUS_METERS = 500; // 500 meters geofence radius
+const WAREHOUSE_COORDINATES: [number, number] = [10.6975, 122.4764]; // DSWD Regional Warehouse Origin
 
 const isValidCoordinate = (coord?: [number, number] | null): coord is [number, number] => {
   return (
@@ -218,6 +221,17 @@ const getQuickGpsCoords = (): Promise<string | undefined> =>
       (pos) => resolve(`${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`),
       () => resolve(undefined),
       { enableHighAccuracy: true, timeout: 4000, maximumAge: 30000 }
+    );
+  });
+
+// High-accuracy GPS lookup for 500m geofence location enforcement
+const getDeviceGpsCoords = (): Promise<{ latitude: number; longitude: number } | null> =>
+  new Promise((resolve) => {
+    if (typeof window === 'undefined' || !navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
     );
   });
 
@@ -625,6 +639,29 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string; txHash?: string } | null>(null);
 
+  // Geofence Receiving & Inspection Modal States
+  const [pendingVerification, setPendingVerification] = useState<{
+    drNumber: string;
+    category: string;
+    quantity: number;
+    finalMuni: string;
+    matchingRelease: OutgoingRelease | null;
+    receiverGpsString: string;
+    distanceMeters: number;
+    isWarehousePickup: boolean;
+    targetFacilityName: string;
+  } | null>(null);
+  const [verifiedQuantityInput, setVerifiedQuantityInput] = useState<number>(0);
+  const [verificationRemarks, setVerificationRemarks] = useState('');
+  const [isVerificationSubmitting, setIsVerificationSubmitting] = useState(false);
+  const [confirmedDeliveryReceipt, setConfirmedDeliveryReceipt] = useState<{
+    drNumber: string;
+    category: string;
+    quantity: number;
+    finalMuni: string;
+    txHash: string;
+  } | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<BarcodeDetectorInstance | null>(null);
@@ -779,82 +816,182 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       const authoritativeLgu = (rawTo && findMatchingLgu(dbLgus, rawTo)) || (matchingRelease?.municipality ? findMatchingLgu(dbLgus, matchingRelease.municipality) : undefined) || canonicalUserLgu;
       const finalMuni = authoritativeLgu?.municipality || canonicalUserLgu?.municipality || effectiveLguName || 'LGU';
 
-      // Capture background GPS location silently for audit log (backend only)
-      const receiverGps = await getQuickGpsCoords();
+      // 500-METER GEOFENCE LOCATION ENFORCEMENT:
+      // Must check device location against designated LGU drop-off area or warehouse origin
+      const currentGps = await getDeviceGpsCoords();
+      if (!currentGps) {
+        throw new Error('Device GPS Location Required: Satellite geolocation must be enabled to verify you are within 500 meters of the designated area.');
+      }
 
-      // Immediately mark as accepted locally so the package leaves the incoming card/map
-      setLocallyAcceptedDrs((prev) => [...prev, canonicalDrNumber.toUpperCase()]);
+      let targetDropoffCoords: [number, number] | null = null;
+      if (matchingRelease?.receiverGps) {
+        const [latStr, lngStr] = matchingRelease.receiverGps.split(',').map((s: string) => parseFloat(s.trim()));
+        if (!isNaN(latStr) && !isNaN(lngStr)) {
+          targetDropoffCoords = [latStr, lngStr];
+        }
+      }
+      if (!targetDropoffCoords && authoritativeLgu?.latitude && authoritativeLgu?.longitude) {
+        targetDropoffCoords = [authoritativeLgu.latitude, authoritativeLgu.longitude];
+      }
+      if (!targetDropoffCoords && canonicalUserLgu?.latitude && canonicalUserLgu?.longitude) {
+        targetDropoffCoords = [canonicalUserLgu.latitude, canonicalUserLgu.longitude];
+      }
+
+      const distToDropoff = targetDropoffCoords
+        ? getDistanceMeters(currentGps.latitude, currentGps.longitude, targetDropoffCoords[0], targetDropoffCoords[1])
+        : null;
+      const distToWarehouse = getDistanceMeters(
+        currentGps.latitude,
+        currentGps.longitude,
+        WAREHOUSE_COORDINATES[0],
+        WAREHOUSE_COORDINATES[1]
+      );
+
+      const isWithinDropoff = distToDropoff !== null && distToDropoff <= GEOFENCE_RADIUS_METERS;
+      const isWithinWarehouse = distToWarehouse <= GEOFENCE_RADIUS_METERS;
+      const isWithinGeofence = isWithinDropoff || isWithinWarehouse;
+
+      if (!isWithinGeofence) {
+        const designatedFacility = matchingRelease?.destinationAddress || matchingRelease?.municipality || finalMuni;
+        const closestDistance = distToDropoff !== null ? Math.min(distToDropoff, distToWarehouse) : distToWarehouse;
+        throw new Error(
+          `Geofence Location Check Failed: You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated area (${designatedFacility}) or warehouse pickup site to scan and accept this shipment. Current distance: ${Math.round(closestDistance)} meters.`
+        );
+      }
+
+      // Geofence verified: Capture coordinates string and launch inspection / verification modal
+      const receiverGpsString = `${currentGps.latitude.toFixed(6)}, ${currentGps.longitude.toFixed(6)}`;
+      const targetFacilityName = isWithinDropoff
+        ? (matchingRelease?.destinationAddress || matchingRelease?.municipality || finalMuni)
+        : 'DSWD Regional Warehouse';
+      const distanceMeters = isWithinDropoff ? (distToDropoff ?? 0) : distToWarehouse;
+
+      setPendingVerification({
+        drNumber: canonicalDrNumber,
+        category,
+        quantity,
+        finalMuni,
+        matchingRelease: matchingRelease || null,
+        receiverGpsString,
+        distanceMeters,
+        isWarehousePickup: !isWithinDropoff && isWithinWarehouse,
+        targetFacilityName
+      });
+      setVerifiedQuantityInput(quantity);
+      setVerificationRemarks('');
+      setIsProcessing(false);
+    } catch (err) {
+      setIsProcessing(false);
+      setToastMessage({
+        type: 'error',
+        text: formatUserErrorMessage(err, 'Failed to verify shipment scan.')
+      });
+    }
+  };
+
+  const handleConfirmReceipt = async () => {
+    if (!pendingVerification) return;
+    const { drNumber, category, finalMuni, matchingRelease, receiverGpsString, isWarehousePickup, targetFacilityName } = pendingVerification;
+    const effectiveQty = verifiedQuantityInput > 0 ? verifiedQuantityInput : pendingVerification.quantity;
+
+    setIsVerificationSubmitting(true);
+    setIsProcessing(true);
+
+    try {
+      // Mark DR as locally accepted so UI immediately reflects handover
+      setLocallyAcceptedDrs((prev) => [...prev, drNumber.toUpperCase()]);
 
       // Execute on-chain acceptance through inventory state
-      const acceptResult = await onAccept(canonicalDrNumber, 'LGUReceiver', finalMuni, receiverGps);
+      const acceptResult = await onAccept(drNumber, 'LGUReceiver', finalMuni, receiverGpsString);
       if (!acceptResult.ok) {
         throw new Error(acceptResult.message || 'Blockchain confirmation failed on Sepolia.');
       }
 
-      const receiptTxHash = (acceptResult as any)?.txHash;
+      const receiptTxHash = (acceptResult as any)?.txHash || '';
 
       // Record direct custody acceptance in Supabase
       await backendApi.recordLguReceipt({
-        drNumber: canonicalDrNumber,
+        drNumber,
         lguName: finalMuni,
         municipality: finalMuni,
         category,
-        quantity,
-        receiverGps,
-        receiverSignature: receiptTxHash || `RECEIVER-QR-${Date.now()}`,
+        quantity: effectiveQty,
+        receiverGps: receiverGpsString,
+        receiverSignature: receiptTxHash || `LGU-RECEIVER-${Date.now()}`,
         txHash: receiptTxHash
       });
 
       // Record final handover hop in custody_hops
       await backendApi.recordCustodyHop({
-        outgoingRequestId: matchingRelease?.id || canonicalDrNumber,
+        outgoingRequestId: matchingRelease?.id || drNumber,
         sequence: 99,
         fromDriverProfileId: matchingRelease?.assignedDriverProfileId || undefined,
         toDriverProfileId: profile.id,
         fromTruckId: matchingRelease?.assignedTruckId || undefined,
-        gpsCoordinates: receiverGps,
+        gpsCoordinates: receiverGpsString,
         blockchainTxHash: receiptTxHash,
-        notes: `Final custody handover verified and accepted by LGU Receiver at ${finalMuni}`
+        notes: `Final custody handover verified and accepted by LGU Receiver at ${targetFacilityName}${isWarehousePickup ? ' (Direct Warehouse Pickup)' : ''}`
       }).catch(() => {});
 
       // Append LGU_RECEIVED to stock_ledger
       await backendApi.appendStockLedger({
         movementType: 'LGU_RECEIVED',
         outgoingRequestId: matchingRelease?.id,
-        drNumber: canonicalDrNumber,
+        drNumber,
         destinationLguId: matchingRelease?.destinationLguId || matchingRelease?.lguId,
-        quantityChange: quantity,
+        quantityChange: effectiveQty,
         referenceTable: 'lgu_inventory_reports',
-        referenceId: canonicalDrNumber,
-        gpsCoordinates: receiverGps,
+        referenceId: drNumber,
+        gpsCoordinates: receiverGpsString,
         blockchainTxHash: receiptTxHash,
         performedByProfileId: profile.id,
-        notes: `Physical relief goods received and verified at ${finalMuni}`
+        notes: `Physical relief goods received and verified on-site at ${targetFacilityName}`
       }).catch(() => {});
 
-      await loadLguStock();
+      // If discrepancy or inspection notes present, submit discrepancy report
+      if (verificationRemarks.trim() || effectiveQty !== pendingVerification.quantity) {
+        const noteText = [
+          effectiveQty !== pendingVerification.quantity
+            ? `Receipt verified count ${effectiveQty} vs manifest ${pendingVerification.quantity}.`
+            : '',
+          verificationRemarks.trim()
+        ].filter(Boolean).join(' ');
+
+        await backendApi.createDiscrepancyReport({
+          reportType: 'Outgoing',
+          drNumber,
+          note: noteText,
+          reportedByRole: 'LGU Receiver',
+          reportedByWallet: profile?.walletAddress || undefined,
+          reportedByProfileId: profile?.id
+        }).catch(() => {});
+      }
 
       // Clean up truck live location since delivery is finalized
       const deliveredTruckId = matchingRelease?.assignedTruckId || (matchingRelease as any)?.assigned_truck_id;
       if (deliveredTruckId) {
-        await backendApi.markTruckLiveLocationDone(deliveredTruckId, canonicalDrNumber).catch(() => {});
+        await backendApi.markTruckLiveLocationDone(deliveredTruckId, drNumber).catch(() => {});
       }
 
-      // Smooth 5-dot modal completes into "Done!"
-      setTimeout(() => {
-        setIsProcessing(false);
-        setToastMessage({
-          type: 'success',
-          text: `Delivery ${canonicalDrNumber} confirmed on Sepolia! Handover verified.`,
-          txHash: receiptTxHash
-        });
-      }, 1600);
+      await loadLguStock();
+
+      setConfirmedDeliveryReceipt({
+        drNumber,
+        category,
+        quantity: effectiveQty,
+        finalMuni,
+        txHash: receiptTxHash
+      });
+      setPendingVerification(null);
     } catch (err) {
-      setIsProcessing(false);
+      console.error('Acceptance execution failed:', err);
       setToastMessage({
         type: 'error',
-        text: formatUserErrorMessage(err, 'Unable to record shipment receipt. Please check your connection.')
+        text: formatUserErrorMessage(err, 'Failed to complete delivery receipt on Sepolia.')
       });
+    } finally {
+      setIsVerificationSubmitting(false);
+      setIsProcessing(false);
     }
   };
 
@@ -1033,7 +1170,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               {lguDestinationCoords && (
                 <Circle
                   center={lguDestinationCoords}
-                  radius={600}
+                  radius={GEOFENCE_RADIUS_METERS}
                   pathOptions={{
                     color: '#059669',
                     fillColor: '#10b981',
@@ -1049,7 +1186,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 <React.Fragment key={`admin-pin-${release.drNumber}`}>
                   <Circle
                     center={coords}
-                    radius={600}
+                    radius={GEOFENCE_RADIUS_METERS}
                     pathOptions={{
                       color: '#2500ba',
                       fillColor: '#3b82f6',
@@ -1060,7 +1197,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   >
                     <Popup>
                       <div className="text-center font-sans p-1">
-                        <p className="text-[10px] font-bold text-emerald-700 uppercase">Drop-Off Geofence Zone (600m)</p>
+                        <p className="text-[10px] font-bold text-emerald-700 uppercase">Drop-Off Geofence Zone ({GEOFENCE_RADIUS_METERS}m)</p>
                         <p className="text-xs font-bold text-gray-900 mt-0.5">{release.destinationAddress || release.municipality || effectiveLguName}</p>
                         <p className="text-[10px] text-gray-500 font-mono">DR #{release.drNumber}</p>
                       </div>
@@ -1095,7 +1232,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               {/* Active En Route Trucks Delivering to this LGU */}
               {incomingTrucks.map(({ release, truckId, coords, dropOffCoords }) => {
                 const isNearDropOff = dropOffCoords
-                  ? getDistanceMeters(coords[0], coords[1], dropOffCoords[0], dropOffCoords[1]) <= 600
+                  ? getDistanceMeters(coords[0], coords[1], dropOffCoords[0], dropOffCoords[1]) <= GEOFENCE_RADIUS_METERS
                   : false;
                 return (
                   <React.Fragment key={`truck-${release.drNumber}-${truckId}`}>
@@ -1424,14 +1561,24 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                         Source: {r.warehouseSource || 'DSWD Logistics Hub'} &bull; Convoy: {r.assignedTruckId || 'Pending'} &bull; Escort: {r.assignedDriverProfileId || r.assignedEscortProfileId ? 'Assigned' : 'Pending'}
                       </p>
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
-                        <span className="text-[9.5px] text-gray-400">Incoming cargo</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsUpcomingDeliveriesOpen(false);
+                            startCamera();
+                          }}
+                          className="text-[10px] font-bold text-[#2500ba] hover:text-blue-800 transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <ScanLine size={12} />
+                          <span>Scan to Receive / Drop Off</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
                             setDiscrepancyTargetDr(r.drNumber);
                             setIsDiscrepancyModalOpen(true);
                           }}
-                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition flex items-center gap-1"
+                          className="text-[10px] font-bold text-rose-600 hover:text-rose-800 transition flex items-center gap-1 cursor-pointer"
                         >
                           <AlertTriangle size={11} />
                           <span>Report Issue</span>
@@ -1713,6 +1860,194 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   {isSubmittingDiscrepancy ? 'Submitting...' : 'Submit Report'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Geofence Receiving & Inspection Modal (Matching Field Drop-Off / Receiving Layout) */}
+        {pendingVerification && (
+          <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+            <div className="relative w-full max-w-sm max-h-[94%] flex flex-col rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setPendingVerification(null)}
+                aria-label="Close"
+                className="absolute right-3 top-3 z-10 p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+              <div className="overflow-y-auto p-4 sm:p-5 flex-1 space-y-3">
+                <div className="mx-auto mb-1 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <CheckCircle2 size={24} />
+                </div>
+                <h2 className="text-center text-sm font-bold text-gray-900">
+                  Confirm Shipment Receipt & Verification
+                </h2>
+
+                {/* Geofence Status Badge */}
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-900">
+                  <div className="flex items-center gap-2">
+                    <MapPin size={16} className="text-emerald-600 shrink-0" />
+                    <div>
+                      <p className="font-bold">
+                        {pendingVerification.isWarehousePickup ? 'Within Warehouse Pickup Geofence' : 'Within Drop-Off Geofence'}
+                      </p>
+                      <p className="text-[10px] text-emerald-700 font-mono">
+                        GPS Verified • ±{Math.round(pendingVerification.distanceMeters)}m to {pendingVerification.targetFacilityName}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-extrabold text-[9.5px] uppercase tracking-wide">
+                    500m Verified
+                  </span>
+                </div>
+
+                {/* Package & Shipment Details Card */}
+                <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl space-y-1.5 text-xs text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-blue-950 text-xs tracking-tight">
+                      Shipment {pendingVerification.drNumber}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-200/80 text-blue-900 font-bold text-[10px]">
+                      {pendingVerification.category}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10.5px] text-blue-900">
+                    <MapPin size={12} className="text-red-500 shrink-0" />
+                    <span className="truncate font-semibold">
+                      Receiving Endpoint: {pendingVerification.finalMuni}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 truncate">
+                    Origin: {pendingVerification.matchingRelease?.warehouseSource || 'DSWD Logistics Hub'}
+                  </p>
+                  <p className="text-[10px] text-gray-500 truncate">
+                    Mode: {pendingVerification.isWarehousePickup ? 'Direct Warehouse Pickup' : `Convoy: ${pendingVerification.matchingRelease?.assignedTruckId || 'Pending'}`}
+                  </p>
+                </div>
+
+                {/* Physical Package Count Verification */}
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 text-center">
+                  <label className="block text-[11px] font-bold text-gray-800 mb-0.5">
+                    Verified Received Package Count
+                  </label>
+                  <p className="text-[9.5px] text-gray-500 mb-2">
+                    Manifest: {pendingVerification.quantity} units. Confirm physical items received in good order.
+                  </p>
+                  <div className="flex items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setVerifiedQuantityInput((prev) => Math.max(1, prev - 1))}
+                      className="w-10 h-10 rounded-xl bg-white border border-gray-300 hover:bg-gray-100 text-gray-800 font-extrabold text-xl flex items-center justify-center shadow-xs transition active:scale-95 cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={verifiedQuantityInput || ''}
+                      onChange={(e) => {
+                        const cleaned = e.target.value.replace(/\D/g, '');
+                        const val = cleaned ? parseInt(cleaned, 10) : 0;
+                        setVerifiedQuantityInput(val);
+                      }}
+                      className="w-24 text-center font-mono font-extrabold text-xl py-2 px-2 border-2 border-emerald-600 rounded-xl text-emerald-800 bg-white focus:outline-hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setVerifiedQuantityInput((prev) => prev + 1)}
+                      className="w-10 h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xl flex items-center justify-center shadow-md transition active:scale-95 cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Inspection Remarks */}
+                <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-left">
+                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
+                    Inspection & Receiving Remarks (Optional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={verificationRemarks}
+                    onChange={(e) => setVerificationRemarks(e.target.value)}
+                    placeholder="e.g. Received in good condition by MSWDO staff. Outer seals intact."
+                    className="w-full text-xs p-2 rounded-lg border border-gray-300 bg-white text-gray-800 placeholder-gray-400 focus:outline-hidden focus:border-emerald-600 resize-none"
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingVerification(null)}
+                    className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isVerificationSubmitting}
+                    onClick={() => void handleConfirmReceipt()}
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <CheckCircle2 size={14} />
+                    <span>Confirm Receipt & Sign Blockchain</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delivery Receipt Confirmed Success Modal */}
+        {confirmedDeliveryReceipt && (
+          <div className="absolute inset-0 z-50 bg-black/60 flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+            <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden p-5 text-center space-y-4">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                <ShieldCheck size={28} />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-gray-900">Delivery Receipt Confirmed!</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Physical handover verified and anchored on Sepolia blockchain.
+                </p>
+              </div>
+              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-left text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-500 font-semibold">Shipment:</span>
+                  <span className="font-mono font-bold text-gray-900">{confirmedDeliveryReceipt.drNumber}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 font-semibold">Verified Units:</span>
+                  <span className="font-bold text-emerald-700">{confirmedDeliveryReceipt.quantity} {confirmedDeliveryReceipt.category}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 font-semibold">Endpoint:</span>
+                  <span className="font-bold text-gray-800">{confirmedDeliveryReceipt.finalMuni}</span>
+                </div>
+              </div>
+              {confirmedDeliveryReceipt.txHash && (
+                <a
+                  href={`https://sepolia.etherscan.io/tx/${confirmedDeliveryReceipt.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-blue-50 border border-blue-200 text-[11px] font-mono text-[#2500ba] font-bold hover:bg-blue-100 transition"
+                >
+                  <ShieldCheck size={14} className="text-[#2500ba]" />
+                  <span>Sepolia: {confirmedDeliveryReceipt.txHash.slice(0, 8)}...{confirmedDeliveryReceipt.txHash.slice(-6)}</span>
+                  <ExternalLink size={12} className="text-[#2500ba]" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setConfirmedDeliveryReceipt(null)}
+                className="w-full py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition cursor-pointer"
+              >
+                Done
+              </button>
             </div>
           </div>
         )}
