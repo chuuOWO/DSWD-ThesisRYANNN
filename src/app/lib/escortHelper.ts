@@ -48,6 +48,27 @@ export function registerEscortProfiles(
   }
 }
 
+async function fetchEscortProfileAsync(raw: string): Promise<void> {
+  try {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, email')
+      .eq('id', raw)
+      .maybeSingle();
+
+    if (data) {
+      const resolvedName =
+        `${data.first_name || ''} ${data.last_name || ''}`.trim() || data.email || 'Relief Escort Officer';
+      escortCache.set(raw, resolvedName);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('escort-profile-resolved', { detail: { id: raw, name: resolvedName } }));
+      }
+    }
+  } catch {
+    // Ignore network/lookup errors in background
+  }
+}
+
 export function resolveEscortName(
   idOrName?: string | null,
   profilesList?: Array<{ id: string; fullName?: string; email?: string }>
@@ -81,23 +102,9 @@ export function resolveEscortName(
   // 4. It is a UUID and not yet in cache -> trigger background lookup
   if (!inflightLookups.has(raw)) {
     inflightLookups.add(raw);
-    supabase
-      .from('profiles')
-      .select('id, first_name, last_name, email')
-      .eq('id', raw)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          const resolvedName =
-            `${data.first_name || ''} ${data.last_name || ''}`.trim() || data.email || 'Relief Escort Officer';
-          escortCache.set(raw, resolvedName);
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('escort-profile-resolved', { detail: { id: raw, name: resolvedName } }));
-          }
-        }
-      })
-      .catch(() => {});
+    void fetchEscortProfileAsync(raw);
   }
 
   return 'Relief Escort Officer';
 }
+
