@@ -513,14 +513,14 @@ export function LGUReportPdfModal({
                           <td className="px-3 py-1.5 whitespace-nowrap">
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold ${
-                                tx.flowLabel === 'Inbound Delivery (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-'))
+                                tx.flowLabel === 'Outgoing Release (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-'))
                                   ? 'bg-blue-100 text-blue-800'
-                                  : tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && tx.type === 'Incoming')
+                                  : tx.flowLabel === 'Incoming Intake (RIS)' || tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && (tx.type === 'Incoming' || tx.referenceCode?.startsWith('RIS-') || tx.referenceCode?.startsWith('INC-')))
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : 'bg-purple-100 text-purple-800'
                               }`}
                             >
-                              {tx.flowLabel || (tx.type === 'Incoming' ? 'Intake (RIS)' : 'Outbound Release')}
+                              {tx.flowLabel || (tx.type === 'Outgoing' ? 'Outgoing Release (DR)' : 'Incoming Intake (RIS)')}
                             </span>
                           </td>
                           <td className="px-3 py-1.5 font-mono font-bold text-gray-900">{tx.referenceCode}</td>

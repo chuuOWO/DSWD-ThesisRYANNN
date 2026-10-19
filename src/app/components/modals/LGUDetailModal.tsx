@@ -336,9 +336,9 @@ export function LGUDetailModal({
         const expiryTier = effectiveExp ? getExpiryTier(effectiveExp) : undefined;
 
         list.push({
-          id: `IN-${r.id || r.drNumber || Math.random()}`,
-          type: 'Incoming',
-          flowLabel: 'Inbound Delivery (DR)',
+          id: `OUT-DR-${r.id || r.drNumber || Math.random()}`,
+          type: 'Outgoing',
+          flowLabel: 'Outgoing Release (DR)',
           referenceCode: r.drNumber || r.id || 'N/A',
           category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
           quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
@@ -371,7 +371,7 @@ export function LGUDetailModal({
           list.push({
             id: `INC-DIRECT-${inc.id}`,
             type: 'Incoming',
-            flowLabel: 'Intake (RIS)',
+            flowLabel: 'Incoming Intake (RIS)',
             referenceCode: inc.incidentCode || inc.id,
             category: normalizeCategoryName(inc.fnfiCategory) || inc.fnfiCategory || 'Relief Goods',
             quantity: Number(inc.quantity) || 0,
@@ -397,9 +397,9 @@ export function LGUDetailModal({
         const source = (r.warehouseSource || '').trim().toLowerCase();
         if (source === muniLower || (muniLower.length > 2 && source.includes(muniLower))) {
           list.push({
-            id: `OUT-${r.id || r.drNumber || Math.random()}`,
+            id: `OUT-LGU-${r.id || r.drNumber || Math.random()}`,
             type: 'Outgoing',
-            flowLabel: 'Outbound Release',
+            flowLabel: 'Local Distribution',
             referenceCode: r.drNumber || r.id || 'N/A',
             category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
             quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
@@ -476,9 +476,9 @@ export function LGUDetailModal({
       let sourceName = `${lgu.municipality} LGU`;
       let destName = 'Local Relief Distribution';
 
-      let ledgerFlowLabel = isIncoming ? 'Intake (RIS)' : 'Outbound Release';
+      let ledgerFlowLabel = isIncoming ? 'Incoming Intake (RIS)' : 'Local Distribution';
       if (row.reference_dr_id || refCode.startsWith('DR-')) {
-        ledgerFlowLabel = 'Inbound Delivery (DR)';
+        ledgerFlowLabel = 'Outgoing Release (DR)';
       } else if (mvType === 'MUTUAL_AID_OUT') {
         ledgerFlowLabel = 'Mutual Aid Out';
       }
@@ -719,12 +719,13 @@ export function LGUDetailModal({
       const normalizedCat = normalizeCategoryName(cat);
       const onHand = Number(stockMap[cat]) || Number(stockMap[normalizedCat]) || 0;
 
+      const muniLower = (lgu.municipality || '').trim().toLowerCase();
       const recentIncoming = allTransactions.find(
-        (t) => t.type === 'Incoming' && normalizeCategoryName(t.category) === normalizedCat && Boolean(t.date)
+        (t) => (t.type === 'Incoming' || t.destination.toLowerCase().includes(muniLower)) && normalizeCategoryName(t.category) === normalizedCat && Boolean(t.date)
       );
 
       const recentOutgoing = allTransactions.find(
-        (t) => t.type === 'Outgoing' && normalizeCategoryName(t.category) === normalizedCat && Boolean(t.date)
+        (t) => t.source.toLowerCase().includes(muniLower) && normalizeCategoryName(t.category) === normalizedCat && Boolean(t.date)
       );
 
       return {
@@ -949,16 +950,18 @@ export function LGUDetailModal({
 
   // High-level aggregate metrics
   const totalInflow = useMemo(() => {
+    const muniLower = (lgu?.municipality || '').trim().toLowerCase();
     return allTransactions
-      .filter((t) => t.type === 'Incoming')
+      .filter((t) => t.type === 'Incoming' || (muniLower && t.destination.toLowerCase().includes(muniLower)))
       .reduce((sum, t) => sum + t.quantity, 0);
-  }, [allTransactions]);
+  }, [allTransactions, lgu?.municipality]);
 
   const totalOutflow = useMemo(() => {
+    const muniLower = (lgu?.municipality || '').trim().toLowerCase();
     return allTransactions
-      .filter((t) => t.type === 'Outgoing')
+      .filter((t) => Boolean(muniLower && t.source.toLowerCase().includes(muniLower)))
       .reduce((sum, t) => sum + t.quantity, 0);
-  }, [allTransactions]);
+  }, [allTransactions, lgu?.municipality]);
 
   const totalOnHand = useMemo(() => {
     if (!lgu?.currentStock) return 0;
@@ -1068,7 +1071,7 @@ export function LGUDetailModal({
               </div>
               <p className="text-2xl font-bold text-green-950">{totalInflow.toLocaleString()}</p>
               <p className="text-[11px] text-green-700 mt-1">
-                {allTransactions.filter((t) => t.type === 'Incoming').length} delivery receipts
+                {allTransactions.filter((t) => t.type === 'Incoming' || t.destination.toLowerCase().includes((lgu.municipality || '').toLowerCase())).length} inbound deliveries &amp; intakes
               </p>
             </div>
 
@@ -1079,7 +1082,7 @@ export function LGUDetailModal({
               </div>
               <p className="text-2xl font-bold text-blue-950">{totalOutflow.toLocaleString()}</p>
               <p className="text-[11px] text-blue-700 mt-1">
-                {allTransactions.filter((t) => t.type === 'Outgoing').length} outward releases
+                {allTransactions.filter((t) => Boolean(lgu.municipality && t.source.toLowerCase().includes(lgu.municipality.toLowerCase()))).length} outward distributions
               </p>
             </div>
 
@@ -1424,8 +1427,8 @@ export function LGUDetailModal({
                     className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer bg-white"
                   >
                     <option value="all">All Flow (Incoming &amp; Outgoing)</option>
-                    <option value="Incoming">Incoming Only (Inflow)</option>
-                    <option value="Outgoing">Outgoing Only (Outflow)</option>
+                    <option value="Outgoing">Outgoing Releases (DR &amp; Dispatches)</option>
+                    <option value="Incoming">Incoming Intakes (RIS)</option>
                   </select>
                 </div>
               ) : (
@@ -1573,20 +1576,20 @@ export function LGUDetailModal({
                       (paginatedItems as LGUTransaction[]).map((tx) => (
                         <tr key={tx.id} className="hover:bg-gray-50/80 transition-colors">
                           <td className="px-4 py-3 whitespace-nowrap">
-                            {tx.flowLabel === 'Inbound Delivery (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-')) ? (
+                            {tx.flowLabel === 'Outgoing Release (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-')) ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
-                                <Truck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                                Inbound Delivery (DR)
+                                <ArrowUpRight className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                Outgoing Release (DR)
                               </span>
-                            ) : tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && tx.type === 'Incoming') ? (
+                            ) : tx.flowLabel === 'Incoming Intake (RIS)' || tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && (tx.type === 'Incoming' || tx.referenceCode?.startsWith('RIS-') || tx.referenceCode?.startsWith('INC-'))) ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
                                 <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                Intake (RIS)
+                                Incoming Intake (RIS)
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
                                 <ArrowUpRight className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                                {tx.flowLabel || 'Outbound Release'}
+                                {tx.flowLabel || 'Local Distribution'}
                               </span>
                             )}
                           </td>
