@@ -1445,15 +1445,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       setIntegrationMode('mock');
     });
 
-    if (initialBatches.length > 0) {
-      backendApi.applyDateBatchDeductions(
-        newDR,
-        initialBatches,
-        newRelease.sourceType || 'Warehouse',
-        newRelease.warehouseSource,
-        newRelease.fnfiCategory
-      ).catch(err => console.warn('applyDateBatchDeductions on release creation error:', err));
-    }
+    // Outgoing release created in Draft/Allocating status:
+    // Proposed FEFO batch allocations are recorded as reservations. Stock deduction is deferred strictly to Admin approval.
 
     backendApi.logActivity({
       action: 'RELEASE_CREATED',
@@ -1666,11 +1659,24 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }
     }).catch(() => {});
 
-    // Deduct stock from the source warehouse or source LGU in Supabase & local state
-    if (isMainWarehouse(release.warehouseSource)) {
+    // Deduct stock from the source warehouse or source LGU in Supabase & local state strictly upon approval
+    if (allocations && allocations.length > 0) {
+      backendApi.applyDateBatchDeductions(
+        drNumber,
+        allocations,
+        release.sourceType || 'Warehouse',
+        release.warehouseSource,
+        release.fnfiCategory
+      ).catch(err => console.warn('Supabase applyDateBatchDeductions error:', err));
+    } else if (isMainWarehouse(release.warehouseSource)) {
       backendApi.deductWarehouseStock(release.warehouseSource, release.fnfiCategory, amountApproved)
         .catch(err => console.warn('Supabase deductWarehouseStock error:', err));
+    } else if (release.warehouseSource && (release.sourceType === 'LGU' || !isMainWarehouse(release.warehouseSource))) {
+      backendApi.deductLguStock(release.warehouseSource, release.fnfiCategory, amountApproved)
+        .catch(err => console.warn('Supabase deductLguStock error:', err));
+    }
 
+    if (isMainWarehouse(release.warehouseSource)) {
       setWarehousesList(prev => {
         const updated = prev.map(wh => {
           const matchName = release.warehouseSource.replace(/main|warehouse/gi, '').trim().toLowerCase();
@@ -1696,9 +1702,6 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         setInventory(calculateWarehouseInventory(updated, kitTypesList));
         return updated;
       });
-    } else if (release.warehouseSource && (release.sourceType === 'LGU' || !isMainWarehouse(release.warehouseSource))) {
-      backendApi.deductLguStock(release.warehouseSource, release.fnfiCategory, amountApproved)
-        .catch(err => console.warn('Supabase deductLguStock error:', err));
     }
 
     // Deduct batches in local state for instantaneous FEFO reflect
@@ -1728,63 +1731,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       return { ok: false, message: 'Only pre-approval releases (Draft or Allocating) can be cancelled.' };
     }
 
-    const totalAllocQty = (release.allocatedBatches || []).reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
-    const qtyToRestore = totalAllocQty;
-
     try {
-      // 1. Call backendApi to cancel and rollback in Supabase
+      // 1. Call backendApi to cancel in Supabase
       const res = await backendApi.cancelOutgoingRequest(drNumber);
       if (!res.ok) {
         return { ok: false, message: res.message || 'Failed to cancel outgoing request in database.' };
       }
 
-      // 2. Restore warehouse stock in local state
-      if (isMainWarehouse(release.warehouseSource) && qtyToRestore > 0) {
-        setWarehousesList(prev => {
-          const updated = prev.map(wh => {
-            const matchName = release.warehouseSource.replace(/main|warehouse/gi, '').trim().toLowerCase();
-            if (!wh.name.toLowerCase().includes(matchName)) return wh;
-            const catLower = release.fnfiCategory.toLowerCase();
-            const newWh = { ...wh };
-            if (catLower.includes('food pack')) newWh.foodPacks = (wh.foodPacks || 0) + qtyToRestore;
-            else if (catLower.includes('hygiene')) newWh.hygieneKits = (wh.hygieneKits || 0) + qtyToRestore;
-            else if (catLower.includes('sleeping')) newWh.sleepingKits = (wh.sleepingKits || 0) + qtyToRestore;
-            else if (catLower.includes('kitchen')) newWh.kitchenKits = (wh.kitchenKits || 0) + qtyToRestore;
-            else if (catLower.includes('family kit')) newWh.familyKits = (wh.familyKits || 0) + qtyToRestore;
-            else if (catLower.includes('sack')) newWh.laminatedSacks = (wh.laminatedSacks || 0) + qtyToRestore;
-            else if (catLower.includes('rtef') || catLower.includes('ready-to-eat')) newWh.rtef = (wh.rtef || 0) + qtyToRestore;
-
-            if (newWh.currentStock && newWh.currentStock[release.fnfiCategory] !== undefined) {
-              newWh.currentStock = {
-                ...newWh.currentStock,
-                [release.fnfiCategory]: (newWh.currentStock[release.fnfiCategory] || 0) + qtyToRestore
-              };
-            }
-            return newWh;
-          });
-          setInventory(calculateWarehouseInventory(updated, kitTypesList));
-          return updated;
-        });
-      }
-
-      // 3. Restore inventory batches in local state
-      if (release.allocatedBatches && release.allocatedBatches.length > 0) {
-        setInventoryBatchesList(prev => prev.map(batch => {
-          const matchAlloc = release.allocatedBatches?.find(a =>
-            a.batchTokenId === batch.batchTokenId ||
-            (a.batchNumber && batch.batchTokenId.includes(a.batchNumber))
-          );
-          if (matchAlloc) {
-            return {
-              ...batch,
-              remainingQuantity: batch.remainingQuantity + (Number(matchAlloc.quantity) || 0)
-            };
-          }
-          return batch;
-        }));
-      }
-
-      // 4. Update outgoing releases list: mark as Cancelled
+      // 2. Update outgoing releases list: mark as Cancelled
       setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
         ? {
             ...item,
@@ -1792,13 +1746,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
             allocatedBatches: [],
             amountApproved: 0,
             auditTrail: [
-              audit('Release Cancelled', `Outgoing request cancelled before approval. Allocated stock restored to warehouse and FEFO lots.`),
+              audit('Release Cancelled', 'Outgoing request cancelled before approval.'),
               ...item.auditTrail
             ]
           }
         : item));
 
-      return { ok: true, message: `Release ${drNumber} has been cancelled. Allocated stock has been restored to tables.` };
+      return { ok: true, message: `Release ${drNumber} has been cancelled.` };
     } catch (err: any) {
       logBackendError('Cancel outgoing release')(err);
       return { ok: false, message: err?.message || 'Failed to cancel release.' };

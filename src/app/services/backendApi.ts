@@ -2198,68 +2198,13 @@ export const backendApi = {
         return { ok: false, message: 'Only pre-approval releases (Draft or Allocating) can be cancelled.' };
       }
 
-      const category = releaseRow.category || 'Family Food Pack';
-      const sourceType = releaseRow.source_type || 'Warehouse';
-      const sourceName = releaseRow.warehouse_source || releaseRow.lgu_name;
-
-      // 1. Restore batch remaining quantities in inventory_batches
-      const allocations = (releaseRow.allocated_batches || []) as Array<{
-        batchTokenId?: string;
-        batchNumber?: string;
-        quantity?: number;
-      }>;
-
-      let totalAllocQty = 0;
-      for (const alloc of allocations) {
-        const allocQty = Number(alloc.quantity || 0);
-        if (allocQty <= 0) continue;
-        totalAllocQty += allocQty;
-
-        let batchRow: { batch_token_id: string; remaining_quantity: number } | null = null;
-        if (alloc.batchTokenId) {
-          const { data } = await supabase
-            .from('inventory_batches')
-            .select('batch_token_id, remaining_quantity')
-            .eq('batch_token_id', alloc.batchTokenId)
-            .maybeSingle();
-          if (data) batchRow = data;
-        }
-
-        if (!batchRow && alloc.batchNumber) {
-          const { data } = await supabase
-            .from('inventory_batches')
-            .select('batch_token_id, remaining_quantity')
-            .ilike('batch_token_id', `%${alloc.batchNumber}%`)
-            .maybeSingle();
-          if (data) batchRow = data;
-        }
-
-        if (batchRow) {
-          const restoredQty = Number(batchRow.remaining_quantity || 0) + allocQty;
-          await supabase
-            .from('inventory_batches')
-            .update({ remaining_quantity: restoredQty })
-            .eq('batch_token_id', batchRow.batch_token_id);
-        }
-      }
-
-      // 2. Delete outgoing_batch_allocations for this DR
+      // 1. Delete any outgoing_batch_allocations reservations for this DR
       await supabase
         .from('outgoing_batch_allocations')
         .delete()
         .eq('outgoing_request_id', releaseRow.dr_number);
 
-      // 3. Restore warehouse or LGU stock only if batches were actually allocated and deducted upon creation
-      const qtyToRestore = totalAllocQty;
-      if (sourceName && qtyToRestore > 0) {
-        if (sourceType === 'Warehouse') {
-          await this.addWarehouseStock(sourceName, category, qtyToRestore);
-        } else {
-          await this.addLguStock(sourceName, category, qtyToRestore);
-        }
-      }
-
-      // 4. Update outgoing_requests to Cancelled
+      // 2. Update outgoing_requests to Cancelled
       const { error: updateErr } = await supabase
         .from('outgoing_requests')
         .update({
