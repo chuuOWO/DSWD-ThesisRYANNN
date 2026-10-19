@@ -1323,7 +1323,30 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const matchedKit = kitTypesList.find(k => k.name.toLowerCase() === payload.fnfiCategory.toLowerCase());
     const kitTypeId = matchedKit?.id || payload.fnfiCategory;
 
-    // Outflow from Source
+    // First create incoming manifest in database to have real UUID
+    let createdManifestId: string | undefined;
+    const manifestHash = `OFFCHAIN-RIS-${Date.now()}`;
+    try {
+      const incRes = await backendApi.createIncoming({
+        manifestNumber: cleanId,
+        dateReceived: payload.transferDate,
+        fnfiCategory: payload.fnfiCategory,
+        quantity: payload.quantity,
+        unitType: payload.unitType || 'packs',
+        expirationDate: payload.expirationDate,
+        source: payload.sourceType === 'Warehouse' ? payload.sourceName : `${payload.sourceName} LGU Prepositioned Site`,
+        destinationType: 'LGU',
+        destination: payload.destinationMunicipality,
+        destinationLguId: destLgu?.id,
+        status: 'Verified',
+        manifestHash
+      });
+      if (incRes?.id) createdManifestId = incRes.id;
+    } catch (err) {
+      console.warn('createIncoming error:', err);
+    }
+
+    // Append Stock Ledger double-entry records with linked manifest ID
     backendApi.appendStockLedger({
       facilityType: payload.sourceType,
       warehouseId: sourceWh?.id,
@@ -1331,19 +1354,18 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       kitTypeId: kitTypeId,
       deltaQuantity: -payload.quantity,
       movementType: 'TRANSFER_OUT',
-      referenceManifestId: cleanId,
+      referenceManifestId: createdManifestId || cleanId,
       manifestNumber: cleanId,
       actorProfileId: currentActor.id
     }).catch(err => console.warn('appendStockLedger TRANSFER_OUT error:', err));
 
-    // Inflow to Destination
     backendApi.appendStockLedger({
       facilityType: 'LGU',
       lguId: destLgu?.id,
       kitTypeId: kitTypeId,
       deltaQuantity: payload.quantity,
       movementType: 'TRANSFER_IN',
-      referenceManifestId: cleanId,
+      referenceManifestId: createdManifestId || cleanId,
       manifestNumber: cleanId,
       actorProfileId: currentActor.id
     }).catch(err => console.warn('appendStockLedger TRANSFER_IN error:', err));
@@ -1359,7 +1381,35 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         .catch(err => console.warn('allocateBatchesToRequest error:', err));
     }
 
-    // 7. Record in incoming_goods table (Verified intake, strictly zero blockchain minting)
+    // 7. Record destination inventory batch (Zero blockchain, strictly database)
+    const newBatchToken = `BATCH-${cleanId}`;
+    backendApi.createInventoryBatch({
+      batchTokenId: newBatchToken,
+      incomingManifestId: createdManifestId || cleanId,
+      kitTypeId: kitTypeId,
+      initialQuantity: payload.quantity,
+      remainingQuantity: payload.quantity,
+      lguId: destLgu?.id,
+      expirationDate: payload.expirationDate,
+      manifestHash,
+      mintedByProfileId: currentActor.id
+    }).catch(err => console.warn('createInventoryBatch error:', err));
+
+    setInventoryBatchesList(prev => [
+      {
+        batchTokenId: newBatchToken,
+        incomingManifestId: cleanId,
+        kitTypeId: kitTypeId,
+        initialQuantity: payload.quantity,
+        remainingQuantity: payload.quantity,
+        lguId: destLgu?.id,
+        expirationDate: payload.expirationDate,
+        mintedAt: new Date().toISOString()
+      },
+      ...prev
+    ]);
+
+    // 8. Record in incoming_goods table and local state
     const goodsWithId: IncomingGoods = {
       id: cleanId,
       manifestNumber: cleanId,
@@ -1374,27 +1424,13 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       destinationLguId: destLgu?.id,
       status: 'Verified',
       verifiedBy: currentActor.name,
-      manifestHash: `OFFCHAIN-RIS-${Date.now()}`,
+      manifestHash,
+      batchTokenId: newBatchToken,
       auditTrail: [
         audit('Stock Replenished', `Replenished ${payload.destinationMunicipality} with ${payload.quantity.toLocaleString()} ${payload.unitType || 'packs'} of ${payload.fnfiCategory} from ${payload.sourceName} (Exp: ${payload.expirationDate}) verified and stocked by ${currentActor.name}.`)
       ]
     };
     setIncomingGoodsList(prev => [goodsWithId, ...prev]);
-
-    backendApi.createIncoming({
-      manifestNumber: cleanId,
-      dateReceived: payload.transferDate,
-      fnfiCategory: payload.fnfiCategory,
-      quantity: payload.quantity,
-      unitType: payload.unitType || 'packs',
-      expirationDate: payload.expirationDate,
-      source: payload.sourceType === 'Warehouse' ? payload.sourceName : `${payload.sourceName} LGU Prepositioned Site`,
-      destinationType: 'LGU',
-      destination: payload.destinationMunicipality,
-      destinationLguId: destLgu?.id,
-      status: 'Verified',
-      manifestHash: goodsWithId.manifestHash
-    }).catch(err => console.warn('createIncoming error:', err));
 
     backendApi.logActivity({
       action: 'LGU_REPLENISHED',

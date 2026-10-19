@@ -1144,7 +1144,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 }}
                 className="w-full mt-3 py-2 px-3 bg-blue-50 group-hover:bg-blue-600 text-blue-700 group-hover:text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
               >
-                <span>View Transactions &amp; Stock Ledger</span>
+                <span>View Transactions &amp; Stock Expiry</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1154,7 +1154,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-base font-bold text-gray-900">Municipal LGU Inventory &amp; Expiry Ledger</h3>
+              <h3 className="text-base font-bold text-gray-900">Municipal LGU Inventory &amp; Stock Status</h3>
               {showDescriptions && (
                 <p className="text-xs text-gray-500">Live buffer stock levels, storage capacities, and batch expiration countdowns</p>
               )}
@@ -1390,7 +1390,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                             type="button"
                             onClick={() => openDetailModal(lgu)}
                             className="p-1.5 hover:bg-blue-50 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
-                            title="View Transactions & Batch Expiry Ledger"
+                            title="View Transactions &amp; Stock Expiry"
                           >
                             <List className="w-3.5 h-3.5" />
                           </button>

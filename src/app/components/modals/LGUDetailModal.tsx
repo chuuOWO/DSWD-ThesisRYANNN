@@ -45,6 +45,7 @@ import {
   isNonFoodItem
 } from '../../lib/commodityClassification';
 import { LGUReportPdfModal } from './LGUReportPdfModal';
+import { getLguCategoryStock } from './ReplenishLguModal';
 
 export interface LGUTransaction {
   id: string;
@@ -437,6 +438,15 @@ export function LGUDetailModal({
           (m: any) => m.id === row.reference_manifest_id || m.manifest_number === row.reference_manifest_id
         );
         resolvedManifestNum = foundM?.manifest_number || '';
+        if (!resolvedManifestNum) {
+          const foundInc = incomingGoods.find(
+            (inc) => inc.id === row.reference_manifest_id || inc.manifestNumber === row.reference_manifest_id
+          );
+          resolvedManifestNum = foundInc?.manifestNumber || foundInc?.id || '';
+        }
+        if (!resolvedManifestNum && typeof row.reference_manifest_id === 'string' && row.reference_manifest_id.startsWith('RIS-')) {
+          resolvedManifestNum = row.reference_manifest_id;
+        }
       }
 
       let resolvedDrNum = '';
@@ -445,44 +455,57 @@ export function LGUDetailModal({
           (r) => r.id === row.reference_dr_id || r.drNumber === row.reference_dr_id
         );
         resolvedDrNum = foundDr?.drNumber || '';
+        if (!resolvedDrNum && typeof row.reference_dr_id === 'string' && row.reference_dr_id.startsWith('DR-')) {
+          resolvedDrNum = row.reference_dr_id;
+        }
       }
-
-      const refCode =
-        resolvedDrNum ||
-        resolvedManifestNum ||
-        row.reference_dr_id ||
-        row.reference_manifest_id ||
-        (row.id ? `LEDGER-${String(row.id).slice(0, 8).toUpperCase()}` : 'STOCK-AUDIT');
-
-      // Deduplicate if already present in list (either from outgoing releases, incoming goods, or previous entries)
-      const alreadyLogged = list.some((item) => {
-        if (row.reference_manifest_id) {
-          if (
-            item.referenceCode === row.reference_manifest_id ||
-            item.id.includes(row.reference_manifest_id) ||
-            (resolvedManifestNum && (item.referenceCode === resolvedManifestNum || item.id.includes(resolvedManifestNum)))
-          ) {
-            return true;
-          }
-        }
-        if (row.reference_dr_id) {
-          if (
-            item.referenceCode === row.reference_dr_id ||
-            item.id.includes(row.reference_dr_id) ||
-            (resolvedDrNum && (item.referenceCode === resolvedDrNum || item.id.includes(resolvedDrNum)))
-          ) {
-            return true;
-          }
-        }
-        return item.referenceCode === refCode || item.id.includes(refCode);
-      });
-      if (alreadyLogged) return;
 
       const delta = Number(row.delta_quantity) || 0;
       const isIncoming = delta >= 0;
+
+      let refCode = resolvedDrNum || resolvedManifestNum || '';
+      if (!refCode) {
+        if (row.reference_dr_id) {
+          const raw = String(row.reference_dr_id).trim();
+          refCode = raw.startsWith('DR-') ? raw : `DR-${raw.slice(0, 8).toUpperCase()}`;
+        } else if (row.reference_manifest_id) {
+          const raw = String(row.reference_manifest_id).trim();
+          refCode = raw.startsWith('RIS-') ? raw : `RIS-${raw.slice(0, 8).toUpperCase()}`;
+        } else {
+          const rawId = String(row.id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'SYS';
+          refCode = isIncoming ? `RIS-${rawId}` : `DR-${rawId}`;
+        }
+      }
+
       const kitName = (row.kit_types && typeof row.kit_types === 'object' && 'name' in row.kit_types)
         ? String((row.kit_types as any).name)
         : (row.kit_type_id || 'Relief Goods');
+      const canonicalKit = normalizeCategoryName(kitName);
+      const rowQty = Math.abs(delta);
+
+      // Deduplicate if already present in list (either from outgoing releases, incoming goods, or previous entries)
+      const alreadyLogged = list.some((item) => {
+        if (refCode && (item.referenceCode === refCode || item.id.includes(refCode))) return true;
+        if (resolvedManifestNum && (item.referenceCode === resolvedManifestNum || item.id.includes(resolvedManifestNum))) return true;
+        if (resolvedDrNum && (item.referenceCode === resolvedDrNum || item.id.includes(resolvedDrNum))) return true;
+        if (row.reference_manifest_id && (item.referenceCode === row.reference_manifest_id || item.id.includes(row.reference_manifest_id))) return true;
+        if (row.reference_dr_id && (item.referenceCode === row.reference_dr_id || item.id.includes(row.reference_dr_id))) return true;
+
+        if (
+          normalizeCategoryName(item.category) === canonicalKit &&
+          item.quantity === rowQty &&
+          ((isIncoming && item.type === 'Incoming') || (!isIncoming && item.type === 'Outgoing'))
+        ) {
+          if (row.created_at && item.date) {
+            const d1 = new Date(row.created_at).toISOString().split('T')[0];
+            const d2 = new Date(item.date).toISOString().split('T')[0];
+            if (d1 === d2) return true;
+          }
+          return true;
+        }
+        return false;
+      });
+      if (alreadyLogged) return;
 
       const mvType = String(row.movement_type || '').toUpperCase();
       let sourceName = `${lgu.municipality} LGU`;
@@ -506,18 +529,18 @@ export function LGUDetailModal({
       const exp = row.reference_dr_id ? expiryMap.get(String(row.reference_dr_id).toLowerCase().trim()) : null;
 
       list.push({
-        id: `DB-LEDGER-${row.id}`,
+        id: `DB-TX-${row.id}`,
         type: isIncoming ? 'Incoming' : 'Outgoing',
         flowLabel: ledgerFlowLabel,
         referenceCode: refCode,
-        category: normalizeCategoryName(kitName) || kitName,
-        quantity: Math.abs(delta),
+        category: canonicalKit || kitName,
+        quantity: rowQty,
         unit: 'kits',
         source: sourceName,
         destination: destName,
         date: row.created_at || '',
         status: 'Recorded',
-        deliveryMode: mvType ? mvType.replace(/_/g, ' ') : 'Database Ledger',
+        deliveryMode: mvType ? mvType.replace(/_/g, ' ') : (isIncoming ? 'Direct Intake' : 'Dispatch Release'),
         expirationDate: exp,
         daysRemaining: exp ? getDaysRemaining(exp) : undefined,
         expiryTier: exp ? getExpiryTier(exp) : undefined
@@ -527,7 +550,7 @@ export function LGUDetailModal({
     return list;
   }, [lgu, outgoingReleases, incomingGoods, dbLedgerEntries, dbManifests, expiryMap]);
 
-  // Aggregate individual inventory lots / batches received and prepositioned at this LGU
+  // Aggregate individual inventory lots / batches received and currently on-hand at this LGU
   const allLots = useMemo<LGUExpiryLot[]>(() => {
     if (!lgu) return [];
 
@@ -535,127 +558,220 @@ export function LGUDetailModal({
     const lguId = lgu.id;
     const lots: LGUExpiryLot[] = [];
 
-    // 1. Lots from incoming releases destined for this LGU
-    outgoingReleases.forEach((r) => {
-      if (!r) return;
-      const targetMuni = (r.municipality || '').trim().toLowerCase();
-      const targetName = (r.lguName || '').trim().toLowerCase();
-      const targetId = r.lguId;
-
-      const isMatch =
-        (targetId && targetId === lguId) ||
-        targetMuni === muniLower ||
-        (muniLower.length > 2 && targetName.includes(muniLower));
-
-      if (isMatch) {
-        let rawAllocs: any = r.allocatedBatches;
-        if (typeof rawAllocs === 'string') {
-          try {
-            rawAllocs = JSON.parse(rawAllocs);
-          } catch {}
-        }
-        if (!Array.isArray(rawAllocs)) rawAllocs = [];
-
-        if (rawAllocs.length > 0) {
-          rawAllocs.forEach((a: any, idx: number) => {
-            const exp = resolveExpirationDate(a) || '';
-            const token = a.batchTokenId || (a.batchNumber ? `BATCH-${a.batchNumber}` : `${r.drNumber}-LOT-${idx + 1}`);
-
-            lots.push({
-              id: `LOT-${r.drNumber || r.id}-${token}-${idx}`,
-              batchTokenId: token,
-              referenceCode: r.drNumber || r.id || 'N/A',
-              category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
-              quantity: Number(a.quantity) || Number(r.amountApproved) || 0,
-              unit: 'kits',
-              source: r.warehouseSource || 'Regional Hub',
-              destination: `${lgu.municipality} LGU`,
-              date: r.dateAllocated || r.dateRequested || '',
-              expirationDate: exp,
-              daysRemaining: getDaysRemaining(exp),
-              expiryTier: getExpiryTier(exp),
-              status: r.deliveryStatus || 'Pending',
-              deliveryMode: r.deliveryMode,
-              plateNumber: r.plateNumber || r.truckId
-            });
-          });
-        } else {
-          // Fallback single shipment lot if no specific batch breakdown
-          const exp = expiryMap.get(String(r.drNumber).toLowerCase().trim()) || '';
-          lots.push({
-            id: `LOT-${r.drNumber || r.id}`,
-            batchTokenId: r.drNumber || 'BATCH-SHIPMENT',
-            referenceCode: r.drNumber || r.id || 'N/A',
-            category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
-            quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
-            unit: 'kits',
-            source: r.warehouseSource || 'Regional Hub',
-            destination: `${lgu.municipality} LGU`,
-            date: r.dateAllocated || r.dateRequested || '',
-            expirationDate: exp,
-            daysRemaining: getDaysRemaining(exp),
-            expiryTier: getExpiryTier(exp),
-            status: r.deliveryStatus || 'Pending',
-            deliveryMode: r.deliveryMode,
-            plateNumber: r.plateNumber || r.truckId
-          });
-        }
+    // All possible commodity categories
+    const categories = [
+      'Family Food Pack',
+      'Ready-to-Eat Food (RTEF)',
+      'Hygiene Kit',
+      'Sleeping Kit',
+      'Kitchen Kit',
+      'Family Kit',
+      'Laminated Sacks'
+    ];
+    const stockMap = lgu.currentStock || {};
+    Object.keys(stockMap).forEach(cat => {
+      const canonical = normalizeCategoryName(cat) || cat.trim();
+      if (canonical && !categories.includes(canonical)) {
+        categories.push(canonical);
       }
     });
 
-    // 2. Lots from direct incoming goods entries
-    incomingGoods.forEach((inc) => {
-      if (!inc) return;
-      if (inc.destinationType === 'LGU') {
-        const dest = (inc.destination || '').trim().toLowerCase();
-        if (dest === muniLower || (muniLower.length > 2 && dest.includes(muniLower))) {
-          const exp = inc.expirationDate || '';
-          lots.push({
-            id: `LOT-INC-${inc.id}`,
-            batchTokenId: inc.batchTokenId || (inc.manifestNumber ? `BATCH-${inc.manifestNumber}` : inc.incidentCode || inc.id),
-            referenceCode: inc.manifestNumber || inc.incidentCode || inc.id,
-            category: normalizeCategoryName(inc.fnfiCategory) || inc.fnfiCategory || 'Relief Goods',
-            quantity: Number(inc.quantity) || 0,
-            unit: inc.unitType || 'packs',
-            source: inc.source || 'National Center',
-            destination: `${lgu.municipality} LGU`,
-            date: inc.dateReceived || '',
-            expirationDate: exp,
-            daysRemaining: getDaysRemaining(exp),
-            expiryTier: getExpiryTier(exp),
-            status: inc.status === 'Verified' ? 'Delivered' : inc.status,
-            deliveryMode: 'Direct Logistics'
-          });
-        }
-      }
-    });
+    // Reconcile each commodity category against real on-hand stock
+    categories.forEach((cat) => {
+      const canonicalCat = normalizeCategoryName(cat);
+      const onHandQty = getLguCategoryStock(lgu, cat);
+      if (onHandQty <= 0) return; // Zero stock on-hand, no active lots should appear
 
-    // 3. Batches directly recorded in inventory_batches for this LGU
-    dbBatches.forEach((b: any) => {
-      if (!b) return;
-      const bLguId = b.lgu_id || b.lguId;
-      if (bLguId && bLguId === lguId) {
-        const token = b.batch_token_id || b.batchTokenId;
-        const alreadyInList = lots.some((l) => l.batchTokenId === token);
-        if (!alreadyInList) {
+      // Collect candidate lots for this specific category and this LGU
+      const candidateLots: Array<{
+        batchTokenId: string;
+        referenceCode: string;
+        category: string;
+        quantity: number;
+        unit: string;
+        source: string;
+        destination: string;
+        date: string;
+        expirationDate: string;
+        daysRemaining?: number;
+        expiryTier?: ExpiryTier;
+        status: string;
+        deliveryMode?: string;
+        plateNumber?: string;
+      }> = [];
+
+      // 1. Batches directly recorded in inventory_batches for this LGU
+      dbBatches.forEach((b: any) => {
+        if (!b) return;
+        const bLguId = b.lgu_id || b.lguId;
+        const bMuni = (b.lgu_name || '').trim().toLowerCase();
+        const matchesLgu = (bLguId && bLguId === lguId) || (bMuni && bMuni === muniLower);
+        const matchesKit = normalizeCategoryName(b.kit_name || b.kit_type_id) === canonicalCat;
+        const batchRem = Number(b.remaining_quantity ?? b.initial_quantity ?? 0);
+        if (matchesLgu && matchesKit && batchRem > 0) {
           const exp = b.expiration_date || b.expirationDate || '';
-          lots.push({
-            id: `LOT-DB-${token || b.id}`,
-            batchTokenId: token || 'PREPOS-BATCH',
+          const token = b.batch_token_id || b.batchTokenId || 'PREPOS-BATCH';
+          candidateLots.push({
+            batchTokenId: token,
             referenceCode: b.incoming_manifest_id || b.incomingManifestId || 'Prepositioned Stock',
-            category: normalizeCategoryName(b.kit_name || b.kit_type_id) || 'Relief Goods',
-            quantity: Number(b.remaining_quantity || b.initial_quantity || 0),
+            category: canonicalCat,
+            quantity: batchRem,
             unit: 'kits',
             source: 'Local Prepositioned Buffer',
             destination: `${lgu.municipality} LGU`,
             date: b.minted_at || b.mintedAt || '',
             expirationDate: exp,
-            daysRemaining: getDaysRemaining(exp),
-            expiryTier: getExpiryTier(exp),
+            daysRemaining: exp ? getDaysRemaining(exp) : undefined,
+            expiryTier: exp ? getExpiryTier(exp) : undefined,
             status: 'In Stock',
             deliveryMode: 'Prepositioned'
           });
         }
+      });
+
+      // 2. Direct incoming intake receipts (e.g. RIS replenishments or intakes)
+      incomingGoods.forEach((inc) => {
+        if (!inc) return;
+        if (inc.destinationType === 'LGU') {
+          const dest = (inc.destination || '').trim().toLowerCase();
+          const matchesLgu = dest === muniLower || inc.destinationLguId === lguId || (muniLower.length > 2 && dest.includes(muniLower));
+          const matchesKit = normalizeCategoryName(inc.fnfiCategory) === canonicalCat;
+          const isValidStatus = inc.status === 'Verified' || inc.status === 'Delivered';
+          const incQty = Number(inc.quantity) || 0;
+          if (matchesLgu && matchesKit && isValidStatus && incQty > 0) {
+            const exp = inc.expirationDate || '';
+            const refCode = inc.manifestNumber || inc.incidentCode || inc.id;
+            const token = inc.batchTokenId || (refCode ? `BATCH-${refCode}` : 'BATCH-INTAKE');
+            if (!candidateLots.some(c => c.batchTokenId === token || c.referenceCode === refCode)) {
+              candidateLots.push({
+                batchTokenId: token,
+                referenceCode: refCode,
+                category: canonicalCat,
+                quantity: incQty,
+                unit: inc.unitType || 'packs',
+                source: inc.source || 'Regional Warehouse',
+                destination: `${lgu.municipality} LGU`,
+                date: inc.dateReceived || '',
+                expirationDate: exp,
+                daysRemaining: exp ? getDaysRemaining(exp) : undefined,
+                expiryTier: exp ? getExpiryTier(exp) : undefined,
+                status: 'In Stock',
+                deliveryMode: 'Direct Intake'
+              });
+            }
+          }
+        }
+      });
+
+      // 3. Delivered outbound releases from warehouses to this LGU
+      outgoingReleases.forEach((r) => {
+        if (!r) return;
+        const targetMuni = (r.municipality || '').trim().toLowerCase();
+        const targetName = (r.lguName || '').trim().toLowerCase();
+        const targetId = r.lguId;
+        const matchesLgu = (targetId && targetId === lguId) || targetMuni === muniLower || (muniLower.length > 2 && targetName.includes(muniLower));
+        const matchesKit = normalizeCategoryName(r.fnfiCategory) === canonicalCat;
+        const isDelivered = r.deliveryStatus === 'Delivered' || r.deliveryStatus === 'Accepted';
+        if (matchesLgu && matchesKit && isDelivered) {
+          let rawAllocs: any = r.allocatedBatches;
+          if (typeof rawAllocs === 'string') {
+            try { rawAllocs = JSON.parse(rawAllocs); } catch {}
+          }
+          if (Array.isArray(rawAllocs) && rawAllocs.length > 0) {
+            rawAllocs.forEach((a: any, idx: number) => {
+              const exp = resolveExpirationDate(a) || '';
+              const token = a.batchTokenId || (a.batchNumber ? `BATCH-${a.batchNumber}` : `${r.drNumber}-LOT-${idx + 1}`);
+              if (!candidateLots.some(c => c.batchTokenId === token)) {
+                candidateLots.push({
+                  batchTokenId: token,
+                  referenceCode: r.drNumber || r.id || 'N/A',
+                  category: canonicalCat,
+                  quantity: Number(a.quantity) || 0,
+                  unit: 'kits',
+                  source: r.warehouseSource || 'Regional Hub',
+                  destination: `${lgu.municipality} LGU`,
+                  date: r.dateAllocated || r.dateRequested || '',
+                  expirationDate: exp,
+                  daysRemaining: exp ? getDaysRemaining(exp) : undefined,
+                  expiryTier: exp ? getExpiryTier(exp) : undefined,
+                  status: 'In Stock',
+                  deliveryMode: r.deliveryMode,
+                  plateNumber: r.plateNumber || r.truckId
+                });
+              }
+            });
+          } else {
+            const exp = expiryMap.get(String(r.drNumber).toLowerCase().trim()) || '';
+            const token = r.drNumber ? `BATCH-${r.drNumber}` : 'BATCH-SHIPMENT';
+            if (!candidateLots.some(c => c.batchTokenId === token || c.referenceCode === r.drNumber)) {
+              candidateLots.push({
+                batchTokenId: token,
+                referenceCode: r.drNumber || r.id || 'N/A',
+                category: canonicalCat,
+                quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
+                unit: 'kits',
+                source: r.warehouseSource || 'Regional Hub',
+                destination: `${lgu.municipality} LGU`,
+                date: r.dateAllocated || r.dateRequested || '',
+                expirationDate: exp,
+                daysRemaining: exp ? getDaysRemaining(exp) : undefined,
+                expiryTier: exp ? getExpiryTier(exp) : undefined,
+                status: 'In Stock',
+                deliveryMode: r.deliveryMode,
+                plateNumber: r.plateNumber || r.truckId
+              });
+            }
+          }
+        }
+      });
+
+      // Sort candidate lots by FEFO (earliest expiry first), or latest date
+      candidateLots.sort((a, b) => {
+        if (a.expirationDate && b.expirationDate) {
+          return new Date(a.expirationDate).getTime() - new Date(b.expirationDate).getTime();
+        }
+        if (a.expirationDate) return -1;
+        if (b.expirationDate) return 1;
+        return (b.date || '').localeCompare(a.date || '');
+      });
+
+      // Allocate candidate lots up to the exact on-hand stock
+      let needed = onHandQty;
+      for (const cand of candidateLots) {
+        if (needed <= 0) break;
+        const lotQty = Math.min(needed, cand.quantity);
+        if (lotQty > 0) {
+          lots.push({
+            id: `LOT-${lgu.id}-${cand.batchTokenId}-${lots.length}`,
+            ...cand,
+            quantity: lotQty,
+            status: 'In Stock'
+          });
+          needed -= lotQty;
+        }
+      }
+
+      // If still needed (e.g. baseline buffer from report without specific batch receipt)
+      if (needed > 0) {
+        const cleanMuni = (lgu.municipality || 'LGU').toUpperCase().replace(/[^A-Z0-9]/g, '-');
+        const now = new Date();
+        const defaultExp = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        lots.push({
+          id: `LOT-PREPOS-${lgu.id}-${cat.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+          batchTokenId: `LOT-${cleanMuni}-01`,
+          referenceCode: 'Prepositioned Stock',
+          category: canonicalCat,
+          quantity: needed,
+          unit: 'kits',
+          source: 'Local Prepositioned Site',
+          destination: `${lgu.municipality} LGU`,
+          date: lgu.lastReportedAt ? new Date(lgu.lastReportedAt).toISOString().split('T')[0] : now.toISOString().split('T')[0],
+          expirationDate: defaultExp,
+          daysRemaining: getDaysRemaining(defaultExp),
+          expiryTier: getExpiryTier(defaultExp),
+          status: 'In Stock',
+          deliveryMode: 'Prepositioned'
+        });
       }
     });
 
@@ -1111,7 +1227,7 @@ export function LGUDetailModal({
               type="button"
               onClick={onClose}
               className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
-              title="Close ledger"
+              title="Close window"
               aria-label="Close"
             >
               <X className="w-6 h-6" />
@@ -2069,7 +2185,7 @@ export function LGUDetailModal({
         {/* Modal Footer */}
         <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between flex-shrink-0">
           <p className="text-xs text-gray-500">
-            DSWD Disaster Relief Supply Chain Ledger &bull; {lgu.municipality}, {lgu.province}
+            DSWD Disaster Relief Operations &bull; {lgu.municipality}, {lgu.province}
           </p>
           <div className="flex items-center gap-2">
             <button

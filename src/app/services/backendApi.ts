@@ -517,11 +517,11 @@ export const backendApi = {
   async resolveWarehouseId(nameOrId?: string | null): Promise<string | null> {
     if (isUuid(nameOrId)) return nameOrId!;
     const target = (nameOrId || '').toLowerCase().trim();
+    if (!target) return null;
     const { data } = await supabase.from('warehouses').select('id, name');
     if (data && data.length > 0) {
       const match = data.find(w => w.name.toLowerCase() === target || target.includes(w.name.toLowerCase()) || w.name.toLowerCase().includes(target));
       if (match) return match.id;
-      return data[0].id;
     }
     return null;
   },
@@ -529,6 +529,7 @@ export const backendApi = {
   async resolveLguId(municipalityOrId?: string | null): Promise<string | null> {
     if (isUuid(municipalityOrId)) return municipalityOrId!;
     const target = (municipalityOrId || '').toLowerCase().trim();
+    if (!target) return null;
     const { data } = await supabase.from('lgus').select('id, municipality, lgu_name');
     if (data && data.length > 0) {
       const match = data.find(l =>
@@ -537,7 +538,6 @@ export const backendApi = {
         target.includes(l.municipality.toLowerCase())
       );
       if (match) return match.id;
-      return data[0].id;
     }
     return null;
   },
@@ -545,6 +545,7 @@ export const backendApi = {
   async resolveKitTypeId(nameOrId?: string | null): Promise<string | null> {
     if (isUuid(nameOrId)) return nameOrId!;
     const target = (nameOrId || '').toLowerCase().trim();
+    if (!target) return null;
     const canonical = normalizeCategoryName(target).toLowerCase();
     const { data } = await supabase.from('kit_types').select('id, name');
     if (data && data.length > 0) {
@@ -559,7 +560,6 @@ export const backendApi = {
                canonical.includes(kCanonical);
       });
       if (match) return match.id;
-      return data[0].id;
     }
     return null;
   },
@@ -3298,10 +3298,10 @@ export const backendApi = {
       const rawMovement = String(entry.movementType || '');
       if (rawMovement === 'INTAKE_VERIFIED' || rawMovement === 'RELEASE_DISPATCHED' || rawMovement === 'AID_RECEIVED' || rawMovement === 'MUTUAL_AID_OUT' || rawMovement === 'AUDIT_CORRECTION') {
         movementType = rawMovement;
-      } else if (rawMovement === 'LGU_RECEIVED') {
+      } else if (rawMovement === 'LGU_RECEIVED' || rawMovement === 'TRANSFER_IN') {
         movementType = 'AID_RECEIVED';
-      } else if (rawMovement === 'CUSTODY_TRANSFER') {
-        movementType = 'RELEASE_DISPATCHED';
+      } else if (rawMovement === 'CUSTODY_TRANSFER' || rawMovement === 'TRANSFER_OUT') {
+        movementType = 'MUTUAL_AID_OUT';
       } else {
         movementType = 'AUDIT_CORRECTION';
       }
@@ -3313,7 +3313,7 @@ export const backendApi = {
       if (isUuid(entry.referenceManifestId)) {
         refManifestId = entry.referenceManifestId;
       } else if (entry.referenceManifestId || entry.manifestNumber) {
-        const mNum = entry.referenceManifestId || entry.manifestNumber;
+        const mNum = entry.manifestNumber || entry.referenceManifestId;
         const { data: mRow } = await supabase.from('incoming_manifests').select('id').ilike('manifest_number', String(mNum).trim()).maybeSingle();
         refManifestId = mRow?.id || null;
       }
