@@ -706,7 +706,7 @@ function RouteMap({
                     {isPrimary ? 'Primary Destination (Active Route)' : 'Assigned Destination'}
                   </p>
                   <p className="text-sm font-semibold text-gray-900 mt-0.5">{pkg.destination}</p>
-                  <p className="text-xs font-mono text-gray-600 mt-0.5">DR #{pkg.drNumber} &bull; {pkg.quantity} {pkg.category}</p>
+                  <p className="text-xs font-mono text-gray-600 mt-0.5">INC #{pkg.drNumber} &bull; {pkg.quantity} {pkg.category}</p>
                   <p className="text-[10px] text-gray-400 mt-1">{pkg.coords[0].toFixed(6)}, {pkg.coords[1].toFixed(6)}</p>
                 </div>
               </Popup>
@@ -1300,7 +1300,7 @@ export function TruckTracking({
                               }`}>
                                 {pkg.isHeld ? 'HELD' : `#${idx + 1}`}
                               </span>
-                              <span className="font-bold text-[#2500ba]">DR #{pkg.drNumber}</span>
+                              <span className="font-bold text-[#2500ba]">INC #{pkg.drNumber}</span>
                               {isActiveRoute && (
                                 <span className="text-[9px] bg-red-600 text-white px-1.5 py-0.2 rounded font-bold uppercase tracking-wider animate-pulse">
                                   Active Route

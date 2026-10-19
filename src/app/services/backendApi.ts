@@ -2211,8 +2211,15 @@ export const backendApi = {
       effectiveIncident = await this.ensureIncidentExists(parsed);
     }
 
+    const rawOutgoingCode = (payload.drNumber || '').trim().toUpperCase();
+    const finalOutgoingCode = rawOutgoingCode.startsWith('INC-')
+      ? rawOutgoingCode
+      : (rawOutgoingCode.startsWith('DR-')
+        ? `INC-${rawOutgoingCode.slice(3)}`
+        : (rawOutgoingCode ? `INC-${rawOutgoingCode}` : await this.generateNextDrNumber()));
+
     const insertPayload: Record<string, any> = {
-      dr_number: payload.drNumber,
+      dr_number: finalOutgoingCode,
       date_allocated: payload.dateAllocated || new Date().toISOString().split('T')[0],
       source_type: isSourceWh ? 'Warehouse' : 'LGU',
       source_warehouse_id: srcWhId || null,
@@ -2516,7 +2523,7 @@ export const backendApi = {
 
       let maxIndex = (data as { value?: number } | null)?.value ?? 0;
 
-      // 2. Scan highest existing DR in outgoing_requests table
+      // 2. Scan highest existing Outgoing code in outgoing_requests table
       try {
         const { data: outReqs } = await supabase
           .from('outgoing_requests')
@@ -2524,7 +2531,7 @@ export const backendApi = {
 
         if (outReqs) {
           for (const req of outReqs) {
-            const match = req.dr_number?.match(/DR-\d{4}-(\d+)/i);
+            const match = req.dr_number?.match(/(?:DR|INC)-\d{4}-(\d+)/i);
             if (match) {
               const num = parseInt(match[1], 10);
               if (!isNaN(num) && num > maxIndex) {
@@ -2534,7 +2541,7 @@ export const backendApi = {
           }
         }
       } catch (dbErr) {
-        console.warn('Outgoing requests DR scan warning:', dbErr);
+        console.warn('Outgoing requests code scan warning:', dbErr);
       }
 
       // 3. Scan highest existing handover on Sepolia smart contract
@@ -2561,7 +2568,11 @@ export const backendApi = {
     const nextIdx = await this.getNextDrIndex();
     const year = new Date().getFullYear();
     const safeIdx = nextIdx && nextIdx > 0 ? nextIdx : 1;
-    return `DR-${year}-${String(safeIdx).padStart(3, '0')}`;
+    return `INC-${year}-${String(safeIdx).padStart(3, '0')}`;
+  },
+
+  async generateNextIncNumber(): Promise<string> {
+    return this.generateNextDrNumber();
   },
 
   async markHandoverAccepted(drNumber: string, receiverGps: string, txHash?: string) {

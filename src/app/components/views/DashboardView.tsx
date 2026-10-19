@@ -1918,7 +1918,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     type="text"
                     value={historySearch}
                     onChange={(e) => { setHistorySearch(e.target.value); setHistoryPage(1); }}
-                    placeholder="Search DR #, LGU municipality, disaster, incident code, or warehouse..."
+                    placeholder="Search INC #, LGU municipality, disaster, incident code, or warehouse..."
                     className="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
                   />
                   {historySearch && (

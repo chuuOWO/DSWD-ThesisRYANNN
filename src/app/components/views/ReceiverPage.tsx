@@ -1755,7 +1755,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
     const resolvedContractId = custody.matchingRelease?.handover_contract_id ||
       payload.handoverContractId ||
-      (payload.drNumber.toUpperCase().startsWith('DR-') ? `HANDOVER-${payload.drNumber.toUpperCase()}` : `HANDOVER-DR-${payload.drNumber}`);
+      (payload.drNumber.toUpperCase().startsWith('HANDOVER-') ? payload.drNumber.toUpperCase() : `HANDOVER-${payload.drNumber.toUpperCase()}`);
 
     const cleanDr = payload.drNumber.replace(/[^a-zA-Z0-9]/g, '');
     let finalBatchTokenIds = (payload.batchTokenIds && payload.batchTokenIds.length > 0)
@@ -2255,7 +2255,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             Drop-Off Geofence ({GEOFENCE_RADIUS_METERS}m)
                           </p>
                           <p className="text-xs font-bold text-gray-900 mt-0.5">{pkgDest.name}</p>
-                          <p className="text-[10px] font-mono text-gray-500 mt-0.5">DR #{pkgDest.drNumber}</p>
+                          <p className="text-[10px] font-mono text-gray-500 mt-0.5">INC #{pkgDest.drNumber}</p>
                           <p className="text-[9.5px] font-bold mt-1 text-blue-700">
                             {dist !== null
                               ? (isInside ? `Inside Zone (${Math.round(dist)}m to pin)` : `Distance: ${Math.round(dist)}m`)
@@ -2267,7 +2267,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
                     <Marker
                       position={pkgDest.position}
-                      icon={createDestinationPinIcon(isSelected ? 'LGU DESTINATION' : `DR #${pkgDest.drNumber}`, isSelected)}
+                      icon={createDestinationPinIcon(isSelected ? 'LGU DESTINATION' : `INC #${pkgDest.drNumber}`, isSelected)}
                     >
                       <Popup>
                         <div className="text-center font-sans p-1">
@@ -2275,7 +2275,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                             {isSelected ? 'Active Destination (Navigating)' : 'Assigned Drop-off'}
                           </p>
                           <p className="text-xs font-bold text-gray-900 mt-0.5">{pkgDest.name}</p>
-                          <p className="text-[10px] font-mono text-gray-500 mt-0.5">DR #{pkgDest.drNumber} • {pkgDest.quantity} {pkgDest.category}</p>
+                          <p className="text-[10px] font-mono text-gray-500 mt-0.5">INC #{pkgDest.drNumber} • {pkgDest.quantity} {pkgDest.category}</p>
                           <p className="text-[10px] text-gray-500 mt-1">{pkgDest.position[0].toFixed(6)}, {pkgDest.position[1].toFixed(6)}</p>
                           <p className="text-[9px] text-emerald-600 font-semibold mt-0.5">Verified Drop-off Facility</p>
                           {!isSelected && (
@@ -2454,7 +2454,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-bold text-[#2500ba] text-[10.5px]">DR #{pkg.drNumber}</span>
+                            <span className="font-bold text-[#2500ba] text-[10.5px]">INC #{pkg.drNumber}</span>
                             {isInsideThis ? (
                               <span className="rounded bg-emerald-600 text-white px-1.5 py-0.5 text-[8px] font-extrabold uppercase">
                                 In Drop-Off Geofence

@@ -1694,7 +1694,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
   const addOutgoingRelease = (newRelease: Omit<OutgoingRelease, 'drNumber' | 'allocatedBatches' | 'auditTrail'> & { allocatedBatches?: BatchAllocation[] }) => {
     const maxKnownIndex = outgoingReleasesList.reduce((max, release) => {
-      const match = release.drNumber.match(/DR-\d{4}-(\d+)/i);
+      const match = release.drNumber.match(/(?:DR|INC)-\d{4}-(\d+)/i);
       if (!match) return max;
       const value = Number.parseInt(match[1], 10);
       return Number.isFinite(value) ? Math.max(max, value) : max;
@@ -1702,7 +1702,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     // On-chain safe floor: Handovers 1, 2, 3, 4 already exist on Sepolia testnet
     const nextIndex = Math.max(maxKnownIndex, 4) + 1;
     const year = new Date().getFullYear();
-    const newDR = `DR-${year}-${String(nextIndex).padStart(3, '0')}`;
+    const newIncCode = `INC-${year}-${String(nextIndex).padStart(3, '0')}`;
     backendApi.getNextDrIndex().catch(() => {});
     const status: OutgoingStatus = newRelease.deliveryStatus === 'Released' ? 'Approved' : (newRelease.deliveryStatus || 'Allocating');
     const matchedLgu = lgusList.find(l =>
@@ -1718,7 +1718,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       ...newRelease,
       lguId: resolvedLguId,
       deliveryStatus: status,
-      drNumber: newDR,
+      drNumber: newIncCode,
       amountApproved: status === 'Draft' || status === 'Allocating' ? 0 : newRelease.amountApproved,
       allocatedBatches: initialBatches,
       auditTrail: [audit('Release Draft Created', 'Outgoing request saved before blockchain custody transfer.')]
@@ -1729,7 +1729,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       ...newRelease,
       lguId: resolvedLguId,
       destinationLguId: resolvedLguId,
-      drNumber: newDR,
+      drNumber: newIncCode,
       amountApproved: newRelease.amountApproved,
       deliveryStatus: status,
       allocatedBatches: initialBatches,
@@ -1754,15 +1754,15 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     backendApi.logActivity({
       action: 'RELEASE_CREATED',
       entityType: 'OutgoingRelease',
-      entityId: newDR,
+      entityId: newIncCode,
       actorId: currentActor.id,
       actorName: currentActor.name,
       actorEmail: currentActor.email,
       actorRole: currentActor.role,
       actorWallet: currentActor.wallet,
-      details: `Created outgoing release request ${newDR} for ${newRelease.lguName} (${newRelease.amountRequested} units of ${newRelease.fnfiCategory} via ${newRelease.deliveryMode}).`,
+      details: `Created outgoing release request ${newIncCode} for ${newRelease.lguName} (${newRelease.amountRequested} units of ${newRelease.fnfiCategory} via ${newRelease.deliveryMode}).`,
       metadata: {
-        drNumber: newDR,
+        drNumber: newIncCode,
         lguName: newRelease.lguName,
         municipality: newRelease.municipality,
         province: newRelease.province,
@@ -2074,7 +2074,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     const senderGps = targetWarehouse
       ? `${targetWarehouse.latitude.toFixed(5)}, ${targetWarehouse.longitude.toFixed(5)}`
       : '10.6975, 122.4764'; // Authoritative Oton main warehouse origin coordinate
-    const handoverContractId = `HANDOVER-${drNumber.replace('DR-', '')}`;
+    const handoverContractId = release.handoverContractId || (drNumber.startsWith('HANDOVER-') ? drNumber : `HANDOVER-${drNumber}`);
     let proof;
 
     try {

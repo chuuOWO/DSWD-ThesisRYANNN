@@ -275,7 +275,7 @@ export function QrCodeGeneratorModal({
         {/* Outgoing Release Selection */}
         <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <label className="block text-xs font-bold text-gray-700">
-            Select Outgoing Release DR
+            Select Outgoing Release (INC Code)
           </label>
           {releases.length === 0 ? (
             <p className="text-xs text-amber-600">No outgoing releases found. Please create and approve an outgoing release first.</p>

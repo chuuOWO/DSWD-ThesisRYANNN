@@ -53,6 +53,12 @@ export function formatOutgoingReference(
     return `INC-${upper}`;
   }
 
+  const rawDr = releaseOrCode.drNumber;
+  if (rawDr && rawDr.trim()) {
+    const cleanDr = rawDr.trim().toUpperCase();
+    if (cleanDr.startsWith('INC-')) return cleanDr;
+  }
+
   const rawIncident = releaseOrCode.incidentCode;
   if (rawIncident && rawIncident.trim()) {
     const parsed = parseIncidentInfo(rawIncident).incidentCode || rawIncident;
@@ -64,10 +70,8 @@ export function formatOutgoingReference(
     }
   }
 
-  const rawDr = releaseOrCode.drNumber;
   if (rawDr && rawDr.trim()) {
     const cleanDr = rawDr.trim().toUpperCase();
-    if (cleanDr.startsWith('INC-')) return cleanDr;
     if (cleanDr.startsWith('DR-')) return `INC-${cleanDr.slice(3)}`;
     return `INC-${cleanDr}`;
   }

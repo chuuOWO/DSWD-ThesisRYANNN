@@ -931,15 +931,16 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         }
         rawTo = parsed.to || '';
       } catch {
-        if (rawPayload.trim().toUpperCase().startsWith('DR-')) {
-          drNumber = rawPayload.trim().toUpperCase();
+        const upperPayload = rawPayload.trim().toUpperCase();
+        if (upperPayload.startsWith('INC-') || upperPayload.startsWith('DR-')) {
+          drNumber = upperPayload;
         } else {
           throw new Error('Invalid QR payload format. Please scan a valid shipment QR code.');
         }
       }
 
       if (!drNumber) {
-        throw new Error('QR payload is missing a valid DR Number.');
+        throw new Error('QR payload is missing a valid INC Code.');
       }
 
       // Find matching release in the system (from props or active upcoming)
@@ -1403,7 +1404,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                       <div className="text-center font-sans p-1">
                         <p className="text-[10px] font-bold text-emerald-700 uppercase">Drop-Off Geofence Zone ({GEOFENCE_RADIUS_METERS}m)</p>
                         <p className="text-xs font-bold text-gray-900 mt-0.5">{release.destinationAddress || release.municipality || effectiveLguName}</p>
-                        <p className="text-[10px] text-gray-500 font-mono">DR #{release.drNumber}</p>
+                        <p className="text-[10px] text-gray-500 font-mono">INC #{release.drNumber}</p>
                       </div>
                     </Popup>
                   </Circle>
@@ -1963,7 +1964,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                       type="text"
                       value={inventorySearchQuery}
                       onChange={(e) => setInventorySearchQuery(e.target.value)}
-                      placeholder="Search batch token, commodity, or DR number..."
+                      placeholder="Search batch token, commodity, or INC code..."
                       className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#2500ba] focus:border-[#2500ba]"
                     />
                     {inventorySearchQuery && (
@@ -2053,7 +2054,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                               <span>Exp: {lot.expirationDate}</span>
                             </span>
                             <span className="truncate text-[9px] text-gray-400">
-                              {lot.drNumber ? `DR: ${lot.drNumber}` : lot.source || 'Local Stock'}
+                              {lot.drNumber ? (lot.drNumber.startsWith('DR-') ? `DR: ${lot.drNumber}` : `INC: ${lot.drNumber}`) : lot.source || 'Local Stock'}
                             </span>
                           </div>
                         </div>
