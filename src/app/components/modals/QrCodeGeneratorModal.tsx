@@ -11,6 +11,7 @@ import {
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
 import type { LguRecord } from '../../services/backendApi';
 import { findMatchingLgu } from '../../lib/lguMatching';
+import { formatOutgoingReference } from '../../lib/referenceCodeHelper';
 
 interface QrCodeGeneratorModalProps {
   releases?: OutgoingRelease[];
@@ -80,7 +81,8 @@ export function QrCodeGeneratorModal({
     }
     const qty = rawQty;
 
-    const cleanDr = currentRelease.drNumber.replace(/[^a-zA-Z0-9]/g, '');
+    const canonicalIncCode = formatOutgoingReference(currentRelease);
+    const cleanCode = canonicalIncCode.replace(/[^a-zA-Z0-9]/g, '');
     let batchIds: string[];
     let batchQtys: number[];
 
@@ -112,11 +114,11 @@ export function QrCodeGeneratorModal({
           batchQtys[batchQtys.length - 1] += remaining;
         }
       } else {
-        batchIds = [`BATCH-${cleanDr}`];
+        batchIds = [`BATCH-${cleanCode}`];
         batchQtys = [qty];
       }
     } else {
-      batchIds = [`BATCH-${cleanDr}`];
+      batchIds = [`BATCH-${cleanCode}`];
       batchQtys = [qty];
     }
     let releaseCoords: [number, number] | undefined = undefined;
@@ -138,11 +140,11 @@ export function QrCodeGeneratorModal({
     }
     
     return {
-      drNumber: currentRelease.drNumber,
-      handoverContractId: currentRelease.handoverContractId || `HANDOVER-${currentRelease.drNumber}`,
+      drNumber: canonicalIncCode,
+      handoverContractId: currentRelease.handoverContractId || `HANDOVER-${canonicalIncCode}`,
       category: currentRelease.fnfiCategory || 'Food Pack',
       quantity: qty,
-      batchTokenIds: batchIds.length > 0 ? batchIds : [`BATCH-${currentRelease.drNumber}`],
+      batchTokenIds: batchIds.length > 0 ? batchIds : [`BATCH-${canonicalIncCode}`],
       batchQuantities: batchQtys.length > 0 ? batchQtys : [qty],
       from: currentRelease.warehouseSource || 'DSWD Oton Main Warehouse',
       to: currentRelease.destinationAddress || currentRelease.lguName || 'Assigned LGU',
@@ -152,7 +154,7 @@ export function QrCodeGeneratorModal({
         network: 'Sepolia Testnet (Chain ID 11155111)',
         contractAddress: (import.meta as any).env?.VITE_HANDOVER_CONTRACT_ADDRESS || (import.meta as any).env?.VITE_RELIEF_TRACKER_CONTRACT_ADDRESS || '',
         tokenStandard: 'ERC-1155 Multi-Token Relief Handover',
-        merkleRootHash: `0x${Array.from(currentRelease.drNumber + qty).reduce((acc, char) => acc + char.charCodeAt(0).toString(16), '').padEnd(64, 'a').slice(0, 64)}`,
+        merkleRootHash: `0x${Array.from(canonicalIncCode + qty).reduce((acc, char) => acc + char.charCodeAt(0).toString(16), '').padEnd(64, 'a').slice(0, 64)}`,
         txHash: currentRelease.blockchainTxHash || null
       }
     };
@@ -236,7 +238,7 @@ export function QrCodeGeneratorModal({
               <div class="affix-sub">Attach this official manifest voucher directly to relief goods cargo or pallet for field handover verification</div>
             </div>
             <h1>DSWD Relief Goods Manifest</h1>
-            <h2>Delivery Receipt: ${payload.drNumber}</h2>
+            <h2>Allocation Reference: ${payload.drNumber}</h2>
             <div class="qr-wrapper">
               <img src="${qrDataUrl}" alt="QR Code" />
             </div>
@@ -297,7 +299,7 @@ export function QrCodeGeneratorModal({
           >
             {releases.map((r) => (
               <option key={r.drNumber} value={r.drNumber}>
-                {r.drNumber} — {r.lguName} ({r.amountApproved || r.amountRequested} {r.fnfiCategory})
+                {formatOutgoingReference(r)} — {r.lguName} ({r.amountApproved || r.amountRequested} {r.fnfiCategory})
               </option>
             ))}
           </select>
@@ -307,7 +309,7 @@ export function QrCodeGeneratorModal({
       {/* Release Identifier & Key Details */}
       <div className="w-full text-center">
         <h3 className="text-lg font-black text-gray-900 tracking-tight">
-          {payload?.drNumber || currentRelease?.drNumber || 'No Release Selected'}
+          {payload?.drNumber || (currentRelease ? formatOutgoingReference(currentRelease) : 'No Release Selected')}
         </h3>
         {payload ? (
           <p className="text-xs text-gray-600 mt-0.5">

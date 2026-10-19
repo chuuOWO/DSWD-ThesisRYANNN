@@ -92,3 +92,19 @@ export function formatReplenishReference(rawCode?: string | null): string {
   return clean ? `DR-${clean}` : 'DR-N/A';
 }
 
+export function formatShipmentReference(
+  releaseOrCode?: { incidentCode?: string | null; drNumber?: string | null } | string | null
+): string {
+  if (!releaseOrCode) return 'INC-N/A';
+  if (typeof releaseOrCode === 'string') {
+    if (isReplenishCode(releaseOrCode)) {
+      return formatReplenishReference(releaseOrCode);
+    }
+    return formatOutgoingReference(releaseOrCode);
+  }
+  if (releaseOrCode.drNumber && isReplenishCode(releaseOrCode.drNumber)) {
+    return formatReplenishReference(releaseOrCode.drNumber);
+  }
+  return formatOutgoingReference(releaseOrCode);
+}
+

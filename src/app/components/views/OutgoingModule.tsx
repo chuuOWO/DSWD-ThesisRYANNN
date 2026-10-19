@@ -241,7 +241,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       destinationLguId: updatedRelease.destinationLguId
     });
     setEditingRelease(null);
-    const releaseDisplayCode = parseIncidentInfo(editingRelease.incidentCode).incidentCode || editingRelease.incidentCode || editingRelease.drNumber;
+    const releaseDisplayCode = parseIncidentInfo(editingRelease.incidentCode).incidentCode || editingRelease.incidentCode || formatOutgoingReference(editingRelease);
     showResult(`Release request ${releaseDisplayCode} updated successfully.`);
   };
 
@@ -591,13 +591,13 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         return (a.drNumber || '').localeCompare(b.drNumber || '');
       }
       if (sortOrder === 'dr_asc') {
-        const codeA = parseIncidentInfo(a.incidentCode).incidentCode || a.incidentCode || a.drNumber || '';
-        const codeB = parseIncidentInfo(b.incidentCode).incidentCode || b.incidentCode || b.drNumber || '';
+        const codeA = parseIncidentInfo(a.incidentCode).incidentCode || a.incidentCode || formatOutgoingReference(a) || '';
+        const codeB = parseIncidentInfo(b.incidentCode).incidentCode || b.incidentCode || formatOutgoingReference(b) || '';
         return codeA.localeCompare(codeB);
       }
       if (sortOrder === 'dr_desc') {
-        const codeA = parseIncidentInfo(a.incidentCode).incidentCode || a.incidentCode || a.drNumber || '';
-        const codeB = parseIncidentInfo(b.incidentCode).incidentCode || b.incidentCode || b.drNumber || '';
+        const codeA = parseIncidentInfo(a.incidentCode).incidentCode || a.incidentCode || formatOutgoingReference(a) || '';
+        const codeB = parseIncidentInfo(b.incidentCode).incidentCode || b.incidentCode || formatOutgoingReference(b) || '';
         return codeB.localeCompare(codeA);
       }
       if (sortOrder === 'qty_desc') {
@@ -787,7 +787,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                         setQrModalRelease(release);
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition shadow-xs cursor-pointer border border-blue-200/60"
-                      title="View & Print Delivery Receipt QR Code"
+                      title="View & Print Incident Allocation QR Code"
                     >
                       <QrCode className="w-3.5 h-3.5" />
                       <span>QR Code</span>
@@ -1622,9 +1622,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       const incCode = incInfo?.incidentCode || rel?.incidentCode;
                       return (
                         <>
-                          <p className="text-sm font-bold text-gray-900">{incCode || report.drNumber || 'Unknown Release'}</p>
+                          <p className="text-sm font-bold text-gray-900">{incCode || formatOutgoingReference(rel || report.drNumber)}</p>
                           {report.drNumber && (
-                            <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{report.drNumber}</p>
+                            <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{formatOutgoingReference(rel || report.drNumber)}</p>
                           )}
                         </>
                       );
@@ -1717,11 +1717,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     <span className="text-gray-600">Incident Code:</span>
                     {(() => {
                       const incidentInfo = parseIncidentInfo(selectedRelease.incidentCode);
-                      const displayCode = incidentInfo.incidentCode || selectedRelease.incidentCode || selectedRelease.drNumber;
+                      const displayCode = incidentInfo.incidentCode || selectedRelease.incidentCode || formatOutgoingReference(selectedRelease);
                       return (
                         <>
                           <p className="font-bold text-blue-600">{displayCode}</p>
-                          <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{selectedRelease.drNumber}</p>
+                          <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{formatOutgoingReference(selectedRelease)}</p>
                         </>
                       );
                     })()}
@@ -1807,8 +1807,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                 </h2>
                 {actionModal.release && (
                   <p className="text-sm text-gray-500 mt-1">
-                    {parseIncidentInfo(actionModal.release.incidentCode).incidentCode || actionModal.release.incidentCode || actionModal.release.drNumber}
-                    <span className="text-[11px] text-gray-400 ml-1.5 font-mono">(Inv Ref: #{actionModal.release.drNumber})</span> | {actionModal.release.lguName}
+                    {parseIncidentInfo(actionModal.release.incidentCode).incidentCode || actionModal.release.incidentCode || formatOutgoingReference(actionModal.release)}
+                    <span className="text-[11px] text-gray-400 ml-1.5 font-mono">(Inv Ref: #{formatOutgoingReference(actionModal.release)})</span> | {actionModal.release.lguName}
                   </p>
                 )}
               </div>
@@ -1911,9 +1911,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               <p className="text-sm text-gray-700">
                 Are you sure you want to cancel outgoing release{' '}
                 <strong className="font-semibold text-gray-900">
-                  {parseIncidentInfo(cancellingRelease.incidentCode).incidentCode || cancellingRelease.incidentCode || cancellingRelease.drNumber}
+                  {parseIncidentInfo(cancellingRelease.incidentCode).incidentCode || cancellingRelease.incidentCode || formatOutgoingReference(cancellingRelease)}
                 </strong>{' '}
-                <span className="text-xs text-gray-400 font-mono">(Inv Ref: #{cancellingRelease.drNumber})</span>?
+                <span className="text-xs text-gray-400 font-mono">(Inv Ref: #{formatOutgoingReference(cancellingRelease)})</span>?
               </p>
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1">
                 <p className="font-bold">What will happen:</p>

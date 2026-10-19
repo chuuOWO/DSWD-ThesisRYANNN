@@ -34,6 +34,7 @@ import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { MobileSettingsModal } from '../modals/MobileSettingsModal';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import { formatUserErrorMessage } from '../../lib/errorUtils';
+import { formatShipmentReference, formatOutgoingReference, isReplenishCode, formatReplenishReference } from '../../lib/referenceCodeHelper';
 
 interface LGUReceiverPageProps {
   profile: UserProfile;
@@ -944,7 +945,12 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       }
 
       // Find matching release in the system (from props or active upcoming)
-      const matchingRelease = releases.find((r) => r.drNumber.toUpperCase() === drNumber.toUpperCase()) || (currentRelease?.drNumber.toUpperCase() === drNumber.toUpperCase() ? currentRelease : null);
+      const cleanUpper = drNumber.toUpperCase();
+      const altUpper = cleanUpper.startsWith('INC-') ? `DR-${cleanUpper.slice(4)}` : (cleanUpper.startsWith('DR-') ? `INC-${cleanUpper.slice(3)}` : cleanUpper);
+      const matchingRelease = releases.find((r) => {
+        const rUpper = r.drNumber.toUpperCase();
+        return rUpper === cleanUpper || rUpper === altUpper;
+      }) || ((currentRelease && (currentRelease.drNumber.toUpperCase() === cleanUpper || currentRelease.drNumber.toUpperCase() === altUpper)) ? currentRelease : null);
       const canonicalDrNumber = (matchingRelease?.drNumber || drNumber).trim();
 
       if (matchingRelease) {
@@ -1192,7 +1198,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       console.error('Acceptance execution failed:', err);
       setToastMessage({
         type: 'error',
-        text: formatUserErrorMessage(err, 'Failed to complete delivery receipt verification.')
+        text: formatUserErrorMessage(err, 'Failed to complete receipt verification.')
       });
     } finally {
       setIsVerificationSubmitting(false);
@@ -1205,7 +1211,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       {/* Comfy 5-Dot Loading Modal */}
       <FiveDotsLoadingModal
         isOpen={isProcessing}
-        title="Processing Delivery Receipt"
+        title="Processing Receipt Verification"
         subtitle={`Updating ${effectiveLguName || 'LGU'} warehouse inventory in Supabase...`}
       />
 
@@ -2054,7 +2060,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                               <span>Exp: {lot.expirationDate}</span>
                             </span>
                             <span className="truncate text-[9px] text-gray-400">
-                              {lot.drNumber ? (lot.drNumber.startsWith('DR-') ? `DR: ${lot.drNumber}` : `INC: ${lot.drNumber}`) : lot.source || 'Local Stock'}
+                              {lot.drNumber ? formatShipmentReference(lot.drNumber) : lot.source || 'Local Stock'}
                             </span>
                           </div>
                         </div>
@@ -2408,7 +2414,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 <ShieldCheck size={28} />
               </div>
               <div>
-                <h3 className="text-base font-extrabold text-gray-900">Delivery Receipt Confirmed!</h3>
+                <h3 className="text-base font-extrabold text-gray-900">Shipment Intake Confirmed!</h3>
                 <p className="text-xs text-gray-500 mt-1">
                   Physical handover verified with digital audit record.
                 </p>
@@ -2416,7 +2422,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-left text-xs space-y-1">
                 <div className="flex justify-between">
                   <span className="text-gray-500 font-semibold">Shipment:</span>
-                  <span className="font-mono font-bold text-gray-900">{confirmedDeliveryReceipt.drNumber}</span>
+                  <span className="font-mono font-bold text-gray-900">{formatShipmentReference(confirmedDeliveryReceipt.drNumber)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500 font-semibold">Verified Units:</span>

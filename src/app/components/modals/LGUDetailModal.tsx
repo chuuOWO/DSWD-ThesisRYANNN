@@ -517,13 +517,12 @@ export function LGUDetailModal({
 
       let resolvedDrNum = '';
       if (row.reference_dr_id) {
+        const cleanDr = String(row.reference_dr_id).trim();
+        const altDr = cleanDr.startsWith('INC-') ? `DR-${cleanDr.slice(4)}` : (cleanDr.startsWith('DR-') ? `INC-${cleanDr.slice(3)}` : cleanDr);
         const foundDr = effectiveOutgoingReleases.find(
-          (r) => r.id === row.reference_dr_id || r.drNumber === row.reference_dr_id
+          (r) => r.id === row.reference_dr_id || r.drNumber === cleanDr || r.drNumber === altDr
         );
-        resolvedDrNum = foundDr?.drNumber || '';
-        if (!resolvedDrNum && typeof row.reference_dr_id === 'string' && row.reference_dr_id.startsWith('DR-')) {
-          resolvedDrNum = row.reference_dr_id;
-        }
+        resolvedDrNum = foundDr ? formatOutgoingReference(foundDr) : (cleanDr.startsWith('INC-') || cleanDr.startsWith('DR-') ? cleanDr : `INC-${cleanDr}`);
       }
 
       const delta = Number(row.delta_quantity) || 0;
@@ -533,13 +532,13 @@ export function LGUDetailModal({
       if (!refCode) {
         if (row.reference_dr_id) {
           const raw = String(row.reference_dr_id).trim();
-          refCode = raw.startsWith('DR-') ? raw : `DR-${raw.slice(0, 8).toUpperCase()}`;
+          refCode = raw.startsWith('INC-') || raw.startsWith('DR-') ? raw : `INC-${raw.slice(0, 8).toUpperCase()}`;
         } else if (row.reference_manifest_id) {
           const raw = String(row.reference_manifest_id).trim();
           refCode = raw.startsWith('RIS-') ? raw : `RIS-${raw.slice(0, 8).toUpperCase()}`;
         } else {
           const rawId = String(row.id || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'SYS';
-          refCode = isIncoming ? `RIS-${rawId}` : `DR-${rawId}`;
+          refCode = isIncoming ? `RIS-${rawId}` : `INC-${rawId}`;
         }
       }
 

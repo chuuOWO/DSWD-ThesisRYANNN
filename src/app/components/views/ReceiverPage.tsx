@@ -212,11 +212,18 @@ const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPa
           } catch {}
         }
 
-        // Check for 'dr' or 'drNumber' param
-        const drParam = params.get('dr') || params.get('drNumber');
+        // Check for 'dr', 'drNumber', 'inc', or 'incNumber' param
+        const drParam = params.get('dr') || params.get('drNumber') || params.get('inc') || params.get('incNumber');
         if (drParam) {
-          const canonicalDr = drParam.toUpperCase().startsWith('DR-') ? drParam.toUpperCase() : `DR-${drParam.toUpperCase()}`;
-          const matchingRel = releases?.find((r) => r.dr_number.toUpperCase() === canonicalDr);
+          const cleanParam = drParam.trim().toUpperCase();
+          const canonicalDr = cleanParam.startsWith('INC-') || cleanParam.startsWith('DR-')
+            ? cleanParam
+            : `INC-${cleanParam}`;
+          const altDr = canonicalDr.startsWith('INC-') ? `DR-${canonicalDr.slice(4)}` : `INC-${canonicalDr.slice(3)}`;
+          const matchingRel = releases?.find((r) => {
+            const u = r.dr_number.toUpperCase();
+            return u === canonicalDr || u === altDr;
+          });
           const rawQty = params.get('qty');
           const parsedQty = rawQty && Number(rawQty) > 0 ? Number(rawQty) : (matchingRel?.amount_approved ?? matchingRel?.amount_requested);
           if (!parsedQty || isNaN(parsedQty) || parsedQty <= 0) {
@@ -1455,7 +1462,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
       const resolvedContractId = matchingRelease?.handover_contract_id ||
         payload.handoverContractId ||
-        (payload.drNumber.toUpperCase().startsWith('DR-') ? `HANDOVER-${payload.drNumber.toUpperCase()}` : `HANDOVER-DR-${payload.drNumber}`);
+        `HANDOVER-${payload.drNumber.toUpperCase()}`;
 
       const destinationText = matchingRelease?.destination_address || matchingRelease?.lgu_name || matchingRelease?.municipality || payload.to || 'Assigned LGU';
       const gpsString = `${nextLoc.latitude.toFixed(6)}, ${nextLoc.longitude.toFixed(6)}`;
@@ -3061,7 +3068,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               }
               subtitle={
                 signStage === 'mining'
-                  ? 'Verifying drop-off delivery receipt...'
+                  ? 'Verifying drop-off incident allocation...'
                   : signError
                   ? signError
                   : 'Submitting final delivery verification...'

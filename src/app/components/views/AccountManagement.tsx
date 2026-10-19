@@ -1998,7 +1998,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             <option value="APPROVE_RELEASE">Release Approved</option>
             <option value="SIGN_RELEASE">Custody Handover Signed</option>
             <option value="RELEASE_DISPATCHED">Dispatched In-Transit</option>
-            <option value="CONFIRM_RECEIPT">Delivery Receipt Confirmed</option>
+            <option value="CONFIRM_RECEIPT">Shipment Receipt Confirmed</option>
             <option value="CORRECTION_REQUESTED">Correction Requested</option>
             <option value="LGU_REPORT_SUBMITTED">LGU Inventory Report Submitted</option>
             <option value="STOCK_ADDED">Warehouse Stock Added</option>

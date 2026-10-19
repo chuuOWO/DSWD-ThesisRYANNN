@@ -11,7 +11,16 @@ import { evaluatePriorityIndicator } from '../lib/priorityLogic';
 import { normalizeCategoryName } from '../lib/lguSync';
 import { formatUserErrorMessage } from '../lib/errorUtils';
 import { parseIncidentInfo } from '../lib/incidentHelper';
+import { formatOutgoingReference } from '../lib/referenceCodeHelper';
 import { blockchain } from './blockchain';
+
+function getDrVariants(code: string): [string, string] {
+  const clean = code.trim();
+  const alt = clean.startsWith('INC-')
+    ? `DR-${clean.slice(4)}`
+    : (clean.startsWith('DR-') ? `INC-${clean.slice(3)}` : clean);
+  return [clean, alt];
+}
 
 export type IncomingRecordStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected' | 'Cancelled';
 
@@ -2284,10 +2293,16 @@ export const backendApi = {
       received_by_profile_id: isUuid(payload.receivedByProfileId) ? payload.receivedByProfileId : undefined
     });
 
-    const { error } = await supabase
+    const [cleanDr, altDr] = getDrVariants(drNumber);
+    const { data: matched } = await supabase
       .from('outgoing_requests')
-      .update(updates)
-      .ilike('dr_number', drNumber.trim());
+      .select('id')
+      .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
+      .maybeSingle();
+
+    const { error } = matched?.id
+      ? await supabase.from('outgoing_requests').update(updates).eq('id', matched.id)
+      : await supabase.from('outgoing_requests').update(updates).ilike('dr_number', cleanDr);
 
     throwIfError(error, 'Failed to update outgoing request');
     return { ok: true };
@@ -2295,11 +2310,11 @@ export const backendApi = {
 
   async cancelOutgoingRequest(drNumber: string): Promise<{ ok: boolean; message?: string }> {
     try {
-      const canonicalDr = drNumber.trim();
+      const [canonicalDr, altDr] = getDrVariants(drNumber);
       const { data: releaseRow, error: fetchErr } = await supabase
         .from('outgoing_requests')
         .select('*')
-        .ilike('dr_number', canonicalDr)
+        .or(`dr_number.eq.${canonicalDr},dr_number.eq.${altDr}`)
         .maybeSingle();
 
       if (fetchErr || !releaseRow) {
@@ -2314,7 +2329,7 @@ export const backendApi = {
       await supabase
         .from('outgoing_batch_allocations')
         .delete()
-        .eq('outgoing_request_id', releaseRow.dr_number);
+        .or(`outgoing_request_id.eq.${releaseRow.dr_number},outgoing_request_id.eq.${canonicalDr}`);
 
       // 2. Update outgoing_requests to Cancelled
       const { error: updateErr } = await supabase
@@ -2576,10 +2591,16 @@ export const backendApi = {
   },
 
   async markHandoverAccepted(drNumber: string, receiverGps: string, txHash?: string) {
-    const { error } = await supabase
+    const [cleanDr, altDr] = getDrVariants(drNumber);
+    const { data: matched } = await supabase
       .from('outgoing_requests')
-      .update({ delivery_status: 'Accepted', receiver_gps: receiverGps, tx_hash: txHash })
-      .eq('dr_number', drNumber);
+      .select('id')
+      .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
+      .maybeSingle();
+
+    const { error } = matched?.id
+      ? await supabase.from('outgoing_requests').update({ delivery_status: 'Accepted', receiver_gps: receiverGps, tx_hash: txHash }).eq('id', matched.id)
+      : await supabase.from('outgoing_requests').update({ delivery_status: 'Accepted', receiver_gps: receiverGps, tx_hash: txHash }).ilike('dr_number', cleanDr);
 
     throwIfError(error, 'Failed to mark handover as accepted');
     return { ok: true };
@@ -2604,11 +2625,16 @@ export const backendApi = {
     if (params.receiverSignature) updates.receiver_signature = params.receiverSignature;
     if (params.txHash) updates.tx_hash = params.txHash;
 
-    const cleanDr = params.drNumber.trim();
-    const { error: outError } = await supabase
+    const [cleanDr, altDr] = getDrVariants(params.drNumber);
+    const { data: matched } = await supabase
       .from('outgoing_requests')
-      .update(updates)
-      .ilike('dr_number', cleanDr);
+      .select('id')
+      .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
+      .maybeSingle();
+
+    const { error: outError } = matched?.id
+      ? await supabase.from('outgoing_requests').update(updates).eq('id', matched.id)
+      : await supabase.from('outgoing_requests').update(updates).ilike('dr_number', cleanDr);
 
     if (outError) {
       console.warn('Failed to update outgoing request on LGU receipt:', outError.message);
@@ -2635,7 +2661,10 @@ export const backendApi = {
 
     const { data, error } = await query;
     throwIfError(error, 'Unable to load receiver releases');
-    return (data ?? []) as ReceiverReleaseRecord[];
+    return (data ?? []).map((r) => ({
+      ...r,
+      dr_number: formatOutgoingReference({ incidentCode: r.incident_code, drNumber: r.dr_number })
+    })) as ReceiverReleaseRecord[];
   },
 
   async getEscortReleases(receiverOrEscortId?: string | null) {
@@ -2661,10 +2690,16 @@ export const backendApi = {
     if (deliveryStatus) {
       updates.delivery_status = deliveryStatus;
     }
-    let { error } = await supabase
+    const [cleanDr, altDr] = getDrVariants(drNumber);
+    const { data: matched } = await supabase
       .from('outgoing_requests')
-      .update(updates)
-      .eq('dr_number', drNumber);
+      .select('id')
+      .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
+      .maybeSingle();
+
+    let { error } = matched?.id
+      ? await supabase.from('outgoing_requests').update(updates).eq('id', matched.id)
+      : await supabase.from('outgoing_requests').update(updates).ilike('dr_number', cleanDr);
 
     if (error && (error.code === '42703' || error.message?.includes('assigned_driver_profile_id'))) {
       const fallbackUpdates: Record<string, unknown> = { assigned_truck_id: cleanTruck };
@@ -2789,11 +2824,11 @@ export const backendApi = {
 
   async markTruckLiveLocationDoneByDr(drNumber: string) {
     try {
-      const cleanDr = drNumber.trim();
+      const [cleanDr, altDr] = getDrVariants(drNumber);
       const { data } = await supabase
         .from('outgoing_requests')
         .select('assigned_truck_id')
-        .ilike('dr_number', cleanDr)
+        .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
         .maybeSingle();
 
       if (data?.assigned_truck_id) {

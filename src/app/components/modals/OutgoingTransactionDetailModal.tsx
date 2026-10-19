@@ -335,7 +335,7 @@ export function OutgoingTransactionDetailModal({
                   </div>
                   <div>
                     <span className="text-gray-500 block text-[11px]">Backend Inventory Ref:</span>
-                    <span className="font-mono font-semibold text-gray-700">#{release.drNumber}</span>
+                    <span className="font-mono font-semibold text-gray-700">#{formatOutgoingReference(release)}</span>
                   </div>
                   <div>
                     <span className="text-gray-500 block text-[11px]">Date Allocated:</span>
@@ -602,7 +602,7 @@ export function OutgoingTransactionDetailModal({
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">Contract Reference:</span>
                     <span className="font-mono font-bold text-gray-900">
-                      {release.handoverContractId || `DSWD-HA-${release.drNumber}`}
+                      {release.handoverContractId || `DSWD-HA-${formatOutgoingReference(release)}`}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -614,7 +614,7 @@ export function OutgoingTransactionDetailModal({
                 </div>
 
                 <div className="p-3.5 bg-gray-50 border border-gray-200 rounded-lg space-y-2">
-                  <span className="text-[11px] font-bold text-gray-700 uppercase">Delivery Receipt QR Manifest</span>
+                  <span className="text-[11px] font-bold text-gray-700 uppercase">Incident Dispatch QR Manifest</span>
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600">Cryptographic QR Order:</span>
                     <span className="font-semibold text-gray-800">
@@ -628,7 +628,7 @@ export function OutgoingTransactionDetailModal({
                       className="w-full mt-1.5 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-bold hover:bg-blue-100 transition cursor-pointer text-xs"
                     >
                       <QrCode className="w-3.5 h-3.5" />
-                      <span>Open Delivery QR Manifest</span>
+                      <span>Open Dispatch QR Manifest</span>
                     </button>
                   )}
                 </div>
@@ -751,7 +751,7 @@ export function OutgoingTransactionDetailModal({
           <div className="text-xs text-gray-500">
             <span>Viewing release record for </span>
             <strong className="text-gray-800">{displayCode}</strong>
-            <span className="text-gray-400 font-mono ml-1">(#{release.drNumber})</span>
+            <span className="text-gray-400 font-mono ml-1">(#{formatOutgoingReference(release)})</span>
           </div>
 
           <div className="flex items-center gap-2">

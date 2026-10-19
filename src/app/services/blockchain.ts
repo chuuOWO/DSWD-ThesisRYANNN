@@ -588,10 +588,12 @@ export const blockchain = {
       let targetRecipientWallet = input.signerWallet;
       if (!targetRecipientWallet || !ethers.isAddress(targetRecipientWallet)) {
         try {
+          const cleanDr = input.drNumber.trim();
+          const altDr = cleanDr.startsWith('INC-') ? `DR-${cleanDr.slice(4)}` : (cleanDr.startsWith('DR-') ? `INC-${cleanDr.slice(3)}` : cleanDr);
           const { data: outReq } = await supabase
             .from('outgoing_requests')
             .select('assigned_truck_id, wallet_address')
-            .ilike('dr_number', input.drNumber.trim())
+            .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
             .maybeSingle();
 
           if (outReq?.wallet_address && ethers.isAddress(outReq.wallet_address) && outReq.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
@@ -643,10 +645,12 @@ export const blockchain = {
       // If empty in input payload, resolve authentic allocated batches from database instead of generating artificial fallback
       if (rawBatchIds.length === 0) {
         try {
+          const cleanDr = input.drNumber.trim();
+          const altDr = cleanDr.startsWith('INC-') ? `DR-${cleanDr.slice(4)}` : (cleanDr.startsWith('DR-') ? `INC-${cleanDr.slice(3)}` : cleanDr);
           const { data: outReq } = await supabase
             .from('outgoing_requests')
             .select('allocated_batches, amount_approved, amount_requested')
-            .ilike('dr_number', input.drNumber.trim())
+            .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
             .maybeSingle();
 
           if (outReq?.allocated_batches && Array.isArray(outReq.allocated_batches)) {
@@ -858,10 +862,12 @@ export const blockchain = {
       let targetLguWallet = input.signerWallet;
       if (!targetLguWallet || !ethers.isAddress(targetLguWallet)) {
         try {
+          const cleanDr = input.drNumber.trim();
+          const altDr = cleanDr.startsWith('INC-') ? `DR-${cleanDr.slice(4)}` : (cleanDr.startsWith('DR-') ? `INC-${cleanDr.slice(3)}` : cleanDr);
           const freshReleases = await supabase
             .from('outgoing_requests')
             .select('lgu_name, municipality, destination_address, wallet_address')
-            .ilike('dr_number', input.drNumber.trim())
+            .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
             .maybeSingle();
 
           const candidates = [

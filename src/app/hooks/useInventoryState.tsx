@@ -28,6 +28,7 @@ import {
   DEFAULT_SUPPLY_SOURCES
 } from '../lib/lguMatching';
 import { parseIncidentInfo } from '../lib/incidentHelper';
+import { formatOutgoingReference } from '../lib/referenceCodeHelper';
 import { evaluatePriorityIndicator, type PriorityColor, type PriorityLevel } from '../lib/priorityLogic';
 import type { LguReplenishPayload } from '../components/modals/ReplenishLguModal';
 import { getLguCategoryStock } from '../components/modals/ReplenishLguModal';
@@ -94,6 +95,7 @@ export interface BatchAllocation {
 export interface OutgoingRelease {
   id?: string;
   drNumber: string;
+  rawDrNumber?: string;
   dateAllocated: string;
   dateRequested?: string;
   lguId?: string;
@@ -435,7 +437,8 @@ export const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => 
 
   return {
     id: row.id,
-    drNumber: row.dr_number ?? row.id,
+    drNumber: row.dr_number ? formatOutgoingReference({ incidentCode: row.incident_code, drNumber: row.dr_number }) : (row.id || 'INC-N/A'),
+    rawDrNumber: row.dr_number ?? undefined,
     dateAllocated: row.date_allocated ?? '',
     dateRequested: row.date_allocated ?? '',
     lguId: row.lgu_id ?? undefined,
