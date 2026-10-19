@@ -152,6 +152,7 @@ export const getWalletErrorMessage = (error: unknown, fallback = 'Blockchain req
 const batchTokenAbi = [
   'function mintBatchToken(string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination) returns (uint256)',
   'function getBatchByTokenId(string batchTokenId) view returns (tuple(uint256 batchId,string manifestNumber,string batchTokenId,string manifestHash,string category,uint256 quantity,string destination,address mintedBy,uint256 mintedAt))',
+  'function batchIdByTokenId(string batchTokenId) view returns (uint256)',
   'function currentBatchId() view returns (uint256)',
   'function isAuthorizedAdmin(address admin) view returns (bool)',
   'function setAdmin(address admin,bool authorized)',
@@ -439,23 +440,45 @@ export const blockchain = {
       }
 
       onStage?.('mining');
-      const tx = await contract.mintBatchToken(
-        input.manifestNumber,
-        input.batchTokenId,
-        input.manifestHash,
-        input.category,
-        BigInt(input.quantity),
-        input.destination
-      );
+      try {
+        const tx = await contract.mintBatchToken(
+          input.manifestNumber,
+          input.batchTokenId,
+          input.manifestHash,
+          input.category,
+          BigInt(input.quantity),
+          input.destination
+        );
 
-      onStage?.('mining', tx.hash);
-      const receipt = await tx.wait(1);
+        onStage?.('mining', tx.hash);
+        const receipt = await tx.wait(1);
 
-      return {
-        hash: receipt?.hash || tx.hash,
-        walletAddress,
-        mode: 'contract'
-      };
+        return {
+          hash: receipt?.hash || tx.hash,
+          walletAddress,
+          mode: 'contract'
+        };
+      } catch (mintErr: any) {
+        const errStr = String(mintErr?.message || mintErr?.reason || mintErr || '');
+        if (errStr.includes('Batch exists')) {
+          console.log(`[Blockchain] Batch token ${input.batchTokenId} is already minted on Sepolia. Reusing on-chain registration.`);
+          try {
+            const onChainId = await contract.batchIdByTokenId(input.batchTokenId);
+            return {
+              hash: `existing-batch-${onChainId?.toString() || Date.now()}`,
+              walletAddress,
+              mode: 'contract'
+            };
+          } catch {
+            return {
+              hash: `existing-batch-${input.batchTokenId}`,
+              walletAddress,
+              mode: 'contract'
+            };
+          }
+        }
+        throw mintErr;
+      }
     })();
 
     activeTxPromises.set(lockKey, task);
@@ -639,7 +662,7 @@ export const blockchain = {
       }
 
       if (rawBatchIds.length === 0) {
-        throw new Error(`No allocated inventory batches found for shipment ${effectiveDrNumber}. Allocate authentic FEFO batches before signing custody.`);
+        throw new Error(`No allocated inventory batches found for shipment ${effectiveDrNumber}. Allocate authentic inventory batches before signing custody.`);
       }
 
       const normalizedBatchTokenIds = rawBatchIds;

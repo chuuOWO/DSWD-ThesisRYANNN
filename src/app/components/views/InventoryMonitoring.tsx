@@ -38,6 +38,7 @@ import {
   getExpiryBadgeConfig,
   type ExpiryTier
 } from '../../lib/expiryConstants';
+import { useGuideMode } from '../../contexts/GuideContext';
 import { FefoLotsLedgerTable } from './FefoLotsLedgerTable';
 
 interface InventoryState {
@@ -69,6 +70,7 @@ interface InventoryItem {
 }
 
 export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryMonitoringProps) {
+  const { showDescriptions } = useGuideMode();
   const { incomingGoodsList, inventory, lguPriorityReports, outgoingReleasesList, lgusList = [], kitTypesList = [], warehousesList = [] } = inventoryState;
 
   // Primary facility scope filter: defaults to Main Warehouses (Oton & Pototan)
@@ -646,9 +648,11 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Regional Warehouses Inventory</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Centrally monitoring Oton and Pototan main hubs, stock balance, and prepositioned relief supplies
-          </p>
+          {showDescriptions && (
+            <p className="text-sm text-gray-600 mt-1">
+              Centrally monitoring Oton and Pototan main hubs, stock balance, and prepositioned relief supplies
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -933,7 +937,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
             }`}
           >
             <Clock className="w-4 h-4" />
-            <span>FEFO Expiring Lots Ledger</span>
+            <span>Batch Expiration Schedule</span>
             {fefoMetrics.criticalLots > 0 && (
               <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-600 text-white">
                 {fefoMetrics.criticalLots} Critical

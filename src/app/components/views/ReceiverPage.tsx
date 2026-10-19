@@ -1549,7 +1549,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setStep('dropoff_success');
     } catch (err: any) {
       console.error('Drop-off error:', err);
-      const msg = formatUserErrorMessage(err, 'Drop-off blockchain confirmation failed on Sepolia.');
+      const msg = formatUserErrorMessage(err, 'Drop-off verification receipt failed.');
       setSignError(msg);
     } finally {
       setIsSubmittingProof(false);
@@ -1959,7 +1959,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         entityType: 'outgoing_request',
         entityId: payload.drNumber,
         details: isHandover
-          ? `Relief Escort custody handover confirmed on Sepolia testnet for ${payload.drNumber}. Transferred from ${previousCarrierTruck || 'convoy'} to ${effectiveTruckId}.`
+          ? `Relief Escort custody handover confirmed for ${payload.drNumber}. Transferred from ${previousCarrierTruck || 'convoy'} to ${effectiveTruckId}.`
           : `Relief Escort custody confirmed for ${payload.drNumber}. Transferred to convoy vehicle ${effectiveTruckId} at GPS ${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}.`,
         metadata: {
           drNumber: payload.drNumber,
@@ -2021,13 +2021,13 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setPendingVerifyPayload({ ...payload, quantity: effectiveQty });
       setPendingCustody(null);
 
-      setHandoverToast(`On-chain custody confirmed on Sepolia for ${payload.drNumber}`);
+      setHandoverToast(`Custody handover verified for ${payload.drNumber}`);
       setTimeout(() => setHandoverToast(null), 7000);
 
       nav('success');
     } catch (err: any) {
       console.warn('Receiver sign custody error:', err);
-      const msg = formatUserErrorMessage(err, 'Blockchain transaction failed or reverted on Sepolia.');
+      const msg = formatUserErrorMessage(err, 'Handover transaction failed or reverted.');
       setSignError(msg);
     } finally {
       isExecutingCustodyRef.current = false;
@@ -2506,7 +2506,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 border border-purple-200 text-purple-700 text-[9px] font-mono font-bold hover:bg-purple-100 transition"
                               >
                                 <ShieldCheck size={10} className="text-purple-600" />
-                                <span>Sepolia ({hash.slice(0, 6)}...{hash.slice(-4)})</span>
+                                <span>Digital Record ({hash.slice(0, 6)}...{hash.slice(-4)})</span>
                                 <ExternalLink size={8} />
                               </a>
                             </div>
@@ -2611,15 +2611,15 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               isOpen={step === 'sign_custody'}
               title={
                 signStage === 'mining'
-                  ? 'Confirming on Blockchain...'
-                  : 'Signing Proof of Custody (Gasless)...'
+                  ? 'Confirming Verification...'
+                  : 'Recording Custody Verification...'
               }
               subtitle={
                 signStage === 'mining'
-                  ? 'Transaction broadcast! Waiting for Sepolia block confirmation...'
+                  ? 'Verifying transfer of custody record...'
                   : signError
                   ? signError
-                  : 'Broadcasting transaction via Sepolia Relayer...'
+                  : 'Submitting transfer verification...'
               }
               onRetry={isSubmittingProof ? undefined : () => void handleExecuteCustodySign()}
               onClose={() => {
@@ -2881,7 +2881,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                       className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
                     >
                       <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Sepolia: {confirmedTxHash.slice(0, 8)}...{confirmedTxHash.slice(-6)}</span>
+                      <span>Audit Record: {confirmedTxHash.slice(0, 8)}...{confirmedTxHash.slice(-6)}</span>
                       <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
                     </a>
                   </div>
@@ -3043,28 +3043,28 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
                   >
                     <Check size={14} />
-                    <span>Confirm Drop-Off & Sign Blockchain</span>
+                    <span>Confirm Drop-Off &amp; Sign Verification</span>
                   </button>
                 </div>
               </div>
             </Modal>
           )}
 
-          {/* 5-Dots Loading Modal during Blockchain Drop-Off execution */}
+          {/* 5-Dots Loading Modal during Drop-Off execution */}
           {step === 'sign_dropoff' && (
             <FiveDotsLoadingModal
               isOpen={step === 'sign_dropoff'}
               title={
                 signStage === 'mining'
-                  ? 'Confirming Drop-Off on Blockchain...'
-                  : 'Recording Drop-Off Proof (Gasless)...'
+                  ? 'Confirming Drop-Off Verification...'
+                  : 'Recording Drop-Off Verification...'
               }
               subtitle={
                 signStage === 'mining'
-                  ? 'Transaction broadcast! Waiting for Sepolia block confirmation...'
+                  ? 'Verifying drop-off delivery receipt...'
                   : signError
                   ? signError
-                  : 'Broadcasting final receipt via Sepolia Relayer...'
+                  : 'Submitting final delivery verification...'
               }
               onRetry={isSubmittingProof ? undefined : () => void handleExecuteDropOff()}
               onClose={() => {
@@ -3137,7 +3137,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                         className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
                       >
                         <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Sepolia: {dropOffTxHash.slice(0, 8)}...{dropOffTxHash.slice(-6)}</span>
+                        <span>Audit Record: {dropOffTxHash.slice(0, 8)}...{dropOffTxHash.slice(-6)}</span>
                         <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
                       </a>
                     ) : (
@@ -3236,7 +3236,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                 {profile?.walletAddress && (
                   <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 text-left space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9.5px] font-bold text-purple-900 uppercase tracking-wide">Sepolia Smart Account</span>
+                      <span className="text-[9.5px] font-bold text-purple-900 uppercase tracking-wide">Digital Verification Account</span>
                       <a
                         href={`https://sepolia.etherscan.io/address/${profile.walletAddress}#nfttransfers`}
                         target="_blank"

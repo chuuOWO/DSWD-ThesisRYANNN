@@ -17,6 +17,7 @@ import {
 } from '../../lib/commodityClassification';
 import { supabase } from '../../lib/supabase';
 import { getDaysRemaining } from '../../lib/expiryConstants';
+import { useGuideMode } from '../../contexts/GuideContext';
 
 export type LGUDelivery = SynchronizedLgu;
 
@@ -68,6 +69,7 @@ interface LGUMonitoringProps {
 }
 
 export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGUMonitoringProps) {
+  const { showDescriptions } = useGuideMode();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProvinceTab, setSelectedProvinceTab] = useState('All');
   const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
@@ -706,7 +708,9 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
+          {showDescriptions && (
+            <p className="text-sm text-gray-600 mt-1">Track FNFI distribution and live stock levels across Panay LGUs</p>
+          )}
         </div>
         {adminActionsEnabled && (
           <button
@@ -1148,8 +1152,10 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
         <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h3 className="text-base font-bold text-gray-900">Municipal LGU Inventory &amp; Aging Ledger</h3>
-              <p className="text-xs text-gray-500">Live buffer stock levels, storage capacities, and rolling FEFO expiration countdowns</p>
+              <h3 className="text-base font-bold text-gray-900">Municipal LGU Inventory &amp; Expiry Ledger</h3>
+              {showDescriptions && (
+                <p className="text-xs text-gray-500">Live buffer stock levels, storage capacities, and batch expiration countdowns</p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-gray-700 bg-gray-200/80 px-2.5 py-1 rounded-full">
@@ -1330,7 +1336,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                             type="button"
                             onClick={() => openDetailModal(lgu)}
                             className="font-semibold text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left group"
-                            title="Click to view detailed stock and FEFO expiry breakdown"
+                            title="Click to view detailed stock and batch expiration breakdown"
                           >
                             <p className="font-bold text-xs text-gray-900 group-hover:text-blue-600 transition-colors">
                               {lgu.lguName || `${lgu.municipality} Municipal Office`}
@@ -1382,7 +1388,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                             type="button"
                             onClick={() => openDetailModal(lgu)}
                             className="p-1.5 hover:bg-blue-50 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
-                            title="View Transactions & FEFO Expiry Ledger"
+                            title="View Transactions & Batch Expiry Ledger"
                           >
                             <List className="w-3.5 h-3.5" />
                           </button>

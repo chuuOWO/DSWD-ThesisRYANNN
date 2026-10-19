@@ -30,9 +30,11 @@ import {
   KeyRound,
   Eye,
   EyeOff,
-  Mail
+  Mail,
+  HelpCircle
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useGuideMode } from '../../contexts/GuideContext';
 import { authApi, type UserProfile } from '../../services/authApi';
 import { blockchain } from '../../services/blockchain';
 import { EmergencyStockCorrectionModal } from './EmergencyStockCorrectionModal';
@@ -71,6 +73,8 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const { refreshProfile, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+
+  const { showDescriptions, toggleDescriptions } = useGuideMode();
 
   // Administrative Actions State
   const [internalAdminActions, setInternalAdminActions] = useState<boolean>(() => {
@@ -1318,6 +1322,40 @@ export function SettingsModal({
                 <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
                   Admin
                 </span>
+              </div>
+
+              {/* Guidance & Instructions Mode Setting */}
+              <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/80 space-y-2">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#2500ba] flex items-center justify-center shrink-0 mt-0.5">
+                      <HelpCircle size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-900">Show Instructions & Explanatory Guides</h4>
+                      <p className="text-[11px] text-gray-500 mt-0.5">
+                        Displays descriptive guidance text and explanatory subtitles under charts, tables, and metric cards. Turn off for a clean, streamlined view.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleDescriptions}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#2500ba] ${
+                      showDescriptions ? 'bg-[#2500ba]' : 'bg-gray-300'
+                    }`}
+                    role="switch"
+                    aria-checked={showDescriptions}
+                    title="Toggle Instructions and Descriptions"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        showDescriptions ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Action Buttons */}

@@ -1,5 +1,7 @@
+import { HelpCircle } from 'lucide-react';
 import type { IncomingGoods, OutgoingRelease, UserRole } from '../../hooks/useInventoryState';
 import type { UserProfile } from '../../services/authApi';
+import { useGuideMode } from '../../contexts/GuideContext';
 import { NotificationDropdown } from './NotificationDropdown';
 
 interface HeaderProps {
@@ -33,6 +35,8 @@ export function Header({
   inventory = [],
   onNavigate
 }: HeaderProps) {
+  const { showDescriptions, toggleDescriptions } = useGuideMode();
+
   return (
     <div className="bg-blue-700 h-16 px-6 flex items-center justify-between shadow-sm select-none">
       <div className="flex items-center gap-3">
@@ -52,6 +56,21 @@ export function Header({
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Global Guide Instructions Toggle Pill */}
+        <button
+          type="button"
+          onClick={toggleDescriptions}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer border ${
+            showDescriptions
+              ? 'bg-amber-400 text-amber-950 border-amber-300 hover:bg-amber-300'
+              : 'bg-white/15 text-blue-100 hover:bg-white/25 border-white/20'
+          }`}
+          title="Toggle descriptive help notes and subtitles under charts and tables"
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
+          <span>Instructions: {showDescriptions ? 'ON' : 'OFF'}</span>
+        </button>
+
         {onNavigate && (
           <NotificationDropdown
             incomingGoodsList={incomingGoodsList}

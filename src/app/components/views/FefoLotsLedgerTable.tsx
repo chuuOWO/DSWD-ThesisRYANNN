@@ -24,6 +24,7 @@ import {
   getExpiryBadgeConfig,
   type ExpiryTier
 } from '../../lib/expiryConstants';
+import { useGuideMode } from '../../contexts/GuideContext';
 
 interface FefoLotsLedgerTableProps {
   allBatches: InventoryBatchRecord[];
@@ -46,6 +47,7 @@ export function FefoLotsLedgerTable({
   onRefreshBatches,
   initialUrgencyFilter = 'all'
 }: FefoLotsLedgerTableProps) {
+  const { showDescriptions } = useGuideMode();
   const [fefoSearchQuery, setFefoSearchQuery] = useState('');
   const [fefoUrgencyFilter, setFefoUrgencyFilter] = useState<'all' | 'critical' | 'moderate' | 'safe' | 'expired'>(
     initialUrgencyFilter
@@ -388,11 +390,13 @@ export function FefoLotsLedgerTable({
         <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
           <div>
             <h3 className="text-base font-bold text-gray-900">
-              FEFO Consumable Lots Ledger
+              Batch Expiration Schedule Ledger
             </h3>
-            <p className="text-xs text-gray-500">
-              Discrete intake batches sorted by earliest expiration date for prioritized FIFO/FEFO outflow
-            </p>
+            {showDescriptions && (
+              <p className="text-xs text-gray-500">
+                Consumable intake batches sorted by expiration date for prioritized dispatch and stock monitoring
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {onRefreshBatches && (

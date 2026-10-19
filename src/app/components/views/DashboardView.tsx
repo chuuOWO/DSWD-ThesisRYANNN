@@ -28,8 +28,10 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  HelpCircle,
   X
 } from 'lucide-react';
+import { useGuideMode } from '../../contexts/GuideContext';
 import {
   BarChart,
   Bar,
@@ -137,6 +139,8 @@ function DashboardSectionWrapper({
   onToggleCollapse,
   children
 }: DashboardSectionWrapperProps) {
+  const { showDescriptions } = useGuideMode();
+
   return (
     <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden transition-all">
       <div className="px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/70">
@@ -147,7 +151,7 @@ function DashboardSectionWrapper({
               <h3 className="text-base font-bold text-gray-900 truncate">{title}</h3>
               {badge}
             </div>
-            {subtitle && <p className="text-xs text-gray-500 truncate mt-0.5">{subtitle}</p>}
+            {showDescriptions && subtitle && <p className="text-xs text-gray-500 truncate mt-0.5">{subtitle}</p>}
           </div>
         </div>
 
@@ -225,6 +229,7 @@ const MONTH_NAMES = [
 ];
 
 export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefresh }: DashboardViewProps) {
+  const { showDescriptions, toggleDescriptions } = useGuideMode();
   const {
     inventory = [],
     incomingGoodsList = [],
@@ -916,26 +921,17 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
   // BOTTOM HISTORY LOG DATA: Requests, Allocated, and Releases
   const filteredHistory = useMemo(() => {
     return outgoingReleasesList.filter((r) => {
-      // 1. Tab filter
-      if (historyTab === 'requests') {
-        if (!r.amountRequested || r.amountRequested <= 0) return false;
-      } else if (historyTab === 'allocated') {
-        if (!['Allocating', 'Approved', 'Packed'].includes(r.deliveryStatus)) return false;
-      } else if (historyTab === 'released') {
-        if (!['Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'].includes(r.deliveryStatus)) return false;
-      }
-
-      // 2. Status filter
+      // 1. Status filter
       if (historyStatusFilter !== 'All') {
         if (r.deliveryStatus !== historyStatusFilter) return false;
       }
 
-      // 3. Commodity Group filter (Food Items vs Non-Food Items)
+      // 2. Commodity Group filter (Food Items vs Non-Food Items)
       if (commodityTypeFilter !== 'All') {
         if (!matchesCommodityFilter(r.fnfiCategory, commodityTypeFilter)) return false;
       }
 
-      // 4. Search query
+      // 3. Search query
       if (historySearch.trim()) {
         const query = historySearch.toLowerCase();
         const matched =
@@ -950,7 +946,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
 
       return true;
     });
-  }, [outgoingReleasesList, historyTab, historyStatusFilter, historySearch, commodityTypeFilter]);
+  }, [outgoingReleasesList, historyStatusFilter, historySearch, commodityTypeFilter]);
 
   const totalHistoryPages = Math.ceil(filteredHistory.length / historyPageSize) || 1;
   const paginatedHistory = useMemo(() => {
@@ -996,6 +992,55 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             onToggleCollapse={() => toggleCollapse(sectionId)}
           >
             <div className="space-y-4">
+              {/* Quick Commodity Scope Switcher (Food vs Non-Food Swapping) */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/90 p-3 rounded-xl border border-gray-200">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-800 uppercase tracking-wide">Commodity Scope:</span>
+                  <span className="text-[11px] text-gray-500 font-medium">
+                    {commodityTypeFilter === 'Food Items'
+                      ? 'Displaying Food Relief items only (Family Food Packs & RTEF)'
+                      : commodityTypeFilter === 'Non-Food Items'
+                      ? 'Displaying Non-Food items only (Hygiene, Sleeping, Kitchen & Family Kits)'
+                      : 'Displaying All Commodities (Combined Total)'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white p-1 rounded-lg border border-gray-200 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setCommodityTypeFilter('All')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+                      commodityTypeFilter === 'All'
+                        ? 'bg-[#2500ba] text-white shadow-xs font-extrabold'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                    }`}
+                  >
+                    All Commodities
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCommodityTypeFilter('Food Items')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      commodityTypeFilter === 'Food Items'
+                        ? 'bg-amber-500 text-white shadow-xs font-extrabold'
+                        : 'text-amber-800 bg-amber-50/60 hover:bg-amber-100 border border-amber-200'
+                    }`}
+                  >
+                    <span>Food Items</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCommodityTypeFilter('Non-Food Items')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                      commodityTypeFilter === 'Non-Food Items'
+                        ? 'bg-indigo-600 text-white shadow-xs font-extrabold'
+                        : 'text-indigo-800 bg-indigo-50/60 hover:bg-indigo-100 border border-indigo-200'
+                    }`}
+                  >
+                    <span>Non-Food Items</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Card 1: Warehouse Stock */}
                 <button
@@ -1236,9 +1281,11 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                       <BarChart3 className="w-4 h-4 text-[#2500ba]" />
                       <span>Goods Allocated by Disaster & Demand</span>
                     </h4>
-                    <p className="text-xs text-gray-500">
-                      {chartViewMode === 'disaster' ? 'Approved relief goods vs requested needs per calamity' : 'Allocation volume over time across Panay'}
-                    </p>
+                    {showDescriptions && (
+                      <p className="text-xs text-gray-500">
+                        {chartViewMode === 'disaster' ? 'Approved relief goods vs requested needs per calamity' : 'Allocation volume over time across Panay'}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-lg text-xs font-semibold">
                     <button
@@ -1318,7 +1365,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                       <Building2 className="w-4 h-4 text-purple-700" />
                       <span>Most Frequent LGUs Allocated</span>
                     </h4>
-                    <p className="text-xs text-gray-500">Top recipient municipalities by total relief volume and shipments</p>
+                    {showDescriptions && (
+                      <p className="text-xs text-gray-500">Top recipient municipalities by total relief volume and shipments</p>
+                    )}
                   </div>
                   <span className="text-[10px] font-bold text-purple-800 bg-purple-50 border border-purple-200 px-2.5 py-0.5 rounded-full">
                     Recipient Ranking
@@ -1366,7 +1415,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                       <Layers className="w-4 h-4 text-emerald-700" />
                       <span>Stock vs Demand / Shortage Analysis</span>
                     </h4>
-                    <p className="text-xs text-gray-500">Warehouse stock vs staged LGU on-hand vs requested demand</p>
+                    {showDescriptions && (
+                      <p className="text-xs text-gray-500">Warehouse stock vs staged LGU on-hand vs requested demand</p>
+                    )}
                   </div>
                   <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                     Supply Balance
@@ -1418,7 +1469,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                       <Clock className="w-4 h-4 text-orange-600" />
                       <span>Incoming Expirations & Shelf-Life Risk</span>
                     </h4>
-                    <p className="text-xs text-gray-500">Relief stock aging and nearest-to-expire batch monitoring</p>
+                    {showDescriptions && (
+                      <p className="text-xs text-gray-500">Relief stock aging and nearest-to-expire batch monitoring</p>
+                    )}
                   </div>
                   <span className="text-[10px] font-bold text-orange-800 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
                     Expiry Watch
@@ -1856,58 +1909,35 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             onToggleCollapse={() => toggleCollapse(sectionId)}
           >
             <div className="space-y-4">
-              {/* History Mode Tabs */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl text-xs font-semibold overflow-x-auto">
-                  <button
-                    type="button"
-                    onClick={() => { setHistoryTab('all'); setHistoryPage(1); }}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${historyTab === 'all' ? 'bg-white text-gray-900 font-bold shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
-                  >
-                    All Activity ({outgoingReleasesList.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setHistoryTab('requests'); setHistoryPage(1); }}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${historyTab === 'requests' ? 'bg-white text-blue-700 font-bold shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
-                  >
-                    Requests
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setHistoryTab('allocated'); setHistoryPage(1); }}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${historyTab === 'allocated' ? 'bg-white text-purple-700 font-bold shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
-                  >
-                    Allocated
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setHistoryTab('released'); setHistoryPage(1); }}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${historyTab === 'released' ? 'bg-white text-emerald-700 font-bold shadow-xs' : 'text-gray-600 hover:text-gray-900'}`}
-                  >
-                    Released & Delivered
-                  </button>
+              {/* Unified History Filter & Search */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-gray-50/70 p-3 rounded-xl border border-gray-200">
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={historySearch}
+                    onChange={(e) => { setHistorySearch(e.target.value); setHistoryPage(1); }}
+                    placeholder="Search DR #, LGU municipality, disaster, incident code, or warehouse..."
+                    className="w-full pl-9 pr-8 py-2 border border-gray-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
+                  />
+                  {historySearch && (
+                    <button
+                      type="button"
+                      onClick={() => { setHistorySearch(''); setHistoryPage(1); }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
-                {/* History Search & Status */}
-                <div className="flex flex-col sm:flex-row items-center gap-2">
-                  <div className="relative flex-1 w-full sm:w-64">
-                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={historySearch}
-                      onChange={(e) => { setHistorySearch(e.target.value); setHistoryPage(1); }}
-                      placeholder="Search DR, LGU, incident..."
-                      className="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-xl text-xs bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
-                    />
-                  </div>
-
+                <div className="flex items-center gap-2">
                   <select
                     value={historyStatusFilter}
                     onChange={(e) => { setHistoryStatusFilter(e.target.value); setHistoryPage(1); }}
-                    className="px-3 py-1.5 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba] w-full sm:w-auto"
+                    className="px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba] w-full sm:w-auto"
                   >
-                    <option value="All">All Statuses</option>
+                    <option value="All">All Operations ({outgoingReleasesList.length})</option>
                     <option value="Allocating">Allocating</option>
                     <option value="Approved">Approved</option>
                     <option value="Packed">Packed</option>
@@ -1917,6 +1947,21 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     <option value="Accepted">Accepted</option>
                     <option value="Distributed">Distributed</option>
                   </select>
+
+                  {(historyStatusFilter !== 'All' || historySearch.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryStatusFilter('All');
+                        setHistorySearch('');
+                        setHistoryPage(1);
+                      }}
+                      className="px-2.5 py-2 text-xs font-bold text-gray-600 hover:text-red-600 bg-white border border-gray-200 hover:border-red-200 rounded-xl transition cursor-pointer shrink-0"
+                      title="Reset filters"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2117,25 +2162,22 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
               <span className="text-xs font-bold uppercase tracking-wider text-blue-300 bg-blue-900/60 px-2.5 py-0.5 rounded border border-blue-700/50">
                 DSWD Field Office VI Logistics
               </span>
-              <span className="text-xs text-blue-200">
-                Integrated Operational Intelligence
-              </span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight">Relief Goods Logistics & Analytics Dashboard</h1>
-            <p className="text-xs md:text-sm text-blue-100/90 mt-1 max-w-2xl">
-              Real-time synchronization across Panay Island LGUs, Oton & Pototan main warehouses, disaster allocations, stock shortages, and GPS-verified deliveries.
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handleRefreshDashboard}
-              disabled={isRefreshing}
-              className="px-3.5 py-2 bg-slate-800/80 hover:bg-slate-700/80 text-white rounded-xl text-xs font-bold transition shadow-sm border border-slate-600/50 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              title="Refresh operational data and metrics"
+              onClick={toggleDescriptions}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm border flex items-center gap-1.5 cursor-pointer ${
+                showDescriptions
+                  ? 'bg-blue-600 text-white border-blue-400'
+                  : 'bg-slate-800/80 text-blue-200 hover:text-white border-slate-700/60'
+              }`}
+              title="Toggle instructions and explanatory descriptions"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
-              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Instructions: {showDescriptions ? 'ON' : 'OFF'}</span>
             </button>
             <button
               type="button"
@@ -2157,23 +2199,10 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
         </div>
       </div>
 
-      {/* Quick Layout & Refresh Toolbar */}
+      {/* Quick Layout Toolbar */}
       <div className="bg-white rounded-xl px-4 py-2.5 border border-gray-200 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleRefreshDashboard}
-            disabled={isRefreshing}
-            className="px-3 py-1.5 bg-[#2500ba] hover:bg-blue-800 text-white font-bold rounded-lg transition shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            title="Refresh all metrics and database tables"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span>{isRefreshing ? 'Refreshing...' : 'Refresh Dashboard'}</span>
-          </button>
-
-          <span className="text-[11px] text-gray-500 font-medium hidden sm:inline">
-            Last synced: {lastRefreshedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-gray-700">Display Layout</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -2551,7 +2580,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                   FOOD ITEMS ONLY
                 </h2>
                 <p className="text-xs text-amber-900 max-w-2xl mt-1 font-medium leading-relaxed">
-                  All warehouse inventory, LGU prepositioning buffers, stock-vs-demand projections, FEFO expiration lots, and delivery manifests are filtered exclusively to Food items.
+                  All warehouse inventory, LGU prepositioning buffers, stock-vs-demand projections, batch expiration tracking, and delivery manifests are filtered exclusively to Food items.
                 </p>
               </div>
             </div>
@@ -2621,7 +2650,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                   NON-FOOD ITEMS ONLY
                 </h2>
                 <p className="text-xs text-indigo-900 max-w-2xl mt-1 font-medium leading-relaxed">
-                  All warehouse inventory, LGU prepositioning buffers, stock-vs-demand projections, FEFO expiration lots, and delivery manifests are filtered exclusively to Non-Food items.
+                  All warehouse inventory, LGU prepositioning buffers, stock-vs-demand projections, batch expiration tracking, and delivery manifests are filtered exclusively to Non-Food items.
                 </p>
               </div>
             </div>

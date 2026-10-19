@@ -14,6 +14,7 @@ import {
   type CommodityTypeFilter,
   matchesCommodityFilter
 } from '../../lib/commodityClassification';
+import { useGuideMode } from '../../contexts/GuideContext';
 
 interface InventoryState {
   inventory: InventoryItem[];
@@ -70,6 +71,7 @@ interface ReleaseActionModalState {
 }
 
 export function OutgoingModule({ inventoryState, currentRole }: OutgoingModuleProps) {
+  const { showDescriptions } = useGuideMode();
   const {
     inventory,
     outgoingReleasesList,
@@ -260,7 +262,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       }
       setActionModal({ type: 'message', message: result.message });
     } catch (err) {
-      setActionModal({ type: 'message', message: err instanceof Error ? err.message : 'Approval and minting failed.' });
+      setActionModal({ type: 'message', message: err instanceof Error ? err.message : 'Release authorization failed.' });
     } finally {
       setIsApproving(false);
     }
@@ -1196,7 +1198,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
           >
             <option value="All">All Proof Statuses</option>
-            <option value="blockchain">Sepolia Blockchain Confirmed</option>
+            <option value="blockchain">Digital Audit Confirmed</option>
             <option value="gps">GPS Telemetry Verified</option>
             <option value="pending_gps">Pending GPS Telemetry</option>
           </select>
@@ -1285,9 +1287,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Outgoing Goods Release</h1>
-            <p className="text-sm text-green-100 mt-1">
-              Approve stock, release goods from the warehouse, and confirm LGU receipt with location details.
-            </p>
+            {showDescriptions && (
+              <p className="text-sm text-green-100 mt-1">
+                Approve stock, release goods from the warehouse, and confirm LGU receipt with location details.
+              </p>
+            )}
           </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <button
@@ -1359,9 +1363,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       {sortedAndFilteredReleases.length} {sortedAndFilteredReleases.length === 1 ? 'record' : 'records'}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Full transaction ledger with blockchain receipts, GPS telemetries, and batch manifest allocations
-                  </p>
+                  {showDescriptions && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Full transaction ledger with digital audit receipts, GPS tracking, and batch manifest allocations
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1768,7 +1774,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   placeholder="0"
                   className="w-full px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-lg"
                 />
-                <p className="text-xs text-gray-600 mt-1">Approval mints the on-chain batch token and records the Admin cryptographic signature.</p>
+                <p className="text-xs text-gray-600 mt-1">Approval confirms the digital release authorization and records the Admin verification.</p>
               </div>
             </div>
 
@@ -1791,7 +1797,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                 disabled={isApproving}
                 className="flex-1 px-6 py-3 bg-[#2500ba] text-white font-semibold rounded-lg hover:bg-blue-800 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
               >
-                {isApproving ? 'Authorizing & Minting...' : 'Approve & Mint Release'}
+                {isApproving ? 'Authorizing Release...' : 'Authorize Release'}
               </button>
             </div>
           </div>
@@ -1945,7 +1951,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1">
                 <p className="font-bold">What will happen:</p>
                 <ul className="list-disc list-inside space-y-0.5">
-                  <li>Allocated batch units (<span className="font-semibold">{cancellingRelease.amountRequested} {cancellingRelease.fnfiCategory || 'items'}</span>) will be restored to warehouse stock and FEFO batches.</li>
+                  <li>Allocated batch units (<span className="font-semibold">{cancellingRelease.amountRequested} {cancellingRelease.fnfiCategory || 'items'}</span>) will be restored to warehouse stock and batch inventory.</li>
                   <li>The release status will be changed to <span className="font-semibold text-red-800">Cancelled</span>.</li>
                   <li>Stock allocation records for this release will be removed.</li>
                 </ul>

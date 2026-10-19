@@ -1101,7 +1101,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       // Execute on-chain acceptance through inventory state
       const acceptResult = await onAccept(drNumber, 'LGUReceiver', finalMuni, receiverGpsString);
       if (!acceptResult.ok) {
-        throw new Error(acceptResult.message || 'Blockchain confirmation failed on Sepolia.');
+        throw new Error(acceptResult.message || 'Digital verification receipt failed.');
       }
 
       const receiptTxHash = (acceptResult as any)?.txHash || '';
@@ -1191,7 +1191,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       console.error('Acceptance execution failed:', err);
       setToastMessage({
         type: 'error',
-        text: formatUserErrorMessage(err, 'Failed to complete delivery receipt on Sepolia.')
+        text: formatUserErrorMessage(err, 'Failed to complete delivery receipt verification.')
       });
     } finally {
       setIsVerificationSubmitting(false);
@@ -1332,7 +1332,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-[11px] font-mono font-bold underline transition ml-1"
                 >
                   <ShieldCheck size={11} />
-                  <span>Sepolia ({toastMessage.txHash.slice(0, 6)}...{toastMessage.txHash.slice(-4)})</span>
+                  <span>Digital Audit ({toastMessage.txHash.slice(0, 6)}...{toastMessage.txHash.slice(-4)})</span>
                   <ExternalLink size={10} />
                 </a>
               )}
@@ -1554,7 +1554,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                 {profile?.walletAddress && (
                   <div className="p-2.5 rounded-xl bg-purple-50/70 border border-purple-200 text-left space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9.5px] font-bold text-purple-900 uppercase tracking-wide">Sepolia Smart Account</span>
+                      <span className="text-[9.5px] font-bold text-purple-900 uppercase tracking-wide">Digital Verification Account</span>
                       <a
                         href={`https://sepolia.etherscan.io/address/${profile.walletAddress}#nfttransfers`}
                         target="_blank"
@@ -1927,7 +1927,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   <div className="flex items-center gap-1.5">
                     <Clock size={14} className="text-[#2500ba]" />
                     <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
-                      FEFO Expiry & Batch Ledger
+                      Batch Expiry &amp; Stock Ledger
                     </h4>
                   </div>
                   <span className="text-[10px] text-gray-500 font-medium">
@@ -2068,7 +2068,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   Designated Municipality: <span className="text-[#2500ba] font-bold">{effectiveLguName || 'Not specified'}</span>
                 </p>
                 <p className="text-[11px] text-gray-500">
-                  Accepted incoming shipments automatically increment these live amounts. Follow FEFO (First-Expired, First-Out) protocols when distributing relief commodities to beneficiaries.
+                  Accepted incoming shipments automatically increment these live amounts. Prioritize releasing batches with the nearest expiration date when distributing relief goods to beneficiaries.
                 </p>
               </div>
 
@@ -2391,7 +2391,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50"
                   >
                     <CheckCircle2 size={14} />
-                    <span>Confirm Receipt & Sign Blockchain</span>
+                    <span>Confirm Receipt &amp; Sign Verification</span>
                   </button>
                 </div>
               </div>
@@ -2409,7 +2409,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               <div>
                 <h3 className="text-base font-extrabold text-gray-900">Delivery Receipt Confirmed!</h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Physical handover verified and anchored on Sepolia blockchain.
+                  Physical handover verified with digital audit record.
                 </p>
               </div>
               <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 text-left text-xs space-y-1">
@@ -2434,7 +2434,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                   className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-blue-50 border border-blue-200 text-[11px] font-mono text-[#2500ba] font-bold hover:bg-blue-100 transition"
                 >
                   <ShieldCheck size={14} className="text-[#2500ba]" />
-                  <span>Sepolia: {confirmedDeliveryReceipt.txHash.slice(0, 8)}...{confirmedDeliveryReceipt.txHash.slice(-6)}</span>
+                  <span>Audit Record: {confirmedDeliveryReceipt.txHash.slice(0, 8)}...{confirmedDeliveryReceipt.txHash.slice(-6)}</span>
                   <ExternalLink size={12} className="text-[#2500ba]" />
                 </a>
               )}

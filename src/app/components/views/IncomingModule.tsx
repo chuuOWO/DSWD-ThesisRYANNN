@@ -14,6 +14,7 @@ import {
   type CommodityTypeFilter,
   matchesCommodityFilter
 } from '../../lib/commodityClassification';
+import { useGuideMode } from '../../contexts/GuideContext';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
@@ -78,6 +79,7 @@ interface IncomingActionModalState {
 }
 
 export function IncomingModule({ inventoryState, currentRole }: IncomingModuleProps) {
+  const { showDescriptions } = useGuideMode();
   const {
     incomingGoodsList,
     inventoryBatchesList = [],
@@ -340,9 +342,11 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Incoming Goods Receiving</h1>
-            <p className="text-sm text-blue-100 mt-1">
-              Record deliveries, inspect physical shipments, and add verified supplies to warehouse inventory.
-            </p>
+            {showDescriptions && (
+              <p className="text-sm text-blue-100 mt-1">
+                Record deliveries, inspect physical shipments, and add verified supplies to warehouse inventory.
+              </p>
+            )}
           </div>
           <button
             onClick={() => setShowAddModal(true)}
@@ -649,8 +653,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <div className="flex items-center gap-2.5">
               <Clock className="w-5 h-5 text-indigo-600" />
               <div>
-                <h3 className="text-base font-bold text-gray-900">FEFO Expiration & Shelf-Life Watchlist</h3>
-                <p className="text-xs text-gray-500">First-Expired, First-Out operational tracking for incoming relief inventory</p>
+                <h3 className="text-base font-bold text-gray-900">Expiration Schedule &amp; Shelf-Life Watchlist</h3>
+                {showDescriptions && (
+                  <p className="text-xs text-gray-500">Operational expiration tracking and shelf-life monitoring for incoming relief inventory</p>
+                )}
               </div>
             </div>
             {fefoWatchlist.criticalCount > 0 ? (
@@ -743,7 +749,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             )}
 
             <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
-              <span>FEFO Protocol:</span>
+              <span>Expiration Protocol:</span>
               <span className="font-medium text-gray-700">Dispatch batches with shortest remaining shelf-life first.</span>
             </div>
           </div>
@@ -755,8 +761,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <div className="flex items-center gap-2.5">
               <FileCheck2 className="w-5 h-5 text-indigo-600" />
               <div>
-                <h3 className="text-base font-bold text-gray-900">Receiving Activity & Verification Pipeline</h3>
-                <p className="text-xs text-gray-500">Verification lifecycle status and recent delivery receipts</p>
+                <h3 className="text-base font-bold text-gray-900">Receiving Activity &amp; Verification Pipeline</h3>
+                {showDescriptions && (
+                  <p className="text-xs text-gray-500">Verification lifecycle status and recent delivery receipts</p>
+                )}
               </div>
             </div>
             <span className="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold border border-indigo-200">

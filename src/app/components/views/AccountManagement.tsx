@@ -45,6 +45,7 @@ import { blockchain } from '../../services/blockchain';
 import { findMatchingLgu, normalizeLguName } from '../../lib/lguMatching';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
+import { useGuideMode } from '../../contexts/GuideContext';
 
 /**
  * Resolves all releases currently in active custody/transit with a given receiver.
@@ -303,6 +304,7 @@ interface AccountManagementProps {
 }
 
 export function AccountManagement({ currentAdminEmail, releases: propsReleases, lgusList }: AccountManagementProps) {
+  const { showDescriptions } = useGuideMode();
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dbReleases, setDbReleases] = useState<OutgoingRelease[]>([]);
@@ -1238,22 +1240,24 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             ) : activeMainTab === 'logs' ? (
               <>
                 <Activity className="w-7 h-7 text-[#10069f]" />
-                System Activity Logs & Blockchain Audit Trail
+                System Activity Logs &amp; Verified Audit Trail
               </>
             ) : (
               <>
                 <History className="w-7 h-7 text-[#10069f]" />
-                User Activity Trails & Individual Account Audit
+                User Activity Trails &amp; Individual Account Audit
               </>
             )}
           </h1>
-          <p className="text-xs text-gray-600 mt-1">
-            {activeMainTab === 'directory'
-              ? 'Review personnel registrations, verify work credentials, and assign logistics roles across Panay Island.'
-              : activeMainTab === 'logs'
-              ? 'Tamper-evident audit trail capturing role assignments, token mints, delivery handovers, and master data changes with on-chain Ethereum Sepolia verification.'
-              : 'Granular chronological audit trail per account tracking user sign-ins, profile changes, dispatched goods, smart account bindings, and on-chain proofs.'}
-          </p>
+          {showDescriptions && (
+            <p className="text-xs text-gray-600 mt-1">
+              {activeMainTab === 'directory'
+                ? 'Review personnel registrations, verify work credentials, and assign logistics roles across Panay Island.'
+                : activeMainTab === 'logs'
+                ? 'Tamper-evident audit trail capturing role assignments, release authorizations, delivery handovers, and master data changes with digital audit verification.'
+                : 'Granular chronological audit trail per account tracking user sign-ins, profile changes, dispatched goods, and digital verification records.'}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2.5">
@@ -1962,7 +1966,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
           <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search logs by actor, action, details, entity, or Sepolia tx hash..."
+            placeholder="Search logs by actor, action, details, entity, or audit hash..."
             value={logSearchQuery}
             onChange={(e) => {
               setLogSearchQuery(e.target.value);
@@ -1983,7 +1987,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#10069f] cursor-pointer"
           >
             <option value="all">All Actions</option>
-            <option value="onchain">On-Chain Sepolia Verified</option>
+            <option value="onchain">Digital Audit Verified</option>
             <option value="USER_LOGIN">Session Logins</option>
             <option value="USER_LOGOUT">Session Logouts</option>
             <option value="INCOMING_ADDED">Incoming Manifest Created</option>
@@ -2068,7 +2072,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                 <th className="px-5 py-3">Action</th>
                 <th className="px-5 py-3">Entity</th>
                 <th className="px-5 py-3">Details</th>
-                <th className="px-5 py-3">Sepolia Tx Proof</th>
+                <th className="px-5 py-3">Digital Audit Record</th>
                 <th className="px-5 py-3 text-right">Inspect</th>
               </tr>
             </thead>
@@ -2088,7 +2092,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                     <p className="text-[11px] text-gray-400 mt-0.5">
                       {logSearchQuery || logActionFilter !== 'all' || logEntityFilter !== 'all'
                         ? 'Try clearing or modifying your filter criteria.'
-                        : 'System actions and blockchain verifications will appear here as they occur.'}
+                        : 'System actions and audit records will appear here as they occur.'}
                     </p>
                   </td>
                 </tr>
@@ -2484,7 +2488,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
           <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search this user's actions, descriptions, entities, or Sepolia Tx hash..."
+            placeholder="Search this user's actions, descriptions, entities, or audit hash..."
             value={userTrailSearchQuery}
             onChange={(e) => {
               setUserTrailSearchQuery(e.target.value);
@@ -2504,7 +2508,7 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
             className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#10069f] cursor-pointer"
           >
             <option value="all">All Actions</option>
-            <option value="onchain">On-Chain Sepolia Verified</option>
+            <option value="onchain">Digital Audit Verified</option>
             <option value="USER_LOGIN">Session Logins</option>
             <option value="USER_LOGOUT">Session Logouts</option>
             <option value="USER_SIGNUP">Account Registrations</option>
@@ -2553,8 +2557,8 @@ export function AccountManagement({ currentAdminEmail, releases: propsReleases, 
                 <th className="px-5 py-3">Timestamp</th>
                 <th className="px-5 py-3">Action</th>
                 <th className="px-5 py-3">Target Entity</th>
-                <th className="px-5 py-3">Audit Details & Summary</th>
-                <th className="px-5 py-3">Sepolia Proof</th>
+                <th className="px-5 py-3">Audit Details &amp; Summary</th>
+                <th className="px-5 py-3">Audit Proof</th>
                 <th className="px-5 py-3 text-right">Inspect</th>
               </tr>
             </thead>

@@ -21,6 +21,7 @@ import { backendApi, type TruckLiveLocation, type ReceiverReleaseRecord, type Lg
 import { authApi, type UserProfile } from '../../services/authApi';
 import { findMatchingLgu } from '../../lib/lguMatching';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
+import { useGuideMode } from '../../contexts/GuideContext';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';
 
@@ -841,6 +842,7 @@ export function TruckTracking({
   outgoingReleasesList?: OutgoingRelease[];
   lgusList?: LguRecord[];
 }) {
+  const { showDescriptions } = useGuideMode();
   const [liveLocations, setLiveLocations] = useState<Record<string, TruckLiveLocation>>({});
   const [releases, setReleases] = useState<ReceiverReleaseRecord[]>([]);
   const [custodyHops, setCustodyHops] = useState<CustodyHopRecord[]>([]);
@@ -1137,7 +1139,9 @@ export function TruckTracking({
       {/* Header Banner */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
         <h1 className="text-2xl font-bold text-gray-900">Live Receiver Tracking</h1>
-        <p className="text-sm text-gray-500 mt-1">Real-time GPS stream of active receivers across Iloilo.</p>
+        {showDescriptions && (
+          <p className="text-sm text-gray-500 mt-1">Real-time GPS stream of active receivers across Iloilo.</p>
+        )}
       </div>
 
       {!selectedTruck ? (
