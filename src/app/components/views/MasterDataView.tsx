@@ -1078,10 +1078,20 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                       Active Storage
                     </span>
                   </div>
-                  <div className="text-xs text-gray-600 space-y-1">
+                  <div className="text-xs text-gray-600 space-y-1.5">
                     <p>Location: <strong>{wh.municipality}, {wh.province}</strong></p>
-                    <p>Holding Capacity: <strong>{wh.capacityPacks.toLocaleString()} food packs</strong></p>
-                    <p className="font-mono text-[11px] text-gray-500">
+                    <p>Total Holding Capacity: <strong>{wh.capacityPacks.toLocaleString()} relief items</strong></p>
+                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                      <div className="bg-amber-50 border border-amber-200 rounded p-1.5 text-amber-900">
+                        <span className="font-semibold block text-[10px] text-amber-700">Food Capacity (60%)</span>
+                        <strong>{Math.round(wh.capacityPacks * 0.6).toLocaleString()}</strong> packs
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 rounded p-1.5 text-blue-900">
+                        <span className="font-semibold block text-[10px] text-blue-700">Non-Food Capacity (40%)</span>
+                        <strong>{(wh.capacityPacks - Math.round(wh.capacityPacks * 0.6)).toLocaleString()}</strong> kits/units
+                      </div>
+                    </div>
+                    <p className="font-mono text-[11px] text-gray-500 pt-0.5">
                       GPS Coordinates: {wh.latitude.toFixed(4)}, {wh.longitude.toFixed(4)}
                     </p>
                   </div>

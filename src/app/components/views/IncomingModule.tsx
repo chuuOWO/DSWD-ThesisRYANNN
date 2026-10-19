@@ -10,6 +10,10 @@ import {
   getExpiryTier,
   getExpiryBadgeConfig
 } from '../../lib/expiryConstants';
+import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter
+} from '../../lib/commodityClassification';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
@@ -93,6 +97,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const [editingIncoming, setEditingIncoming] = useState<IncomingGoods | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
+  const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [actionModal, setActionModal] = useState<IncomingActionModalState | null>(null);
 
@@ -235,8 +240,9 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
     const matchesWarehouse = selectedWarehouse === 'All' || item.destination === selectedWarehouse;
     const matchesCategory = selectedCategory === 'All' || item.fnfiCategory === selectedCategory;
+    const matchesCommodity = matchesCommodityFilter(item.fnfiCategory, commodityTypeFilter);
 
-    return matchesSearch && matchesWarehouse && matchesCategory;
+    return matchesSearch && matchesWarehouse && matchesCategory && matchesCommodity;
   });
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -247,10 +253,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     return filteredGoods.slice(start, start + pageSize);
   }, [filteredGoods, currentPage, pageSize]);
 
-  const postedCount = incomingGoodsList.filter(item => item.status === 'Verified').length;
-  const pendingCount = incomingGoodsList.filter(item => item.status === 'Pending Verification' || item.status === 'Draft').length;
+  const postedCount = incomingGoodsList.filter(item => item.status === 'Verified' && matchesCommodityFilter(item.fnfiCategory, commodityTypeFilter)).length;
+  const pendingCount = incomingGoodsList.filter(item => (item.status === 'Pending Verification' || item.status === 'Draft') && matchesCommodityFilter(item.fnfiCategory, commodityTypeFilter)).length;
   const warehouseTotalQty = incomingGoodsList
-    .filter(item => item.destinationType === 'Warehouse' && item.status === 'Verified')
+    .filter(item => item.destinationType === 'Warehouse' && item.status === 'Verified' && matchesCommodityFilter(item.fnfiCategory, commodityTypeFilter))
     .reduce((sum, item) => sum + item.quantity, 0);
 
   // FEFO shelf-life tracking for verified incoming batches sorted by earliest expiration
@@ -397,12 +403,12 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
       )}
 
       <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search RIS code, manifest ID, batch record, category, source..."
+              placeholder="Search RIS code, manifest ID, batch, source..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -416,12 +422,25 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           </div>
 
           <select
+            value={commodityTypeFilter}
+            onChange={(e) => {
+              setCommodityTypeFilter(e.target.value as CommodityTypeFilter);
+              setCurrentPage(1);
+            }}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-white"
+          >
+            <option value="All">All Classifications</option>
+            <option value="Food Items">Food Items (FFP & RTEF)</option>
+            <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+          </select>
+
+          <select
             value={selectedWarehouse}
             onChange={(e) => {
               setSelectedWarehouse(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-white"
           >
             <option value="All">All Destinations</option>
             {destinationOptions.map(dest => (
@@ -435,7 +454,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               setSelectedCategory(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-white"
           >
             <option value="All">All Categories</option>
             {categoryOptions.map(cat => <option key={cat} value={cat}>{cat}</option>)}

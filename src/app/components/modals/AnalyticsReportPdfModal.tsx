@@ -32,6 +32,7 @@ interface AnalyticsReportPdfModalProps {
   selectedDisasterFilter: string;
   selectedLguFilter: string;
   selectedCategoryFilter: string;
+  commodityTypeFilter?: 'All' | 'Food Items' | 'Non-Food Items';
   // Filtered and Master Datasets
   filteredReleases: OutgoingRelease[];
   allReleases: OutgoingRelease[];
@@ -54,6 +55,7 @@ export function AnalyticsReportPdfModal({
   selectedDisasterFilter,
   selectedLguFilter,
   selectedCategoryFilter,
+  commodityTypeFilter = 'All',
   filteredReleases,
   allReleases,
   inventory,
@@ -475,7 +477,7 @@ export function AnalyticsReportPdfModal({
                   <Filter className="w-3 h-3 text-indigo-700" />
                   <span>Applied Operational Filter Configuration (Active Query Scope)</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-gray-800">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-gray-800">
                   <div className="bg-white p-2 rounded border border-indigo-100">
                     <span className="block font-bold text-gray-500 text-[8px] uppercase">Time Horizon</span>
                     <span className="font-semibold text-indigo-900">{filterScopeText.time}</span>
@@ -487,6 +489,10 @@ export function AnalyticsReportPdfModal({
                   <div className="bg-white p-2 rounded border border-indigo-100">
                     <span className="block font-bold text-gray-500 text-[8px] uppercase">Destination LGU</span>
                     <span className="font-semibold text-indigo-900">{filterScopeText.lgu}</span>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-indigo-100">
+                    <span className="block font-bold text-gray-500 text-[8px] uppercase">Classification</span>
+                    <span className="font-semibold text-indigo-900">{commodityTypeFilter === 'All' ? 'All Commodities' : commodityTypeFilter}</span>
                   </div>
                   <div className="bg-white p-2 rounded border border-indigo-100">
                     <span className="block font-bold text-gray-500 text-[8px] uppercase">FNFI Commodity</span>

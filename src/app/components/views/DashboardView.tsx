@@ -60,6 +60,13 @@ import {
 
 import type { UserProfile } from '../../services/authApi';
 import { AnalyticsReportPdfModal } from '../modals/AnalyticsReportPdfModal';
+import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter,
+  getWarehouseCapacities,
+  getLguCapacities,
+  getLguCommodityStock
+} from '../../lib/commodityClassification';
 
 interface DashboardState {
   inventory: InventoryItem[];
@@ -236,6 +243,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
   const [selectedDisasterFilter, setSelectedDisasterFilter] = useState<string>('All');
   const [selectedLguFilter, setSelectedLguFilter] = useState<string>('All');
+  const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
 
   // Chart 1 mode: Disaster vs Monthly timeline
@@ -539,7 +547,12 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
         if (!r.municipality || r.municipality.toLowerCase() !== selectedLguFilter.toLowerCase()) return false;
       }
 
-      // 4. Category filter
+      // 4. Commodity Group filter (Food Items vs Non-Food Items)
+      if (commodityTypeFilter !== 'All') {
+        if (!matchesCommodityFilter(r.fnfiCategory, commodityTypeFilter)) return false;
+      }
+
+      // 5. Specific Category filter
       if (selectedCategoryFilter !== 'All') {
         const canonicalFilter = normalizeCategoryName(selectedCategoryFilter);
         const canonicalRelease = normalizeCategoryName(r.fnfiCategory);
@@ -552,20 +565,66 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
 
       return true;
     });
-  }, [outgoingReleasesList, timeFilter, selectedQuarter, selectedMonth, selectedDisasterFilter, selectedLguFilter, selectedCategoryFilter]);
+  }, [outgoingReleasesList, timeFilter, selectedQuarter, selectedMonth, selectedDisasterFilter, selectedLguFilter, commodityTypeFilter, selectedCategoryFilter]);
+
+  // Warehouse Capacities partitioned into 2: Food Items (60%) and Non-Food Items (40%)
+  const warehouseCapacityTotals = useMemo(() => {
+    const whList = (warehousesList && warehousesList.length > 0) ? warehousesList : [
+      { capacityPacks: 100000 },
+      { capacityPacks: 80000 }
+    ];
+    let totalCap = 0;
+    let foodCap = 0;
+    let nonFoodCap = 0;
+    whList.forEach(w => {
+      const caps = getWarehouseCapacities(w.capacityPacks);
+      totalCap += caps.total;
+      foodCap += caps.food;
+      nonFoodCap += caps.nonFood;
+    });
+    return {
+      total: totalCap,
+      food: foodCap,
+      nonFood: nonFoodCap,
+      effective: commodityTypeFilter === 'Food Items' ? foodCap : (commodityTypeFilter === 'Non-Food Items' ? nonFoodCap : totalCap)
+    };
+  }, [warehousesList, commodityTypeFilter]);
+
+  // LGU Capacities partitioned into 2: Food Items (60%) and Non-Food Items (40%)
+  const lguCapacityTotals = useMemo(() => {
+    let totalCap = 0;
+    let foodCap = 0;
+    let nonFoodCap = 0;
+    effectiveLgus.forEach(lgu => {
+      const caps = getLguCapacities(lgu.maxStock);
+      totalCap += caps.total;
+      foodCap += caps.food;
+      nonFoodCap += caps.nonFood;
+    });
+    return {
+      total: totalCap,
+      food: foodCap,
+      nonFood: nonFoodCap,
+      effective: commodityTypeFilter === 'Food Items' ? foodCap : (commodityTypeFilter === 'Non-Food Items' ? nonFoodCap : totalCap)
+    };
+  }, [effectiveLgus, commodityTypeFilter]);
 
   // Total Metric KPI Computations
   const totalWarehouseInventory = useMemo(() => {
-    return inventory.reduce((sum, item) => sum + (item.totalStock ?? (item.warehouseA + item.warehouseB)), 0);
-  }, [inventory]);
+    return inventory.reduce((sum, item) => {
+      if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(item.category, commodityTypeFilter)) {
+        return sum;
+      }
+      return sum + (item.totalStock ?? (item.warehouseA + item.warehouseB));
+    }, 0);
+  }, [inventory, commodityTypeFilter]);
 
   const totalLguOnHand = useMemo(() => {
     return effectiveLgus.reduce((sum, lgu) => {
-      const stockObj = lgu.currentStock || {};
-      const stockSum = Object.values(stockObj).reduce((s, v) => s + (Number(v) || 0), 0);
-      return sum + stockSum;
+      const stockInfo = getLguCommodityStock(lgu);
+      return sum + stockInfo.forFilter(commodityTypeFilter);
     }, 0);
-  }, [effectiveLgus]);
+  }, [effectiveLgus, commodityTypeFilter]);
 
   const totalGoodsAllocated = useMemo(() => {
     return filteredReleases.reduce((sum, r) => sum + (Number(r.amountApproved || r.amountRequested) || 0), 0);
@@ -693,47 +752,54 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
       else if (i.category?.trim()) catSet.add(i.category.trim());
     });
 
-    return Array.from(catSet).map((cat) => {
-      const canonical = normalizeCategoryName(cat);
-      // 1. Warehouse stock
-      const whItem = inventory.find(i => normalizeCategoryName(i.category) === canonical || i.category.toLowerCase().includes(cat.toLowerCase()));
-      const warehouseStock = whItem ? (whItem.totalStock ?? (whItem.warehouseA + whItem.warehouseB)) : 0;
+    return Array.from(catSet)
+      .filter((cat) => {
+        if (commodityTypeFilter !== 'All') {
+          return matchesCommodityFilter(cat, commodityTypeFilter);
+        }
+        return true;
+      })
+      .map((cat) => {
+        const canonical = normalizeCategoryName(cat);
+        // 1. Warehouse stock
+        const whItem = inventory.find(i => normalizeCategoryName(i.category) === canonical || i.category.toLowerCase().includes(cat.toLowerCase()));
+        const warehouseStock = whItem ? (whItem.totalStock ?? (whItem.warehouseA + whItem.warehouseB)) : 0;
 
-      // 2. LGU on-hand
-      const lguOnHand = effectiveLgus.reduce((sum, lgu) => {
-        return sum + (getLguStockForCategory(lgu, cat) || 0);
-      }, 0);
+        // 2. LGU on-hand
+        const lguOnHand = effectiveLgus.reduce((sum, lgu) => {
+          return sum + (getLguStockForCategory(lgu, cat) || 0);
+        }, 0);
 
-      // 3. Demand (requested)
-      const demand = filteredReleases
-        .filter(r => {
-          const rCanonical = normalizeCategoryName(r.fnfiCategory);
-          return r.fnfiCategory && (rCanonical === canonical || r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()));
-        })
-        .reduce((sum, r) => sum + (Number(r.amountRequested) || 0), 0);
+        // 3. Demand (requested)
+        const demand = filteredReleases
+          .filter(r => {
+            const rCanonical = normalizeCategoryName(r.fnfiCategory);
+            return r.fnfiCategory && (rCanonical === canonical || r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()));
+          })
+          .reduce((sum, r) => sum + (Number(r.amountRequested) || 0), 0);
 
-      // 4. Allocated (approved)
-      const allocated = filteredReleases
-        .filter(r => {
-          const rCanonical = normalizeCategoryName(r.fnfiCategory);
-          return r.fnfiCategory && (rCanonical === canonical || r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()));
-        })
-        .reduce((sum, r) => sum + (Number(r.amountApproved || r.amountRequested) || 0), 0);
+        // 4. Allocated (approved)
+        const allocated = filteredReleases
+          .filter(r => {
+            const rCanonical = normalizeCategoryName(r.fnfiCategory);
+            return r.fnfiCategory && (rCanonical === canonical || r.fnfiCategory.toLowerCase().includes(cat.toLowerCase()));
+          })
+          .reduce((sum, r) => sum + (Number(r.amountApproved || r.amountRequested) || 0), 0);
 
-      const netGap = warehouseStock - demand;
-      const isShortage = netGap < 0;
+        const netGap = warehouseStock - demand;
+        const isShortage = netGap < 0;
 
-      return {
-        category: cat,
-        warehouseStock,
-        lguOnHand,
-        demand,
-        allocated,
-        netGap,
-        status: isShortage ? 'Deficit' : 'Surplus'
-      };
-    });
-  }, [inventory, effectiveLgus, filteredReleases, kitTypesList]);
+        return {
+          category: cat,
+          warehouseStock,
+          lguOnHand,
+          demand,
+          allocated,
+          netGap,
+          status: isShortage ? 'Deficit' : 'Surplus'
+        };
+      });
+  }, [inventory, effectiveLgus, filteredReleases, kitTypesList, commodityTypeFilter]);
 
   // CHART 4: Incoming Expirations on LGUs and Warehouses
   const { expirationBuckets, expiringBatches } = useMemo(() => {
@@ -757,6 +823,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
     }> = [];
 
     incomingGoodsList.forEach((item) => {
+      if (commodityTypeFilter !== 'All') {
+        if (!matchesCommodityFilter(item.fnfiCategory, commodityTypeFilter)) return;
+      }
       if (!item.expirationDate) return;
       const exp = new Date(item.expirationDate);
       if (isNaN(exp.getTime())) return;
@@ -810,7 +879,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
       expirationBuckets: buckets,
       expiringBatches: batches.slice(0, 5)
     };
-  }, [incomingGoodsList, effectiveLgus]);
+  }, [incomingGoodsList, effectiveLgus, commodityTypeFilter]);
 
   // BOTTOM HISTORY LOG DATA: Requests, Allocated, and Releases
   const filteredHistory = useMemo(() => {
@@ -829,7 +898,12 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
         if (r.deliveryStatus !== historyStatusFilter) return false;
       }
 
-      // 3. Search query
+      // 3. Commodity Group filter (Food Items vs Non-Food Items)
+      if (commodityTypeFilter !== 'All') {
+        if (!matchesCommodityFilter(r.fnfiCategory, commodityTypeFilter)) return false;
+      }
+
+      // 4. Search query
       if (historySearch.trim()) {
         const query = historySearch.toLowerCase();
         const matched =
@@ -844,7 +918,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
 
       return true;
     });
-  }, [outgoingReleasesList, historyTab, historyStatusFilter, historySearch]);
+  }, [outgoingReleasesList, historyTab, historyStatusFilter, historySearch, commodityTypeFilter]);
 
   const totalHistoryPages = Math.ceil(filteredHistory.length / historyPageSize) || 1;
   const paginatedHistory = useMemo(() => {
@@ -859,6 +933,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
     setSelectedDisasterFilter('All');
     setSelectedLguFilter('All');
     setSelectedCategoryFilter('All');
+    setCommodityTypeFilter('All');
   };
 
   // Dynamic Section Renderer
@@ -900,15 +975,34 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
                       <Package className="w-5 h-5" />
                     </div>
-                    <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showWarehouseOverview ? 'rotate-180' : ''}`} />
+                    <div className="flex items-center gap-1.5">
+                      {commodityTypeFilter !== 'All' && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          commodityTypeFilter === 'Food Items'
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                        }`}>
+                          {commodityTypeFilter}
+                        </span>
+                      )}
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showWarehouseOverview ? 'rotate-180' : ''}`} />
+                    </div>
                   </div>
                   <p className="text-2xl font-bold text-gray-900 mt-3 font-mono">{totalWarehouseInventory.toLocaleString()}</p>
                   <p className="text-xs font-bold text-gray-700 mt-0.5">Warehouse Inventory</p>
-                  <div className="flex items-center justify-between text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100">
-                    <span>Oton & Pototan Hubs</span>
-                    <span className="text-blue-600 font-semibold group-hover:underline">
-                      {showWarehouseOverview ? 'Hide breakdown' : 'Show FNFI breakdown'}
-                    </span>
+                  <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                    <div className="flex items-center justify-between text-[11px] text-gray-600">
+                      <span>
+                        Cap: <strong className="text-gray-900">{warehouseCapacityTotals.effective.toLocaleString()}</strong> ({Math.round((totalWarehouseInventory / (warehouseCapacityTotals.effective || 1)) * 100)}%)
+                      </span>
+                      <span className="text-blue-600 font-semibold group-hover:underline text-[10px]">
+                        {showWarehouseOverview ? 'Hide' : 'Breakdown'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-gray-400">
+                      <span>Food Cap: {warehouseCapacityTotals.food.toLocaleString()}</span>
+                      <span>Non-Food: {warehouseCapacityTotals.nonFood.toLocaleString()}</span>
+                    </div>
                   </div>
                 </button>
 
@@ -922,15 +1016,34 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold">
                       <Building2 className="w-5 h-5" />
                     </div>
-                    <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-                      {effectiveLgus.length} LGUs
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {commodityTypeFilter !== 'All' && (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          commodityTypeFilter === 'Food Items'
+                            ? 'bg-amber-50 text-amber-800 border-amber-200'
+                            : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                        }`}>
+                          {commodityTypeFilter}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                        {effectiveLgus.length} LGUs
+                      </span>
+                    </div>
                   </div>
                   <p className="text-2xl font-bold text-gray-900 mt-3 font-mono">{totalLguOnHand.toLocaleString()}</p>
                   <p className="text-xs font-bold text-gray-700 mt-0.5">Total LGU Stock On-Hand</p>
-                  <div className="flex items-center justify-between text-[11px] text-gray-500 mt-2 pt-2 border-t border-gray-100">
-                    <span>Staged Relief Kits</span>
-                    <span className="text-purple-600 font-semibold group-hover:underline">View LGUs</span>
+                  <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                    <div className="flex items-center justify-between text-[11px] text-gray-600">
+                      <span>
+                        Cap: <strong className="text-gray-900">{lguCapacityTotals.effective.toLocaleString()}</strong> ({Math.round((totalLguOnHand / (lguCapacityTotals.effective || 1)) * 100)}%)
+                      </span>
+                      <span className="text-purple-600 font-semibold group-hover:underline text-[10px]">View LGUs</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-gray-400">
+                      <span>Food Cap: {lguCapacityTotals.food.toLocaleString()}</span>
+                      <span>Non-Food: {lguCapacityTotals.nonFood.toLocaleString()}</span>
+                    </div>
                   </div>
                 </button>
 
@@ -2010,7 +2123,29 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Quick Commodity Toggle Pills */}
+            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+              {(['All', 'Food Items', 'Non-Food Items'] as const).map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setCommodityTypeFilter(tab)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    commodityTypeFilter === tab
+                      ? tab === 'Food Items'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : tab === 'Non-Food Items'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white text-gray-900 shadow-xs'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  {tab === 'All' ? 'All Commodities' : tab}
+                </button>
+              ))}
+            </div>
+
             <button
               type="button"
               onClick={() => setIsExportPdfOpen(true)}
@@ -2033,7 +2168,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
         </div>
 
         {/* Filter Controls Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {/* 1. Time Mode Filter (Monthly / Quarterly / All) */}
           <div>
             <label className="block text-[11px] font-bold text-gray-600 mb-1">Time Horizon</label>
@@ -2127,7 +2262,21 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
             </select>
           </div>
 
-          {/* 5. FNFI Category Filter */}
+          {/* 5. Commodity Classification Filter (Food vs Non-Food) */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-600 mb-1">Classification Type</label>
+            <select
+              value={commodityTypeFilter}
+              onChange={(e) => setCommodityTypeFilter(e.target.value as CommodityTypeFilter)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-xl text-xs font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-[#2500ba]"
+            >
+              <option value="All">All Classifications</option>
+              <option value="Food Items">Food Items (FFP & RTEF)</option>
+              <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+            </select>
+          </div>
+
+          {/* 6. FNFI Category Filter */}
           <div>
             <label className="block text-[11px] font-bold text-gray-600 mb-1">FNFI Relief Commodity</label>
             <select
@@ -2157,6 +2306,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
         selectedDisasterFilter={selectedDisasterFilter}
         selectedLguFilter={selectedLguFilter}
         selectedCategoryFilter={selectedCategoryFilter}
+        commodityTypeFilter={commodityTypeFilter}
         filteredReleases={filteredReleases}
         allReleases={outgoingReleasesList}
         inventory={inventory}

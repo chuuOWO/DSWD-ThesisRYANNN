@@ -14,6 +14,10 @@ import {
 import type { InventoryBatchRecord, KitTypeRecord, LguRecord, WarehouseRecord } from '../../services/backendApi';
 import { normalizeCategoryName } from '../../lib/lguSync';
 import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter
+} from '../../lib/commodityClassification';
+import {
   EXPIRY_THRESHOLDS,
   getDaysRemaining,
   getExpiryTier,
@@ -46,6 +50,7 @@ export function FefoLotsLedgerTable({
   const [fefoUrgencyFilter, setFefoUrgencyFilter] = useState<'all' | 'critical' | 'moderate' | 'safe' | 'expired'>(
     initialUrgencyFilter
   );
+  const [fefoCommodityFilter, setFefoCommodityFilter] = useState<CommodityTypeFilter>('All');
   const [fefoCategoryFilter, setFefoCategoryFilter] = useState('All');
   const [fefoFacilityFilter, setFefoFacilityFilter] = useState('All');
   const [fefoSortOrder, setFefoSortOrder] = useState<'earliest' | 'latest' | 'quantity'>('earliest');
@@ -122,6 +127,10 @@ export function FefoLotsLedgerTable({
       result = result.filter((b) => b.tier === fefoUrgencyFilter);
     }
 
+    if (fefoCommodityFilter !== 'All') {
+      result = result.filter((b) => matchesCommodityFilter(b.category, fefoCommodityFilter));
+    }
+
     if (fefoCategoryFilter !== 'All') {
       result = result.filter((b) => b.category === fefoCategoryFilter);
     }
@@ -144,7 +153,7 @@ export function FefoLotsLedgerTable({
     });
 
     return result;
-  }, [allBatches, fefoSearchQuery, fefoUrgencyFilter, fefoCategoryFilter, fefoFacilityFilter, fefoSortOrder, kitTypesList, lgusList, warehousesList]);
+  }, [allBatches, fefoSearchQuery, fefoUrgencyFilter, fefoCommodityFilter, fefoCategoryFilter, fefoFacilityFilter, fefoSortOrder, kitTypesList, lgusList, warehousesList]);
 
   // FEFO Metrics Summary across all active batches
   const fefoMetrics = useMemo(() => {
@@ -291,18 +300,34 @@ export function FefoLotsLedgerTable({
       <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-xs space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Search */}
-          <div className="relative lg:col-span-2">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search Batch ID, Manifest, Commodity, Facility..."
+              placeholder="Search Batch ID, Manifest, Facility..."
               value={fefoSearchQuery}
               onChange={(e) => {
                 setFefoSearchQuery(e.target.value);
                 setFefoPage(1);
               }}
-              className="w-full pl-9 pr-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             />
+          </div>
+
+          {/* Classification Filter (Food vs Non-Food) */}
+          <div>
+            <select
+              value={fefoCommodityFilter}
+              onChange={(e) => {
+                setFefoCommodityFilter(e.target.value as CommodityTypeFilter);
+                setFefoPage(1);
+              }}
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="All">All Classifications</option>
+              <option value="Food Items">Food Items (FFP & RTEF)</option>
+              <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+            </select>
           </div>
 
           {/* Urgency Filter */}
@@ -313,7 +338,7 @@ export function FefoLotsLedgerTable({
                 setFefoUrgencyFilter(e.target.value as any);
                 setFefoPage(1);
               }}
-              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               <option value="all">All Urgency Tiers</option>
               <option value="critical">Critical (&le; {EXPIRY_THRESHOLDS.CRITICAL_MAX_DAYS} days)</option>
@@ -331,7 +356,7 @@ export function FefoLotsLedgerTable({
                 setFefoCategoryFilter(e.target.value);
                 setFefoPage(1);
               }}
-              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               <option value="All">All Categories ({dynamicCategories.length})</option>
               {dynamicCategories.map((c) => (
@@ -348,7 +373,7 @@ export function FefoLotsLedgerTable({
                 setFefoSortOrder(e.target.value as any);
                 setFefoPage(1);
               }}
-              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               <option value="earliest">Earliest Expiring (FEFO Priority)</option>
               <option value="latest">Latest Expiring First</option>

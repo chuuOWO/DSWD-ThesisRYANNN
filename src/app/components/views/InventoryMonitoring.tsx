@@ -23,6 +23,12 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { backendApi, type LguRecord, type KitTypeRecord, type InventoryBatchRecord, type WarehouseRecord } from '../../services/backendApi';
 import type { IncomingGoods, OutgoingRelease, LGUPriorityReport } from '../../hooks/useInventoryState';
 import { normalizeCategoryName } from '../../lib/lguSync';
+import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter,
+  getWarehouseCapacities,
+  getLguCapacities
+} from '../../lib/commodityClassification';
 import type { UserProfile } from '../../services/authApi';
 import { InventoryReportPdfModal } from '../modals/InventoryReportPdfModal';
 import {
@@ -68,6 +74,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
   // Primary facility scope filter: defaults to Main Warehouses (Oton & Pototan)
   const [facilityScope, setFacilityScope] = useState<'main' | 'oton' | 'pototan' | 'all' | 'lgu'>('main');
   const [selectedLguFilter, setSelectedLguFilter] = useState('All');
+  const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [stockHealthFilter, setStockHealthFilter] = useState<'all' | 'low' | 'expiring' | 'optimal'>('all');
@@ -511,9 +518,14 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
         return false;
       }
 
+      // 5. Commodity Classification filter
+      if (commodityTypeFilter !== 'All') {
+        if (!matchesCommodityFilter(item.category, commodityTypeFilter)) return false;
+      }
+
       return true;
     });
-  }, [combinedData, searchQuery, selectedCategory, stockHealthFilter, facilityScope]);
+  }, [combinedData, searchQuery, selectedCategory, stockHealthFilter, facilityScope, commodityTypeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
   const paginatedData = useMemo(() => {
@@ -521,34 +533,105 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, currentPage, pageSize]);
 
-  // Totals for top KPI banners
-  const warehouseATotal = displayData.reduce((sum, item) => sum + item.warehouseA, 0);
-  const warehouseBTotal = displayData.reduce((sum, item) => sum + item.warehouseB, 0);
+  // Warehouse Capacities partitioned into 2: Food Items (60%) and Non-Food Items (40%)
+  const otonCaps = useMemo(() => {
+    const wh = warehousesList.find(w => w.name.toLowerCase().includes('oton'));
+    return getWarehouseCapacities(wh?.capacityPacks || 100000);
+  }, [warehousesList]);
+
+  const pototanCaps = useMemo(() => {
+    const wh = warehousesList.find(w => w.name.toLowerCase().includes('pototan'));
+    return getWarehouseCapacities(wh?.capacityPacks || 80000);
+  }, [warehousesList]);
+
+  const totalHubCaps = useMemo(() => {
+    const total = otonCaps.total + pototanCaps.total;
+    const food = otonCaps.food + pototanCaps.food;
+    const nonFood = otonCaps.nonFood + pototanCaps.nonFood;
+    return {
+      total,
+      food,
+      nonFood,
+      effective: commodityTypeFilter === 'Food Items' ? food : (commodityTypeFilter === 'Non-Food Items' ? nonFood : total)
+    };
+  }, [otonCaps, pototanCaps, commodityTypeFilter]);
+
+  const lguCapsTotal = useMemo(() => {
+    let total = 0;
+    let food = 0;
+    let nonFood = 0;
+    lgusList.forEach(lgu => {
+      const caps = getLguCapacities(lgu.maxStock);
+      total += caps.total;
+      food += caps.food;
+      nonFood += caps.nonFood;
+    });
+    if (total === 0) {
+      total = 3000 * Math.max(1, lgusList.length || 1);
+      food = Math.round(total * 0.6);
+      nonFood = total - food;
+    }
+    return {
+      total,
+      food,
+      nonFood,
+      effective: commodityTypeFilter === 'Food Items' ? food : (commodityTypeFilter === 'Non-Food Items' ? nonFood : total)
+    };
+  }, [lgusList, commodityTypeFilter]);
+
+  // Totals for top KPI banners filtered by commodity group
+  const warehouseATotal = displayData.reduce((sum, item) => {
+    if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(item.category, commodityTypeFilter)) return sum;
+    return sum + item.warehouseA;
+  }, 0);
+  const warehouseBTotal = displayData.reduce((sum, item) => {
+    if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(item.category, commodityTypeFilter)) return sum;
+    return sum + item.warehouseB;
+  }, 0);
   const totalMainWarehouse = warehouseATotal + warehouseBTotal;
-  const totalLGUWarehouse = Object.values(lguTotals).reduce((sum, val) => sum + val, 0);
-  const totalReleased = displayData.reduce((sum, item) => sum + item.released, 0);
-  const totalExpiring = displayData.reduce((sum, item) => sum + item.expiringItems, 0);
+  const totalLGUWarehouse = Object.entries(lguTotals).reduce((sum, [category, val]) => {
+    if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(category, commodityTypeFilter)) return sum;
+    return sum + val;
+  }, 0);
+  const totalReleased = displayData.reduce((sum, item) => {
+    if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(item.category, commodityTypeFilter)) return sum;
+    return sum + item.released;
+  }, 0);
+  const totalExpiring = displayData.reduce((sum, item) => {
+    if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(item.category, commodityTypeFilter)) return sum;
+    return sum + item.expiringItems;
+  }, 0);
 
   // Chart data comparing warehouses (includes LGUs only if scope is 'all' or 'lgu')
   const chartData = useMemo(() => {
-    return dynamicCategories.map((category) => {
-      const inventoryItem = displayData.find((item) => item.category?.toLowerCase() === category.toLowerCase());
-      const lguTotal = lguWarehouseData.reduce((sum, lgu) => {
-        const value = (lgu as Record<string, number | string>)[category];
-        return sum + (typeof value === 'number' ? value : 0);
-      }, 0);
+    return dynamicCategories
+      .filter((category) => {
+        if (commodityTypeFilter !== 'All') {
+          return matchesCommodityFilter(category, commodityTypeFilter);
+        }
+        return true;
+      })
+      .map((category) => {
+        const inventoryItem = displayData.find((item) => item.category?.toLowerCase() === category.toLowerCase());
+        const lguTotal = lguWarehouseData.reduce((sum, lgu) => {
+          const value = (lgu as Record<string, number | string>)[category];
+          return sum + (typeof value === 'number' ? value : 0);
+        }, 0);
 
-      return {
-        name: category,
-        'Oton Main Warehouse': inventoryItem?.warehouseA || 0,
-        'Pototan Main Warehouse': inventoryItem?.warehouseB || 0,
-        'All LGUs': lguTotal
-      };
-    });
-  }, [dynamicCategories, displayData, lguWarehouseData]);
+        return {
+          name: category,
+          'Oton Main Warehouse': inventoryItem?.warehouseA || 0,
+          'Pototan Main Warehouse': inventoryItem?.warehouseB || 0,
+          'All LGUs': lguTotal
+        };
+      });
+  }, [dynamicCategories, displayData, lguWarehouseData, commodityTypeFilter]);
 
   // Critical items for alert notices
-  const lowStockItems = displayData.filter((item) => item.available < 500);
+  const lowStockItems = displayData.filter((item) => {
+    if (commodityTypeFilter !== 'All' && !matchesCommodityFilter(item.category, commodityTypeFilter)) return false;
+    return item.available < 500;
+  });
 
   return (
     <div className="space-y-6">
@@ -575,49 +658,102 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
 
       {/* Summary KPI Cards: Oton, Pototan, and Prepositioned Stock */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-4 text-white shadow-sm">
-          <div className="flex items-center justify-between opacity-80 mb-1">
-            <span className="text-xs font-semibold">Total Hub Buffer</span>
-            <Package className="w-5 h-5" />
+        <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-4 text-white shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between opacity-80 mb-1">
+              <span className="text-xs font-semibold">Total Hub Buffer</span>
+              <Package className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold">{totalMainWarehouse.toLocaleString()}</p>
+            <p className="text-[11px] opacity-90 mt-0.5">Oton + Pototan Hubs</p>
           </div>
-          <p className="text-2xl font-bold">{totalMainWarehouse.toLocaleString()}</p>
-          <p className="text-[11px] opacity-90 mt-1">Oton + Pototan Hubs</p>
+          <div className="mt-2 pt-2 border-t border-white/20 text-[10px] space-y-0.5">
+            <div className="flex justify-between font-semibold">
+              <span>Cap: {totalHubCaps.effective.toLocaleString()}</span>
+              <span>{Math.round((totalMainWarehouse / (totalHubCaps.effective || 1)) * 100)}%</span>
+            </div>
+            <div className="flex justify-between opacity-80 text-[9px]">
+              <span>Food: {totalHubCaps.food.toLocaleString()}</span>
+              <span>NFI: {totalHubCaps.nonFood.toLocaleString()}</span>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-gradient-to-br from-green-600 to-green-700 rounded-xl p-4 text-white shadow-sm">
-          <div className="flex items-center justify-between opacity-80 mb-1">
-            <span className="text-xs font-semibold">Oton Main Hub</span>
-            <Building2 className="w-5 h-5" />
+        <div className="bg-gradient-to-br from-green-600 to-green-700 rounded-xl p-4 text-white shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between opacity-80 mb-1">
+              <span className="text-xs font-semibold">Oton Main Hub</span>
+              <Building2 className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold">{warehouseATotal.toLocaleString()}</p>
+            <p className="text-[11px] opacity-90 mt-0.5">Western Panay Hub</p>
           </div>
-          <p className="text-2xl font-bold">{warehouseATotal.toLocaleString()}</p>
-          <p className="text-[11px] opacity-90 mt-1">Western Panay Hub</p>
+          <div className="mt-2 pt-2 border-t border-white/20 text-[10px] space-y-0.5">
+            <div className="flex justify-between font-semibold">
+              <span>Cap: {otonCaps.forFilter(commodityTypeFilter).toLocaleString()}</span>
+              <span>{Math.round((warehouseATotal / (otonCaps.forFilter(commodityTypeFilter) || 1)) * 100)}%</span>
+            </div>
+            <div className="flex justify-between opacity-80 text-[9px]">
+              <span>Food: {otonCaps.food.toLocaleString()}</span>
+              <span>NFI: {otonCaps.nonFood.toLocaleString()}</span>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-4 text-white shadow-sm">
-          <div className="flex items-center justify-between opacity-80 mb-1">
-            <span className="text-xs font-semibold">Pototan Main Hub</span>
-            <Building2 className="w-5 h-5" />
+        <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-4 text-white shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between opacity-80 mb-1">
+              <span className="text-xs font-semibold">Pototan Main Hub</span>
+              <Building2 className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold">{warehouseBTotal.toLocaleString()}</p>
+            <p className="text-[11px] opacity-90 mt-0.5">Central Panay Hub</p>
           </div>
-          <p className="text-2xl font-bold">{warehouseBTotal.toLocaleString()}</p>
-          <p className="text-[11px] opacity-90 mt-1">Central Panay Hub</p>
+          <div className="mt-2 pt-2 border-t border-white/20 text-[10px] space-y-0.5">
+            <div className="flex justify-between font-semibold">
+              <span>Cap: {pototanCaps.forFilter(commodityTypeFilter).toLocaleString()}</span>
+              <span>{Math.round((warehouseBTotal / (pototanCaps.forFilter(commodityTypeFilter) || 1)) * 100)}%</span>
+            </div>
+            <div className="flex justify-between opacity-80 text-[9px]">
+              <span>Food: {pototanCaps.food.toLocaleString()}</span>
+              <span>NFI: {pototanCaps.nonFood.toLocaleString()}</span>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl p-4 text-white shadow-sm">
-          <div className="flex items-center justify-between opacity-80 mb-1">
-            <span className="text-xs font-semibold">Prepositioned in LGUs</span>
-            <TrendingUp className="w-5 h-5" />
+        <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-xl p-4 text-white shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between opacity-80 mb-1">
+              <span className="text-xs font-semibold">Prepositioned in LGUs</span>
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold">{totalLGUWarehouse.toLocaleString()}</p>
+            <p className="text-[11px] opacity-90 mt-0.5">Local Municipal Reserves</p>
           </div>
-          <p className="text-2xl font-bold">{totalLGUWarehouse.toLocaleString()}</p>
-          <p className="text-[11px] opacity-90 mt-1">Local Municipal Reserves</p>
+          <div className="mt-2 pt-2 border-t border-white/20 text-[10px] space-y-0.5">
+            <div className="flex justify-between font-semibold">
+              <span>Cap: {lguCapsTotal.effective.toLocaleString()}</span>
+              <span>{Math.round((totalLGUWarehouse / (lguCapsTotal.effective || 1)) * 100)}%</span>
+            </div>
+            <div className="flex justify-between opacity-80 text-[9px]">
+              <span>Food: {lguCapsTotal.food.toLocaleString()}</span>
+              <span>NFI: {lguCapsTotal.nonFood.toLocaleString()}</span>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-gradient-to-br from-orange-600 to-orange-700 rounded-xl p-4 text-white shadow-sm col-span-2 md:col-span-1">
-          <div className="flex items-center justify-between opacity-80 mb-1">
-            <span className="text-xs font-semibold">Total Dispatched</span>
-            <TrendingDown className="w-5 h-5" />
+        <div className="bg-gradient-to-br from-orange-600 to-orange-700 rounded-xl p-4 text-white shadow-sm col-span-2 md:col-span-1 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between opacity-80 mb-1">
+              <span className="text-xs font-semibold">Total Dispatched</span>
+              <TrendingDown className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold">{totalReleased.toLocaleString()}</p>
+            <p className="text-[11px] opacity-90 mt-0.5">Released to Relief</p>
           </div>
-          <p className="text-2xl font-bold">{totalReleased.toLocaleString()}</p>
-          <p className="text-[11px] opacity-90 mt-1">Released to Relief</p>
+          <div className="mt-2 pt-2 border-t border-white/20 text-[10px]">
+            <span className="opacity-90">{commodityTypeFilter === 'All' ? 'All Commodities' : commodityTypeFilter}</span>
+          </div>
         </div>
       </div>
 
@@ -932,8 +1068,8 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
           )}
         </div>
 
-        {/* Search, Commodity Category, and Stock Buffer Health Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Search, Commodity Classification, Category, and Stock Buffer Health Filters */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
@@ -950,12 +1086,27 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
 
           <div>
             <select
+              value={commodityTypeFilter}
+              onChange={(e) => {
+                setCommodityTypeFilter(e.target.value as CommodityTypeFilter);
+                setCurrentPage(1);
+              }}
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="All">All Classifications</option>
+              <option value="Food Items">Food Items (FFP & RTEF)</option>
+              <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+            </select>
+          </div>
+
+          <div>
+            <select
               value={selectedCategory}
               onChange={(e) => {
                 setSelectedCategory(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               <option value="All">All Categories ({dynamicCategories.length})</option>
               {dynamicCategories.map((cat) => (
@@ -973,7 +1124,7 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
                 setStockHealthFilter(e.target.value as 'all' | 'low' | 'expiring' | 'optimal');
                 setCurrentPage(1);
               }}
-              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-xs font-medium border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               <option value="all">All Buffer Levels</option>
               <option value="low">Low Stock Buffer (&lt; 500 units)</option>

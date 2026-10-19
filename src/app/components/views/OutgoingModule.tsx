@@ -10,6 +10,10 @@ import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
 import { backendApi, type LguRecord, type ProvinceRecord, type WarehouseRecord, type SupplySourceRecord, type KitTypeRecord, type TruckRecord, type EscortProfile } from '../../services/backendApi';
 import { resolveEscortName, registerEscortProfiles } from '../../lib/escortHelper';
+import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter
+} from '../../lib/commodityClassification';
 
 interface InventoryState {
   inventory: InventoryItem[];
@@ -88,6 +92,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [editingRelease, setEditingRelease] = useState<OutgoingRelease | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
+  const [selectedCommodityType, setSelectedCommodityType] = useState<CommodityTypeFilter>('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [selectedProvince, setSelectedProvince] = useState('All');
   const [selectedMunicipality, setSelectedMunicipality] = useState('All');
@@ -438,6 +443,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     let count = 0;
     if (searchTerm.trim()) count++;
     if (selectedWarehouse !== 'All') count++;
+    if (selectedCommodityType !== 'All') count++;
     if (selectedStatus !== 'All') count++;
     if (selectedProvince !== 'All') count++;
     if (selectedMunicipality !== 'All') count++;
@@ -451,6 +457,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   }, [
     searchTerm,
     selectedWarehouse,
+    selectedCommodityType,
     selectedStatus,
     selectedProvince,
     selectedMunicipality,
@@ -465,6 +472,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const resetAllFilters = () => {
     setSearchTerm('');
     setSelectedWarehouse('All');
+    setSelectedCommodityType('All');
     setSelectedStatus('All');
     setSelectedProvince('All');
     setSelectedMunicipality('All');
@@ -511,6 +519,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
       const matchesWarehouse =
         selectedWarehouse === 'All' || release.warehouseSource === selectedWarehouse;
+      const matchesCommodity =
+        selectedCommodityType === 'All' || matchesCommodityFilter(release.fnfiCategory, selectedCommodityType);
       const matchesStatus =
         selectedStatus === 'All' || release.deliveryStatus === selectedStatus;
       const matchesProv =
@@ -529,6 +539,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       return (
         matchesSearch &&
         matchesWarehouse &&
+        matchesCommodity &&
         matchesStatus &&
         matchesProv &&
         matchesMuni &&
@@ -1045,6 +1056,23 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           </select>
         </div>
 
+        {/* Commodity Classification */}
+        <div>
+          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">Classification Type</label>
+          <select
+            value={selectedCommodityType}
+            onChange={(e) => {
+              setSelectedCommodityType(e.target.value as CommodityTypeFilter);
+              setCurrentPage(1);
+            }}
+            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
+          >
+            <option value="All">All Classifications</option>
+            <option value="Food Items">Food Items (FFP & RTEF)</option>
+            <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+          </select>
+        </div>
+
         {/* Relief Goods */}
         <div>
           <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">Goods Category</label>
@@ -1433,7 +1461,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             {/* If filters not expanded, show the 3 quick filters */}
             {!isFilterExpanded && (
               <div className="p-4 border-b border-gray-200 bg-white">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
@@ -1447,6 +1475,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
                   </div>
+
+                  <select
+                    value={selectedCommodityType}
+                    onChange={(e) => {
+                      setSelectedCommodityType(e.target.value as CommodityTypeFilter);
+                      setCurrentPage(1);
+                    }}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                  >
+                    <option value="All">All Classifications</option>
+                    <option value="Food Items">Food Items (FFP & RTEF)</option>
+                    <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+                  </select>
 
                   <select
                     value={selectedWarehouse}

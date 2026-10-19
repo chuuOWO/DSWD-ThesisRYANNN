@@ -8,6 +8,12 @@ import { backendApi, type LguRecord, type LguInput, type ProvinceRecord, type Ki
 import { DEFAULT_KIT_NAMES, REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { computeSynchronizedLgus, getLguStockForCategory, normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
 import { evaluatePriorityIndicator } from '../../lib/priorityLogic';
+import {
+  type CommodityTypeFilter,
+  matchesCommodityFilter,
+  getLguCapacities,
+  getLguCommodityStock
+} from '../../lib/commodityClassification';
 
 export type LGUDelivery = SynchronizedLgu;
 
@@ -48,6 +54,7 @@ interface LGUMonitoringProps {
 export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGUMonitoringProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProvinceTab, setSelectedProvinceTab] = useState('All');
+  const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [currentPage, setCurrentPage] = useState(1);
@@ -215,9 +222,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       const matchesCategory = selectedCategory === 'All' ||
                              getLguStockForCategory(lgu, selectedCategory) > 0;
 
-      return matchesSearch && matchesProvince && matchesCategory;
+      const matchesCommodity = commodityTypeFilter === 'All' || (() => {
+        const stock = getLguCommodityStock(lgu);
+        return stock.forFilter(commodityTypeFilter) > 0;
+      })();
+
+      return matchesSearch && matchesProvince && matchesCategory && matchesCommodity;
     });
-  }, [baseLguList, searchTerm, selectedProvinceTab, selectedCategory, showArchived]);
+  }, [baseLguList, searchTerm, selectedProvinceTab, selectedCategory, commodityTypeFilter, showArchived]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLGUs.length / pageSize));
   const paginatedLGUs = useMemo(() => {
@@ -448,7 +460,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
       {/* Search, Category Filter, and View Mode Toggle */}
       <div className="bg-white rounded-lg p-5 border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
@@ -464,12 +476,25 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           </div>
 
           <select
+            value={commodityTypeFilter}
+            onChange={(e) => {
+              setCommodityTypeFilter(e.target.value as CommodityTypeFilter);
+              setCurrentPage(1);
+            }}
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-white"
+          >
+            <option value="All">All Classifications</option>
+            <option value="Food Items">Food Items (FFP & RTEF)</option>
+            <option value="Non-Food Items">Non-Food Items (NFIs)</option>
+          </select>
+
+          <select
             value={selectedCategory}
             onChange={(e) => {
               setSelectedCategory(e.target.value);
               setCurrentPage(1);
             }}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+            className="px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium bg-white"
           >
             <option value="All">All Categories</option>
             {categoryOptions.map(cat => (
@@ -579,54 +604,82 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                   </div>
 
                   {/* On-Hand Relief Inventory (Prominent & Automated) */}
-                  <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Package className="w-4 h-4 text-purple-700" />
-                        <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
-                      </div>
-                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                        {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()} / {(lgu.maxStock ?? 3000).toLocaleString()} Max
-                      </span>
-                    </div>
+                  {(() => {
+                    const caps = getLguCapacities(lgu.maxStock);
+                    const stock = getLguCommodityStock(lgu);
+                    const effectiveCap = caps.forFilter(commodityTypeFilter);
+                    const effectiveStock = stock.forFilter(commodityTypeFilter);
+                    const occupancyPct = Math.round((effectiveStock / (effectiveCap || 1)) * 100);
 
-                    {/* Category Breakdown Chips */}
-                    <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
-                      {Object.entries(lgu.currentStock || {})
-                        .filter(([_, qty]) => Number(qty) > 0)
-                        .map(([category, qty]) => (
-                          <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
-                            <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
-                            <p className="text-xs font-bold text-purple-900 mt-0.5">{(Number(qty) || 0).toLocaleString()}</p>
+                    return (
+                      <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Package className="w-4 h-4 text-purple-700" />
+                            <span className="text-xs font-bold text-purple-950">On-Hand Relief Stock</span>
                           </div>
-                        ))}
-                      {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
-                        <div className="col-span-2 text-center py-2 text-[11px] text-purple-600 font-medium italic">
-                          No relief stock recorded on-hand
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                            {effectiveStock.toLocaleString()} / {effectiveCap.toLocaleString()} ({occupancyPct}%)
+                          </span>
                         </div>
-                      )}
-                    </div>
 
-                    <div className="flex items-center justify-between text-[10px] text-purple-700 pt-1 border-t border-purple-200/60">
-                      <span className="flex items-center gap-1">
-                        <Lock className="w-3 h-3 text-purple-500" />
-                        Automated via deliveries
-                      </span>
-                      {adminActionsEnabled && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEmergencyLguId(lgu.id);
-                            setShowEmergencyModal(true);
-                          }}
-                          className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
-                        >
-                          Emergency Recount
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                        {/* 2-Way Capacity Split Indicator */}
+                        <div className="grid grid-cols-2 gap-2 text-[10px] bg-white/90 p-2 rounded-lg border border-purple-100">
+                          <div className="space-y-0.5">
+                            <div className="flex justify-between font-bold text-gray-700">
+                              <span>Food Buffer</span>
+                              <span className="text-amber-800">{Math.round((stock.food / (caps.food || 1)) * 100)}%</span>
+                            </div>
+                            <p className="text-gray-500 font-medium">{stock.food.toLocaleString()} / {caps.food.toLocaleString()}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <div className="flex justify-between font-bold text-gray-700">
+                              <span>Non-Food</span>
+                              <span className="text-indigo-800">{Math.round((stock.nonFood / (caps.nonFood || 1)) * 100)}%</span>
+                            </div>
+                            <p className="text-gray-500 font-medium">{stock.nonFood.toLocaleString()} / {caps.nonFood.toLocaleString()}</p>
+                          </div>
+                        </div>
+
+                        {/* Category Breakdown Chips */}
+                        <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+                          {Object.entries(lgu.currentStock || {})
+                            .filter(([category, qty]) => Number(qty) > 0 && matchesCommodityFilter(category, commodityTypeFilter))
+                            .map(([category, qty]) => (
+                              <div key={category} className="bg-white rounded-lg px-2.5 py-1.5 border border-purple-100 shadow-2xs">
+                                <p className="text-[10px] text-gray-500 font-medium truncate" title={category}>{category}</p>
+                                <p className="text-xs font-bold text-purple-900 mt-0.5">{(Number(qty) || 0).toLocaleString()}</p>
+                              </div>
+                            ))}
+                          {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
+                            <div className="col-span-2 text-center py-2 text-[11px] text-purple-600 font-medium italic">
+                              No relief stock recorded on-hand
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-purple-700 pt-1 border-t border-purple-200/60">
+                          <span className="flex items-center gap-1">
+                            <Lock className="w-3 h-3 text-purple-500" />
+                            Automated via deliveries
+                          </span>
+                          {adminActionsEnabled && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEmergencyLguId(lgu.id);
+                                setShowEmergencyModal(true);
+                              }}
+                              className="text-purple-700 hover:text-purple-900 font-bold hover:underline cursor-pointer"
+                            >
+                              Emergency Recount
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="pt-2 border-t border-gray-100 space-y-1 text-[11px] text-gray-500">
                     <div className="flex justify-between">
@@ -713,26 +766,41 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <span className="text-gray-700">{lgu.deliveryCount}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-sm text-purple-700">
-                            {Object.values(lgu.currentStock || {}).reduce((sum, val) => sum + (Number(val) || 0), 0).toLocaleString()}
-                          </span>
-                          <span className="text-[10px] text-gray-400 font-medium">/ {(lgu.maxStock ?? 3000).toLocaleString()} max</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1 max-w-sm">
-                          {Object.entries(lgu.currentStock || {})
-                            .filter(([_, qty]) => Number(qty) > 0)
-                            .map(([cat, qty]) => (
-                              <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
-                                {cat}: {(Number(qty) || 0).toLocaleString()}
+                      {(() => {
+                        const caps = getLguCapacities(lgu.maxStock);
+                        const stock = getLguCommodityStock(lgu);
+                        const effectiveCap = caps.forFilter(commodityTypeFilter);
+                        const effectiveStock = stock.forFilter(commodityTypeFilter);
+                        const occupancyPct = Math.round((effectiveStock / (effectiveCap || 1)) * 100);
+
+                        return (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-sm text-purple-700">
+                                {effectiveStock.toLocaleString()}
                               </span>
-                            ))}
-                          {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
-                            <span className="text-[10px] text-gray-400 italic">0 in stock</span>
-                          )}
-                        </div>
-                      </div>
+                              <span className="text-[10px] text-gray-400 font-medium">/ {effectiveCap.toLocaleString()} cap ({occupancyPct}%)</span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 flex items-center gap-2">
+                              <span>Food: <strong>{stock.food.toLocaleString()}</strong>/{caps.food.toLocaleString()}</span>
+                              <span>&bull;</span>
+                              <span>NFI: <strong>{stock.nonFood.toLocaleString()}</strong>/{caps.nonFood.toLocaleString()}</span>
+                            </div>
+                            <div className="flex flex-wrap gap-1 max-w-sm">
+                              {Object.entries(lgu.currentStock || {})
+                                .filter(([cat, qty]) => Number(qty) > 0 && matchesCommodityFilter(cat, commodityTypeFilter))
+                                .map(([cat, qty]) => (
+                                  <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
+                                    {cat}: {(Number(qty) || 0).toLocaleString()}
+                                  </span>
+                                ))}
+                              {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
+                                <span className="text-[10px] text-gray-400 italic">0 in stock</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-1">
