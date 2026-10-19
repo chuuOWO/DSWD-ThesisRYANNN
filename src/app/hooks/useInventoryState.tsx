@@ -306,7 +306,7 @@ type OutgoingRequestRow = {
   created_at?: string | null;
 };
 
-const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
+export const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
   const item = {
     id: row.manifest_number ?? row.id,
     dateReceived: row.date_received ?? '',
@@ -412,7 +412,7 @@ export const deduplicateLguPriorityReports = (reports: LGUPriorityReport[], lgus
   return Array.from(map.values()).sort((a, b) => b.urgencyScore - a.urgencyScore);
 };
 
-const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
+export const mapOutgoingRequest = (row: OutgoingRequestRow): OutgoingRelease => {
   const rawBatches = Array.isArray(row.allocated_batches)
     ? row.allocated_batches
     : typeof row.allocated_batches === 'string'

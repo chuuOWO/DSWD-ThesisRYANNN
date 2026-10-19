@@ -28,7 +28,12 @@ import {
   FileText,
   RotateCcw
 } from 'lucide-react';
-import type { OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
+import {
+  type OutgoingRelease,
+  type IncomingGoods,
+  mapIncomingManifest,
+  mapOutgoingRequest
+} from '../../hooks/useInventoryState';
 import { normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
 import { backendApi, type KitTypeRecord } from '../../services/backendApi';
 import { supabase } from '../../lib/supabase';
@@ -65,6 +70,7 @@ export interface LGUTransaction {
   source: string;
   destination: string;
   date: string;
+  createdAt?: string;
   status: string;
   deliveryMode?: string;
   plateNumber?: string;
@@ -138,14 +144,18 @@ export function LGUDetailModal({
   const [dbLedgerEntries, setDbLedgerEntries] = useState<any[]>([]);
   const [dbBatches, setDbBatches] = useState<any[]>([]);
   const [dbManifests, setDbManifests] = useState<any[]>([]);
+  const [dbOutgoing, setDbOutgoing] = useState<OutgoingRelease[]>([]);
+  const [dbIncoming, setDbIncoming] = useState<IncomingGoods[]>([]);
   const [isLoadingLedger, setIsLoadingLedger] = useState(false);
 
-  // Load and subscribe to live database stock ledger movements and batch data for this LGU
+  // Load and subscribe to live database stock ledger movements, outgoing dispatches, and incoming manifests
   useEffect(() => {
     if (!isOpen || !lgu?.id) {
       setDbLedgerEntries([]);
       setDbBatches([]);
       setDbManifests([]);
+      setDbOutgoing([]);
+      setDbIncoming([]);
       return;
     }
 
@@ -154,15 +164,22 @@ export function LGUDetailModal({
 
     const fetchAllData = async () => {
       try {
-        const [ledgerRows, batchesRes, manifestsRes] = await Promise.all([
+        const [ledgerRows, batchesRes, manifestsRes, outgoingRes] = await Promise.all([
           backendApi.getStockLedgerForLgu(lgu.id).catch(() => []),
           supabase.from('inventory_batches').select('*'),
-          supabase.from('incoming_manifests').select('*')
+          supabase.from('incoming_manifests').select('*').order('created_at', { ascending: false }),
+          supabase.from('outgoing_requests').select('*').order('created_at', { ascending: false })
         ]);
         if (isSubscribed) {
           setDbLedgerEntries(ledgerRows || []);
           if (batchesRes.data) setDbBatches(batchesRes.data);
-          if (manifestsRes.data) setDbManifests(manifestsRes.data);
+          if (manifestsRes.data) {
+            setDbManifests(manifestsRes.data);
+            setDbIncoming(manifestsRes.data.map(mapIncomingManifest));
+          }
+          if (outgoingRes.data) {
+            setDbOutgoing(outgoingRes.data.map(mapOutgoingRequest));
+          }
         }
       } catch (err) {
         console.warn('Failed to load database ledger/batches for LGU:', err);
@@ -175,8 +192,15 @@ export function LGUDetailModal({
 
     fetchAllData();
 
+    // Authoritative real-time sync across all master tables matching IncomingModule & OutgoingModule
+    const unsubscribeDashboard = backendApi.subscribeDashboard(() => {
+      if (isSubscribed) {
+        fetchAllData();
+      }
+    });
+
     const channelLedger = supabase
-      .channel(`lgu-ledger-${lgu.id}`)
+      .channel(`lgu-ledger-${lgu.id}-${crypto.randomUUID().slice(0, 8)}`)
       .on(
         'postgres_changes',
         {
@@ -186,32 +210,55 @@ export function LGUDetailModal({
           filter: `lgu_id=eq.${lgu.id}`
         },
         () => {
-          fetchAllData();
+          if (isSubscribed) fetchAllData();
         }
       )
       .subscribe();
 
-    const channelBatches = supabase
-      .channel(`lgu-batches-${lgu.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'inventory_batches'
-        },
-        () => {
-          fetchAllData();
-        }
-      )
-      .subscribe();
+    // Heartbeat poll ensures live updates remain synchronized
+    const pollTimer = setInterval(() => {
+      if (isSubscribed) fetchAllData();
+    }, 4000);
 
     return () => {
       isSubscribed = false;
+      unsubscribeDashboard();
       supabase.removeChannel(channelLedger);
-      supabase.removeChannel(channelBatches);
+      clearInterval(pollTimer);
     };
   }, [isOpen, lgu?.id]);
+
+  // Authoritative real-time outgoing releases merging live Supabase rows with props
+  const effectiveOutgoingReleases = useMemo<OutgoingRelease[]>(() => {
+    const map = new Map<string, OutgoingRelease>();
+    (outgoingReleases || []).forEach((r) => {
+      if (!r) return;
+      const key = (r.drNumber || r.id || '').trim().toLowerCase();
+      if (key) map.set(key, r);
+    });
+    dbOutgoing.forEach((r) => {
+      if (!r) return;
+      const key = (r.drNumber || r.id || '').trim().toLowerCase();
+      if (key) map.set(key, r);
+    });
+    return Array.from(map.values());
+  }, [outgoingReleases, dbOutgoing]);
+
+  // Authoritative real-time incoming goods intake merging live Supabase manifests with props
+  const effectiveIncomingGoods = useMemo<IncomingGoods[]>(() => {
+    const map = new Map<string, IncomingGoods>();
+    (incomingGoods || []).forEach((item) => {
+      if (!item) return;
+      const key = (item.id || item.manifestNumber || '').trim().toLowerCase();
+      if (key) map.set(key, item);
+    });
+    dbIncoming.forEach((item) => {
+      if (!item) return;
+      const key = (item.id || item.manifestNumber || '').trim().toLowerCase();
+      if (key) map.set(key, item);
+    });
+    return Array.from(map.values());
+  }, [incomingGoods, dbIncoming]);
 
   // Reset pagination when opening modal or switching tabs/filters
   useEffect(() => {
@@ -262,8 +309,8 @@ export function LGUDetailModal({
       }
     });
 
-    // 3. From incomingGoods prop
-    incomingGoods.forEach((inc) => {
+    // 3. From effective incoming goods (live database + props)
+    effectiveIncomingGoods.forEach((inc) => {
       if (inc?.expirationDate) {
         if (inc.id) map.set(String(inc.id).toLowerCase().trim(), inc.expirationDate);
         if (inc.manifestNumber) {
@@ -277,7 +324,7 @@ export function LGUDetailModal({
     });
 
     return map;
-  }, [dbBatches, dbManifests, incomingGoods]);
+  }, [dbBatches, dbManifests, effectiveIncomingGoods]);
 
   // Helper to resolve an allocation or batch token to an expiration date
   const resolveExpirationDate = (alloc: { batchTokenId?: string | null; batchNumber?: string | null; expirationDate?: string | null }): string | null => {
@@ -303,7 +350,7 @@ export function LGUDetailModal({
     const list: LGUTransaction[] = [];
 
     // 1. Inbound shipments dispatched from Regional Hubs/Warehouses to this LGU (Incoming to LGU)
-    outgoingReleases.forEach((r) => {
+    effectiveOutgoingReleases.forEach((r) => {
       if (!r) return;
       const targetMuni = (r.municipality || '').trim().toLowerCase();
       const targetName = (r.lguName || '').trim().toLowerCase();
@@ -355,6 +402,7 @@ export function LGUDetailModal({
         const daysRemaining = effectiveExp ? getDaysRemaining(effectiveExp) : undefined;
         const expiryTier = effectiveExp ? getExpiryTier(effectiveExp) : undefined;
         const outIncCode = formatOutgoingReference(r);
+        const releaseTime = (r as any).created_at || (r as any).createdAt || r.dateAllocated || r.dateRequested || '';
 
         list.push({
           id: `OUT-INC-${r.id || r.drNumber || Math.random()}`,
@@ -366,7 +414,8 @@ export function LGUDetailModal({
           unit: 'kits',
           source: r.warehouseSource || 'Regional Hub',
           destination: `${lgu.municipality} LGU`,
-          date: r.dateAllocated || r.dateRequested || '',
+          date: r.dateAllocated || r.dateRequested || (releaseTime ? String(releaseTime).split('T')[0] : ''),
+          createdAt: releaseTime ? new Date(releaseTime).toISOString() : undefined,
           status: r.deliveryStatus || 'Pending',
           deliveryMode: r.deliveryMode,
           plateNumber: r.plateNumber || r.truckId,
@@ -380,7 +429,7 @@ export function LGUDetailModal({
     });
 
     // 2. Direct incoming goods entries to this LGU (Incoming to LGU)
-    incomingGoods.forEach((inc) => {
+    effectiveIncomingGoods.forEach((inc) => {
       if (!inc) return;
       if (inc.destinationType === 'LGU') {
         const dest = (inc.destination || '').trim().toLowerCase();
@@ -392,6 +441,7 @@ export function LGUDetailModal({
           const incCode = isReplenish
             ? formatReplenishReference(inc.manifestNumber || inc.id)
             : formatIncomingReference(inc.manifestNumber, inc.id);
+          const incomingTime = (inc as any).created_at || (inc as any).createdAt || inc.dateReceived || '';
 
           list.push({
             id: `INC-DIRECT-${inc.id}`,
@@ -403,7 +453,8 @@ export function LGUDetailModal({
             unit: inc.unitType || 'packs',
             source: inc.source || 'National Center',
             destination: `${lgu.municipality} LGU`,
-            date: inc.dateReceived || '',
+            date: inc.dateReceived || (incomingTime ? String(incomingTime).split('T')[0] : ''),
+            createdAt: incomingTime ? new Date(incomingTime).toISOString() : undefined,
             status: inc.status === 'Verified' ? 'Delivered' : inc.status,
             deliveryMode: isReplenish ? 'LGU Replenishment' : 'Direct Logistics',
             expirationDate: exp,
@@ -416,12 +467,13 @@ export function LGUDetailModal({
     });
 
     // 3. Outbound releases dispatched from this LGU (Outgoing from LGU)
-    outgoingReleases.forEach((r) => {
+    effectiveOutgoingReleases.forEach((r) => {
       if (!r) return;
       if (r.sourceType === 'LGU' && r.deliveryStatus !== 'Cancelled') {
         const source = (r.warehouseSource || '').trim().toLowerCase();
         if (source === muniLower || (muniLower.length > 2 && source.includes(muniLower))) {
           const lguOutCode = formatOutgoingReference(r);
+          const outTime = (r as any).created_at || (r as any).createdAt || r.dateAllocated || r.dateRequested || '';
           list.push({
             id: `OUT-LGU-${r.id || r.drNumber || Math.random()}`,
             type: 'Outgoing',
@@ -432,7 +484,8 @@ export function LGUDetailModal({
             unit: 'kits',
             source: `${lgu.municipality} LGU`,
             destination: r.destination || r.municipality || 'Local Evacuation Center',
-            date: r.dateAllocated || r.dateRequested || '',
+            date: r.dateAllocated || r.dateRequested || (outTime ? String(outTime).split('T')[0] : ''),
+            createdAt: outTime ? new Date(outTime).toISOString() : undefined,
             status: r.deliveryStatus || 'Released',
             deliveryMode: r.deliveryMode,
             plateNumber: r.plateNumber || r.truckId
@@ -452,7 +505,7 @@ export function LGUDetailModal({
         );
         resolvedManifestNum = foundM?.manifest_number || '';
         if (!resolvedManifestNum) {
-          const foundInc = incomingGoods.find(
+          const foundInc = effectiveIncomingGoods.find(
             (inc) => inc.id === row.reference_manifest_id || inc.manifestNumber === row.reference_manifest_id
           );
           resolvedManifestNum = foundInc?.manifestNumber || foundInc?.id || '';
@@ -464,7 +517,7 @@ export function LGUDetailModal({
 
       let resolvedDrNum = '';
       if (row.reference_dr_id) {
-        const foundDr = outgoingReleases.find(
+        const foundDr = effectiveOutgoingReleases.find(
           (r) => r.id === row.reference_dr_id || r.drNumber === row.reference_dr_id
         );
         resolvedDrNum = foundDr?.drNumber || '';
@@ -552,6 +605,7 @@ export function LGUDetailModal({
       }
 
       const exp = row.reference_dr_id ? expiryMap.get(String(row.reference_dr_id).toLowerCase().trim()) : null;
+      const ledgerTime = row.created_at || '';
 
       list.push({
         id: `DB-TX-${row.id}`,
@@ -563,7 +617,8 @@ export function LGUDetailModal({
         unit: 'kits',
         source: sourceName,
         destination: destName,
-        date: row.created_at || '',
+        date: ledgerTime ? String(ledgerTime).split('T')[0] : '',
+        createdAt: ledgerTime ? new Date(ledgerTime).toISOString() : undefined,
         status: 'Recorded',
         deliveryMode: mvType ? mvType.replace(/_/g, ' ') : (isIncoming ? 'Direct Intake' : 'Dispatch Release'),
         expirationDate: exp,
@@ -573,7 +628,7 @@ export function LGUDetailModal({
     });
 
     return list;
-  }, [lgu, outgoingReleases, incomingGoods, dbLedgerEntries, dbManifests, expiryMap]);
+  }, [lgu, effectiveOutgoingReleases, effectiveIncomingGoods, dbLedgerEntries, dbManifests, expiryMap]);
 
   // Aggregate individual inventory lots / batches received and currently on-hand at this LGU
   const allLots = useMemo<LGUExpiryLot[]>(() => {
@@ -1046,10 +1101,16 @@ export function LGUDetailModal({
         return daysB - daysA;
       }
       if (sortBy === 'date_asc') {
-        return new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime();
+        const timeA = new Date(a.createdAt || a.date || 0).getTime();
+        const timeB = new Date(b.createdAt || b.date || 0).getTime();
+        if (timeA !== timeB) return timeA - timeB;
+        return String(a.referenceCode || '').localeCompare(String(b.referenceCode || ''));
       }
       if (sortBy === 'date_desc') {
-        return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime();
+        const timeB = new Date(b.createdAt || b.date || 0).getTime();
+        const timeA = new Date(a.createdAt || a.date || 0).getTime();
+        if (timeB !== timeA) return timeB - timeA;
+        return String(b.referenceCode || '').localeCompare(String(a.referenceCode || ''));
       }
       if (sortBy === 'qty_desc') {
         return b.quantity - a.quantity;
@@ -1826,13 +1887,13 @@ export function LGUDetailModal({
               </div>
 
               {/* Search Bar */}
-              <div>
+              <div className="min-w-[190px]">
                 <label className="block text-[11px] font-bold text-gray-700 mb-1">Search Reference / Batch</label>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Search DR, lot, category..."
+                    placeholder="Search reference, lot, category..."
                     value={searchQuery}
                     onChange={(e) => {
                       setSearchQuery(e.target.value);

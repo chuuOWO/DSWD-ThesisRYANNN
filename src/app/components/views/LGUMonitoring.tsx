@@ -229,6 +229,16 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     });
   }, [inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, inventoryState?.lguPriorityReports, inventoryState?.lgusList]);
 
+  // Keep selected LGU in sync with live data updates
+  const activeLguForDetails = useMemo(() => {
+    if (!selectedLguForDetails) return null;
+    const found = baseLguList.find(
+      l => l.id === selectedLguForDetails.id ||
+      l.municipality.toLowerCase() === selectedLguForDetails.municipality.toLowerCase()
+    );
+    return found || selectedLguForDetails;
+  }, [selectedLguForDetails, baseLguList]);
+
   // Province list with counts
   const provinceOptions = useMemo(() => {
     if (inventoryState?.provincesList && inventoryState.provincesList.length > 0) {
@@ -1586,7 +1596,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
             setShowDetailModal(false);
             setSelectedLguForDetails(null);
           }}
-          lgu={selectedLguForDetails}
+          lgu={activeLguForDetails}
           outgoingReleases={inventoryState?.outgoingReleasesList}
           incomingGoods={inventoryState?.incomingGoodsList}
           kitTypesList={inventoryState?.kitTypesList}

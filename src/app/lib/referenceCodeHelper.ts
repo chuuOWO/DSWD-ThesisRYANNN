@@ -7,9 +7,16 @@ import { parseIncidentInfo } from './incidentHelper';
  * 3. LGU Replenishment transfer -> DR codes (Delivery Receipt)
  */
 
+function stripLeadingPrefixes(code: string, prefixes: string[]): string {
+  const s = code.trim();
+  const pattern = new RegExp(`^((?:${prefixes.join('|')})[-_ ]*)+`, 'i');
+  return s.replace(pattern, '').trim();
+}
+
 export function isReplenishCode(code?: string | null): boolean {
   if (!code) return false;
-  return code.trim().toUpperCase().startsWith('DR-');
+  const upper = code.trim().toUpperCase();
+  return upper.startsWith('DR-') || /^DR[-_ ]*[0-9A-Z]/i.test(upper);
 }
 
 export function formatIncomingReference(manifestNumber?: string | null, fallbackId?: string | null): string {
@@ -18,25 +25,20 @@ export function formatIncomingReference(manifestNumber?: string | null, fallback
 
   const upper = raw.toUpperCase();
   // LGU replenishment transfer records retain DR code
-  if (upper.startsWith('DR-')) {
-    return upper;
-  }
-  if (upper.startsWith('RIS-')) {
-    return upper;
-  }
-  if (upper.startsWith('MNF-')) {
-    return `RIS-${upper.slice(4)}`;
-  }
-  if (upper.startsWith('BATCH-MNF-')) {
-    return `RIS-${upper.slice(10)}`;
-  }
-  if (upper.startsWith('BATCH-')) {
-    return `RIS-${upper.slice(6)}`;
+  if (isReplenishCode(upper)) {
+    return formatReplenishReference(upper);
   }
 
-  // Clean alphanumeric for raw UUIDs / ledger hashes
-  const clean = upper.replace(/[^A-Z0-9-]/g, '');
-  return clean.length > 14 ? `RIS-${clean.slice(0, 12)}` : `RIS-${clean}`;
+  const remainder = stripLeadingPrefixes(upper, ['RIS', 'BATCH-MNF', 'BATCH', 'MNF']);
+  if (!remainder) return 'RIS-N/A';
+
+  // Clean alphanumeric or preserve structured hyphenated codes
+  const clean = remainder.replace(/[^A-Z0-9-]/g, '');
+  if (!clean) return 'RIS-N/A';
+
+  return clean.length > 14 && !clean.includes('-')
+    ? `RIS-${clean.slice(0, 12)}`
+    : `RIS-${clean}`;
 }
 
 export function formatOutgoingReference(
@@ -48,15 +50,17 @@ export function formatOutgoingReference(
     const raw = releaseOrCode.trim();
     if (!raw) return 'INC-N/A';
     const upper = raw.toUpperCase();
-    if (upper.startsWith('INC-')) return upper;
-    if (upper.startsWith('DR-')) return `INC-${upper.slice(3)}`;
-    return `INC-${upper}`;
+    const remainder = stripLeadingPrefixes(upper, ['INC', 'DR']);
+    return remainder ? `INC-${remainder}` : 'INC-N/A';
   }
 
   const rawDr = releaseOrCode.drNumber;
   if (rawDr && rawDr.trim()) {
-    const cleanDr = rawDr.trim().toUpperCase();
-    if (cleanDr.startsWith('INC-')) return cleanDr;
+    const upper = rawDr.trim().toUpperCase();
+    if (upper.startsWith('INC')) {
+      const remainder = stripLeadingPrefixes(upper, ['INC', 'DR']);
+      if (remainder) return `INC-${remainder}`;
+    }
   }
 
   const rawIncident = releaseOrCode.incidentCode;
@@ -64,16 +68,15 @@ export function formatOutgoingReference(
     const parsed = parseIncidentInfo(rawIncident).incidentCode || rawIncident;
     const cleanParsed = parsed.trim().toUpperCase();
     if (cleanParsed && cleanParsed !== 'NONE') {
-      if (cleanParsed.startsWith('INC-')) return cleanParsed;
-      if (cleanParsed.startsWith('DR-')) return `INC-${cleanParsed.slice(3)}`;
-      return `INC-${cleanParsed}`;
+      const remainder = stripLeadingPrefixes(cleanParsed, ['INC', 'DR']);
+      if (remainder) return `INC-${remainder}`;
     }
   }
 
   if (rawDr && rawDr.trim()) {
-    const cleanDr = rawDr.trim().toUpperCase();
-    if (cleanDr.startsWith('DR-')) return `INC-${cleanDr.slice(3)}`;
-    return `INC-${cleanDr}`;
+    const upper = rawDr.trim().toUpperCase();
+    const remainder = stripLeadingPrefixes(upper, ['INC', 'DR']);
+    if (remainder) return `INC-${remainder}`;
   }
 
   return 'INC-N/A';
@@ -83,9 +86,9 @@ export function formatReplenishReference(rawCode?: string | null): string {
   const raw = (rawCode || '').trim();
   if (!raw) return 'DR-N/A';
   const upper = raw.toUpperCase();
-  if (upper.startsWith('DR-')) return upper;
-  if (upper.startsWith('RIS-')) return `DR-${upper.slice(4)}`;
-  if (upper.startsWith('MNF-')) return `DR-${upper.slice(4)}`;
-  return `DR-${upper}`;
+  const remainder = stripLeadingPrefixes(upper, ['DR', 'RIS', 'BATCH-MNF', 'BATCH', 'MNF']);
+  if (!remainder) return 'DR-N/A';
+  const clean = remainder.replace(/[^A-Z0-9-]/g, '');
+  return clean ? `DR-${clean}` : 'DR-N/A';
 }
 
