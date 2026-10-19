@@ -1220,7 +1220,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       console.error('Cannot add incoming goods: RIS number is strictly required.');
       return;
     }
-    const cleanId = rawRis.toUpperCase();
+    const upperRis = rawRis.toUpperCase();
+    const cleanId = upperRis.startsWith('RIS-') || upperRis.startsWith('DR-')
+      ? upperRis
+      : `RIS-${upperRis}`;
     const isLgu = newGoods.destinationType === 'LGU';
     const initialStatus: IncomingStatus = 'Pending Verification';
     const auditMessage = isLgu

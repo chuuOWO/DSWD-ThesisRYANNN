@@ -261,9 +261,14 @@ export function AddIncomingGoodsModal({
         destLguId = availableLgus.find(l => l.municipality.toLowerCase() === selectedMunicipality.toLowerCase())?.id;
       }
 
+      const rawManifest = (formData.manifestNumber || '').trim().toUpperCase();
+      const finalManifest = rawManifest.startsWith('RIS-') || rawManifest.startsWith('DR-')
+        ? rawManifest
+        : `RIS-${rawManifest}`;
+
       const submissionData: IncomingGoodsForm = {
         ...formData,
-        manifestNumber: formData.manifestNumber?.trim().toUpperCase(),
+        manifestNumber: finalManifest,
         source: finalSource,
         destination: formData.destinationType === 'LGU' ? selectedMunicipality : formData.destination,
         supplySourceId: matchedSource?.id,

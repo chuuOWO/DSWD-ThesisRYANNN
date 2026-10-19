@@ -2097,8 +2097,13 @@ export const backendApi = {
       effectiveIncident = await this.ensureIncidentExists(parsed);
     }
 
+    const rawManifest = (payload.manifestNumber || '').trim().toUpperCase();
+    const finalManifest = rawManifest.startsWith('RIS-') || rawManifest.startsWith('DR-')
+      ? rawManifest
+      : (rawManifest ? `RIS-${rawManifest}` : `RIS-${Date.now()}`);
+
     const insertPayload: Record<string, any> = {
-      manifest_number: payload.manifestNumber,
+      manifest_number: finalManifest,
       date_received: payload.dateReceived || new Date().toISOString().split('T')[0],
       category: payload.fnfiCategory || 'Family Food Pack',
       quantity: Number(payload.quantity) || 1,
