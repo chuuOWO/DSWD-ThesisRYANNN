@@ -650,6 +650,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
     distanceMeters: number;
     isWarehousePickup: boolean;
     targetFacilityName: string;
+    intakeMode?: 'post_dropoff' | 'direct_convoy' | 'warehouse_pickup';
   } | null>(null);
   const [verifiedQuantityInput, setVerifiedQuantityInput] = useState<number>(0);
   const [verificationRemarks, setVerificationRemarks] = useState('');
@@ -865,6 +866,13 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         ? (matchingRelease?.destinationAddress || matchingRelease?.municipality || finalMuni)
         : 'DSWD Regional Warehouse';
       const distanceMeters = isWithinDropoff ? (distToDropoff ?? 0) : distToWarehouse;
+      const isWarehousePickupMode = (!isWithinDropoff && isWithinWarehouse) || matchingRelease?.deliveryMode === 'Pick up';
+      const isDeliveredMode = matchingRelease?.deliveryStatus === 'Delivered';
+      const intakeMode = isWarehousePickupMode
+        ? 'warehouse_pickup'
+        : isDeliveredMode
+        ? 'post_dropoff'
+        : 'direct_convoy';
 
       setPendingVerification({
         drNumber: canonicalDrNumber,
@@ -874,8 +882,9 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         matchingRelease: matchingRelease || null,
         receiverGpsString,
         distanceMeters,
-        isWarehousePickup: !isWithinDropoff && isWithinWarehouse,
-        targetFacilityName
+        isWarehousePickup: isWarehousePickupMode,
+        targetFacilityName,
+        intakeMode
       });
       setVerifiedQuantityInput(quantity);
       setVerificationRemarks('');
@@ -922,6 +931,12 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       });
 
       // Record final handover hop in custody_hops
+      const hopNote = isWarehousePickup
+        ? `Final custody handover verified and accepted by LGU Receiver at ${targetFacilityName} (Direct Warehouse Pickup).`
+        : matchingRelease?.deliveryStatus === 'Delivered'
+        ? `Final physical intake verified and accepted by LGU Receiver at ${targetFacilityName} (Post-Drop-Off Delivery). Escort custody fulfilled.`
+        : `Final direct intake verified and accepted by LGU Receiver at ${targetFacilityName} (Direct Intake Handover from Convoy ${matchingRelease?.assignedTruckId || 'Truck'}).`;
+
       await backendApi.recordCustodyHop({
         outgoingRequestId: matchingRelease?.id || drNumber,
         sequence: 99,
@@ -930,7 +945,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         fromTruckId: matchingRelease?.assignedTruckId || undefined,
         gpsCoordinates: receiverGpsString,
         blockchainTxHash: receiptTxHash,
-        notes: `Final custody handover verified and accepted by LGU Receiver at ${targetFacilityName}${isWarehousePickup ? ' (Direct Warehouse Pickup)' : ''}`
+        notes: hopNote
       }).catch(() => {});
 
       // Append LGU_RECEIVED to stock_ledger
@@ -972,6 +987,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       if (deliveredTruckId) {
         await backendApi.markTruckLiveLocationDone(deliveredTruckId, drNumber).catch(() => {});
       }
+      await backendApi.markTruckLiveLocationDoneByDr(drNumber).catch(() => {});
 
       await loadLguStock();
 
@@ -1890,7 +1906,11 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     <MapPin size={16} className="text-emerald-600 shrink-0" />
                     <div>
                       <p className="font-bold">
-                        {pendingVerification.isWarehousePickup ? 'Within Warehouse Pickup Geofence' : 'Within Drop-Off Geofence'}
+                        {pendingVerification.isWarehousePickup
+                          ? 'Within Warehouse Pickup Geofence'
+                          : pendingVerification.matchingRelease?.deliveryStatus === 'Delivered'
+                          ? 'Within Drop-Off Geofence (Post-Drop-Off Intake)'
+                          : 'Within Drop-Off Geofence (Direct Convoy Handover)'}
                       </p>
                       <p className="text-[10px] text-emerald-700 font-mono">
                         GPS Verified • ±{Math.round(pendingVerification.distanceMeters)}m to {pendingVerification.targetFacilityName}
@@ -1922,7 +1942,11 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
                     Origin: {pendingVerification.matchingRelease?.warehouseSource || 'DSWD Logistics Hub'}
                   </p>
                   <p className="text-[10px] text-gray-500 truncate">
-                    Mode: {pendingVerification.isWarehousePickup ? 'Direct Warehouse Pickup' : `Convoy: ${pendingVerification.matchingRelease?.assignedTruckId || 'Pending'}`}
+                    Mode: {pendingVerification.isWarehousePickup
+                      ? 'Direct Warehouse Pickup (LGU Retrieval)'
+                      : pendingVerification.matchingRelease?.deliveryStatus === 'Delivered'
+                      ? `Physical Intake (Delivered by Escort - Convoy ${pendingVerification.matchingRelease?.assignedTruckId || 'Vehicle'})`
+                      : `Direct Intake Handover (from Convoy ${pendingVerification.matchingRelease?.assignedTruckId || 'Vehicle'})`}
                   </p>
                 </div>
 

@@ -1469,49 +1469,22 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       const destinationText = matchingRelease?.destination_address || matchingRelease?.lgu_name || matchingRelease?.municipality || payload.to || 'Assigned LGU';
       const gpsString = `${nextLoc.latitude.toFixed(6)}, ${nextLoc.longitude.toFixed(6)}`;
 
-      // Confirm receipt on Sepolia blockchain
-      const proof = await blockchain.confirmReceipt({
-        drNumber: payload.drNumber,
-        handoverContractId: resolvedContractId,
-        destination: destinationText,
-        gps: gpsString,
-        signerWallet: activeWalletAddr && activeWalletAddr !== '0xReceiverWallet' ? activeWalletAddr : undefined
-      }, (stage, txHash) => {
-        setSignStage(stage);
-        if (txHash) {
-          setDropOffTxHash(txHash);
-        }
-      });
+      // Verified drop-off record reference
+      const dropOffRef = `DROPOFF-${payload.drNumber}-${Date.now()}`;
+      setDropOffTxHash(dropOffRef);
 
-      const activeTxHash = proof.hash;
-      setDropOffTxHash(activeTxHash);
-
-      // Record direct custody acceptance in Supabase via backendApi.recordLguReceipt
-      const targetMuni = matchingRelease?.municipality || matchingRelease?.lgu_name || payload.to || 'LGU';
-      await backendApi.recordLguReceipt({
-        drNumber: payload.drNumber,
-        lguName: targetMuni,
-        municipality: targetMuni,
-        category: payload.category,
-        quantity: effectiveQty,
-        receiverGps: gpsString,
-        receiverSignature: activeTxHash || `RECEIVER-DROPOFF-${Date.now()}`,
-        txHash: activeTxHash
-      }).catch((e) => console.warn('recordLguReceipt error:', e));
-
-      // Update outgoing_requests: delivery_status = 'Accepted'
+      // 1. Update outgoing_requests: delivery_status = 'Delivered' (so LGU can subsequently scan and accept)
       await backendApi.updateOutgoing(payload.drNumber, {
-        deliveryStatus: 'Accepted',
+        deliveryStatus: 'Delivered',
         receiverGps: gpsString,
-        txHash: activeTxHash,
+        deliveredAt: new Date().toISOString(),
         handoverContractId: resolvedContractId,
-        receiverSignature: activeTxHash,
-        walletAddress: proof.walletAddress || activeWalletAddr,
-        receivedByProfileId: profile?.id,
+        receiverSignature: dropOffRef,
+        walletAddress: activeWalletAddr,
         amountApproved: effectiveQty
       }).catch((e) => console.warn('updateOutgoing error:', e));
 
-      // Report discrepancy if verified quantity differs or remarks entered
+      // 2. Report discrepancy if verified quantity differs or remarks entered
       if (dropOffRemarks.trim() || effectiveQty !== payload.quantity) {
         const noteText = [
           effectiveQty !== payload.quantity ? `Drop-off verified count ${effectiveQty} vs manifest ${payload.quantity}.` : '',
@@ -1528,7 +1501,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         }).catch(() => {});
       }
 
-      // Record final hop in custody_hops
+      // 3. Record drop-off hop in custody_hops (Escort -> Destination Site)
       const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);
       const nextSequence = (existingHops.length || 0) + 1;
       await backendApi.recordCustodyHop({
@@ -1537,67 +1510,52 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         fromDriverProfileId: profile?.id,
         fromTruckId: activeTruckId,
         gpsCoordinates: gpsString,
-        blockchainTxHash: activeTxHash,
-        notes: `Final drop-off verified inside drop-off geofence at ${destinationText}. Delivered ${effectiveQty} units.`
+        blockchainTxHash: dropOffRef,
+        notes: `Shipment dropped off at destination facility (${destinationText}) by Escort ${profile?.fullName || receiverId}. Awaiting physical intake scan by LGU Receiver.`
       }).catch(() => {});
 
-      // Record LGU_RECEIVED movement in stock_ledger
-      await backendApi.appendStockLedger({
-        movementType: 'LGU_RECEIVED',
-        outgoingRequestId: matchingRelease?.id,
-        drNumber: payload.drNumber,
-        destinationLguId: matchingRelease?.destination_lgu_id || matchingRelease?.lgu_id,
-        quantityChange: effectiveQty,
-        referenceTable: 'lgu_inventory_reports',
-        referenceId: payload.drNumber,
-        gpsCoordinates: gpsString,
-        blockchainTxHash: activeTxHash,
-        performedByProfileId: profile?.id,
-        notes: `Drop-off verified at ${destinationText}. Handover completed on Sepolia.`
-      }).catch(() => {});
-
-      // Clean up truck live location since delivery is finalized
+      // 4. Clean up truck live location since this shipment's transit is finished
       await backendApi.markTruckLiveLocationDoneByDr(payload.drNumber).catch(() => {});
       if (activeTruckId) {
         await backendApi.markTruckLiveLocationDone(activeTruckId, payload.drNumber).catch(() => {});
       }
 
-      // Activity log
+      // 5. Activity log
       await backendApi.logActivity({
         actorId: profile?.id,
         actorName: profile?.fullName || receiverId,
         actorEmail: profile?.email,
         actorRole: 'escort',
-        actorWallet: proof.walletAddress || activeWalletAddr,
+        actorWallet: activeWalletAddr,
         action: 'DELIVERY_DROPOFF_COMPLETED',
         entityType: 'outgoing_request',
         entityId: payload.drNumber,
-        details: `Relief delivery ${payload.drNumber} dropped off inside geofence at ${destinationText}. Recorded to Sepolia testnet.`,
+        details: `Relief delivery ${payload.drNumber} dropped off inside geofence at ${destinationText}. Awaiting LGU receiver intake.`,
         metadata: {
           drNumber: payload.drNumber,
           truckId: activeTruckId,
           destination: destinationText,
           quantity: effectiveQty,
           gps: gpsString,
-          txHash: activeTxHash
-        },
-        txHash: activeTxHash
+          dropOffRef
+        }
       }).catch(() => {});
 
-      // Remove from active packages
+      // 6. Remove from active packages (Escort custody completed)
       const remaining = activePackages.filter((p) => p.drNumber.toUpperCase() !== payload.drNumber.toUpperCase());
       setActivePackages(remaining);
       try {
         localStorage.setItem(storageKey, JSON.stringify(remaining));
       } catch {}
 
-      // Refresh releases list
+      // 7. Refresh releases list
       backendApi.getReceiverReleases().then((rows) => {
         setAllReleases(rows);
       }).catch(() => {});
 
-      setHandoverToast(`Drop-off confirmed on Sepolia for ${payload.drNumber}! Delivery finalized.`);
+      setHandoverToast(`Drop-off confirmed for ${payload.drNumber}! Delivered at ${destinationText}. Awaiting LGU intake.`);
       setTimeout(() => setHandoverToast(null), 8000);
+      setIsSubmittingProof(false);
       setStep('dropoff_success');
     } catch (err: any) {
       console.error('Drop-off error:', err);
@@ -1629,6 +1587,13 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
       if (matchingDbRelease && ['Accepted', 'Distributed'].includes(matchingDbRelease.delivery_status ?? '')) {
         setHandoverToast(`Chain of Custody Finalized: Shipment ${payload.drNumber} was already accepted and received by the destination LGU. It cannot be scanned into transit again.`);
+        setTimeout(() => setHandoverToast(null), 8000);
+        nav('pickup');
+        return;
+      }
+
+      if (matchingDbRelease && matchingDbRelease.delivery_status === 'Delivered') {
+        setHandoverToast(`Shipment ${payload.drNumber} was already dropped off at the destination terminal and is awaiting LGU intake scan.`);
         setTimeout(() => setHandoverToast(null), 8000);
         nav('pickup');
         return;
@@ -3230,7 +3195,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               <div className="text-center mt-1 space-y-3">
                 <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide">
                   <ShieldCheck size={14} className="text-emerald-700" />
-                  <span>End of Transaction • Recorded on Blockchain</span>
+                  <span>Shipment Delivered to Facility • Awaiting LGU Intake</span>
                 </div>
 
                 <div>
@@ -3251,7 +3216,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500 font-medium">Delivery Status:</span>
-                    <span className="font-bold text-emerald-700">Accepted / Delivered</span>
+                    <span className="font-bold text-emerald-700">Delivered (Pending LGU Acceptance)</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500 font-medium">Escort / Carrier:</span>
@@ -3261,18 +3226,29 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   </div>
                 </div>
 
+                <p className="text-[10px] text-gray-500 italic mt-1">
+                  Shipment dropped off at destination facility. Vehicle custody is completed. The LGU receiver can now scan and intake the goods into municipal inventory even after departure.
+                </p>
+
                 {dropOffTxHash && (
                   <div className="flex justify-center pt-1">
-                    <a
-                      href={`https://sepolia.etherscan.io/tx/${dropOffTxHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Sepolia: {dropOffTxHash.slice(0, 8)}...{dropOffTxHash.slice(-6)}</span>
-                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
-                    </a>
+                    {dropOffTxHash.startsWith('0x') ? (
+                      <a
+                        href={`https://sepolia.etherscan.io/tx/${dropOffTxHash}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-mono font-bold hover:bg-emerald-100 transition shadow-xs"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Sepolia: {dropOffTxHash.slice(0, 8)}...{dropOffTxHash.slice(-6)}</span>
+                        <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                      </a>
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gray-100 border border-gray-200 text-gray-600 text-[10.5px] font-mono">
+                        <Check size={13} className="text-emerald-600" />
+                        <span>Drop-Off Log: {dropOffTxHash}</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
