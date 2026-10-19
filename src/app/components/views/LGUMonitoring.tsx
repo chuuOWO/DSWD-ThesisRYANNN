@@ -11,6 +11,7 @@ import { evaluatePriorityIndicator } from '../../lib/priorityLogic';
 import {
   type CommodityTypeFilter,
   matchesCommodityFilter,
+  isFoodItem,
   getLguCapacities,
   getLguCommodityStock
 } from '../../lib/commodityClassification';
@@ -199,8 +200,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       if (canonical) set.add(canonical);
       else set.add(c);
     });
-    return Array.from(set).sort();
-  }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList]);
+    const list = Array.from(set).sort();
+    if (commodityTypeFilter === 'All') return list;
+    return list.filter(cat => matchesCommodityFilter(cat, commodityTypeFilter));
+  }, [inventoryState?.kitTypesList, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, commodityTypeFilter]);
+
+  useEffect(() => {
+    if (selectedCategory !== 'All' && commodityTypeFilter !== 'All') {
+      if (!matchesCommodityFilter(selectedCategory, commodityTypeFilter)) {
+        setSelectedCategory('All');
+      }
+    }
+  }, [commodityTypeFilter, selectedCategory]);
 
 
   const handleEditLGU = async (updatedLGU: LGUDelivery) => {
@@ -250,24 +261,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const filteredLGUs = useMemo(() => {
     return baseLguList.filter(lgu => {
       if (!showArchived && lgu?.isActive === false) return false;
-      const q = (searchTerm || '').toLowerCase();
-      const matchesSearch = (lgu?.lguName || '').toLowerCase().includes(q) ||
-                            (lgu?.municipality || '').toLowerCase().includes(q);
+      const q = (searchTerm || '').toLowerCase().trim();
+      const matchesSearch = !q ||
+                            (lgu?.lguName || '').toLowerCase().includes(q) ||
+                            (lgu?.municipality || '').toLowerCase().includes(q) ||
+                            (lgu?.province || '').toLowerCase().includes(q);
 
       const matchesProvince = selectedProvinceTab === 'All' ||
                              (lgu?.province || '').toLowerCase() === (selectedProvinceTab || '').toLowerCase();
 
-      const matchesCategory = selectedCategory === 'All' ||
-                             getLguStockForCategory(lgu, selectedCategory) > 0;
-
-      const matchesCommodity = commodityTypeFilter === 'All' || (() => {
-        const stock = getLguCommodityStock(lgu);
-        return stock.forFilter(commodityTypeFilter) > 0;
-      })();
-
-      return matchesSearch && matchesProvince && matchesCategory && matchesCommodity;
+      return matchesSearch && matchesProvince;
     });
-  }, [baseLguList, searchTerm, selectedProvinceTab, selectedCategory, commodityTypeFilter, showArchived]);
+  }, [baseLguList, searchTerm, selectedProvinceTab, showArchived]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLGUs.length / pageSize));
   const paginatedLGUs = useMemo(() => {
@@ -355,6 +360,15 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       return null;
     };
 
+    const targetCategoryMatch = (cat?: string | null) => {
+      if (selectedCategory !== 'All') {
+        const c1 = normalizeCategoryName(cat);
+        const c2 = normalizeCategoryName(selectedCategory);
+        return c1.toLowerCase() === c2.toLowerCase();
+      }
+      return matchesCommodityFilter(cat, commodityTypeFilter);
+    };
+
     const seenTokens = new Set<string>();
 
     // 1. Live database inventory_batches assigned to this LGU
@@ -363,7 +377,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       const exp = b.expiration_date || b.expirationDate;
       if (!exp) return;
       const cat = b.kit_name || b.kit_type_id || b.kitTypeId;
-      if (!matchesCommodityFilter(cat, commodityTypeFilter)) return;
+      if (!targetCategoryMatch(cat)) return;
 
       const token = b.batch_token_id || b.batchTokenId;
       if (token && seenTokens.has(token)) return;
@@ -385,7 +399,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     const releases = inventoryState?.outgoingReleasesList || [];
     releases.forEach((r) => {
       if (!r) return;
-      if (!matchesCommodityFilter(r.fnfiCategory, commodityTypeFilter)) return;
+      if (!targetCategoryMatch(r.fnfiCategory)) return;
 
       const targetLguId = findLguId(r.lguId, r.municipality || r.destination, r.province);
       if (!targetLguId) return;
@@ -435,7 +449,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     const incoming = inventoryState?.incomingGoodsList || [];
     incoming.forEach((inc) => {
       if (!inc || inc.destinationType !== 'LGU') return;
-      if (!matchesCommodityFilter(inc.fnfiCategory, commodityTypeFilter)) return;
+      if (!targetCategoryMatch(inc.fnfiCategory)) return;
 
       const targetLguId = findLguId(null, inc.destination, null);
       if (!targetLguId) return;
@@ -456,7 +470,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     });
 
     return map;
-  }, [baseLguList, dbBatches, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, commodityTypeFilter]);
+  }, [baseLguList, dbBatches, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, commodityTypeFilter, selectedCategory]);
 
   // Table summary totals (sum of all filtered records)
   const tableTotals = useMemo(() => {
@@ -468,8 +482,12 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     filteredLGUs.forEach((lgu) => {
       const caps = getLguCapacities(lgu);
       const stock = getLguCommodityStock(lgu);
-      const effectiveCap = caps.forFilter(commodityTypeFilter);
-      const effectiveStock = stock.forFilter(commodityTypeFilter);
+      const effectiveCap = selectedCategory !== 'All'
+        ? (isFoodItem(selectedCategory) ? caps.food : caps.nonFood)
+        : caps.forFilter(commodityTypeFilter);
+      const effectiveStock = selectedCategory !== 'All'
+        ? getLguStockForCategory(lgu, selectedCategory)
+        : stock.forFilter(commodityTypeFilter);
       currentStockSum += effectiveStock;
       capacitySum += effectiveCap;
 
@@ -489,41 +507,44 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       expiring90Sum,
       expiring120Sum
     };
-  }, [filteredLGUs, commodityTypeFilter, lguExpiryBreakdown]);
+  }, [filteredLGUs, commodityTypeFilter, selectedCategory, lguExpiryBreakdown]);
 
   const commodityHeaderLabel = useMemo(() => {
+    if (selectedCategory !== 'All') {
+      return selectedCategory.toUpperCase();
+    }
     if (commodityTypeFilter === 'Food Items') {
-      return 'FAMILY FOOD PACKS';
+      return 'FAMILY FOOD PACKS & RTEF';
     }
     if (commodityTypeFilter === 'Non-Food Items') {
       return 'NON-FOOD ITEMS (NFIs)';
     }
     return 'FAMILY FOOD PACKS & RELIEF GOODS';
-  }, [commodityTypeFilter]);
+  }, [commodityTypeFilter, selectedCategory]);
 
   const getLguStatusConfig = (effectiveStock: number, effectiveCap: number) => {
     if (effectiveStock <= 0) {
       return {
         label: 'DEPLETED',
-        bgClass: 'bg-gray-100 text-gray-700'
+        badgeClass: 'bg-gray-100 text-gray-700 border-gray-200'
       };
     }
     const pct = effectiveCap > 0 ? (effectiveStock / effectiveCap) * 100 : 100;
     if (pct >= 80) {
       return {
         label: 'ADEQUATE',
-        bgClass: 'bg-[#D9EAD3] text-[#274E13]'
+        badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200'
       };
     }
     if (pct >= 50) {
       return {
         label: 'MODERATE',
-        bgClass: 'bg-[#FFF2CC] text-[#7F6000]'
+        badgeClass: 'bg-amber-50 text-amber-800 border-amber-200'
       };
     }
     return {
       label: 'CRITICAL',
-      bgClass: 'bg-[#F4CCCC] text-[#783F04]'
+      badgeClass: 'bg-rose-50 text-rose-800 border-rose-200'
     };
   };
 
@@ -809,16 +830,18 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                       <p className="text-xs text-gray-600 mt-0.5">{lgu.province} &bull; {lgu.lguName}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEditModal(lgu);
-                    }}
-                    className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
-                    title="Edit LGU"
-                  >
-                    <Edit className="w-4 h-4 text-gray-600" />
-                  </button>
+                  {adminActionsEnabled && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditModal(lgu);
+                      }}
+                      className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
+                      title="Edit LGU"
+                    >
+                      <Edit className="w-4 h-4 text-gray-600" />
+                    </button>
+                  )}
                 </div>
 
                 <div className="space-y-2.5">
@@ -952,95 +975,108 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-300 shadow-xs overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-gray-900">Municipal LGU Inventory &amp; Aging Ledger</h3>
+              <p className="text-xs text-gray-500">Live buffer stock levels, storage capacities, and rolling FEFO expiration countdowns</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-700 bg-gray-200/80 px-2.5 py-1 rounded-full">
+                {filteredLGUs.length} Municipalities
+              </span>
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs">
-              <thead>
+            <table className="w-full text-left text-xs divide-y divide-gray-200">
+              <thead className="bg-gray-50 text-gray-700 font-bold uppercase text-[10px] tracking-wider select-none">
                 <tr>
                   <th
                     rowSpan={2}
-                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-2.5 uppercase tracking-wider text-xs align-middle"
+                    className="px-4 py-3 text-center border-b border-r border-gray-200 align-middle w-28"
                   >
                     STATUS
                   </th>
                   <th
                     rowSpan={2}
-                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-4 py-2.5 uppercase tracking-wider text-xs align-middle"
+                    className="px-5 py-3 text-left border-b border-r border-gray-200 align-middle min-w-[200px]"
                   >
-                    <span className="block leading-tight">WAREHOUSE</span>
-                    <span className="block leading-tight">NAME</span>
+                    LGU / MUNICIPALITY
                   </th>
                   <th
                     colSpan={4}
-                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-4 py-1.5 uppercase tracking-wider text-xs"
+                    className="px-4 py-2 text-center border-b border-r border-gray-200 bg-gray-100/70 text-gray-800 font-extrabold"
                   >
                     {commodityHeaderLabel}
                   </th>
                   <th
-                    className="bg-[#F4CCCC] text-[#783F04] font-extrabold text-center border border-gray-300 px-3 py-1.5 uppercase tracking-wider text-xs whitespace-nowrap min-w-[130px]"
+                    className="px-4 py-2 text-center border-b border-r border-rose-200 bg-rose-50/70 text-rose-900 font-extrabold whitespace-nowrap min-w-[130px]"
                   >
-                    <span className="block text-[10px] opacity-80 font-bold">EXPIRING</span>
+                    <span className="block text-[9px] opacity-75 font-semibold">EXPIRING</span>
                     <span className="block text-xs font-black">≤ 90 DAYS</span>
                     <span className="block text-[9px] font-medium normal-case opacity-75">(≤ 3 Months)</span>
                   </th>
                   <th
-                    className="bg-[#FFE599] text-[#7F6000] font-extrabold text-center border border-gray-300 px-3 py-1.5 uppercase tracking-wider text-xs whitespace-nowrap min-w-[130px]"
+                    className="px-4 py-2 text-center border-b border-r border-amber-200 bg-amber-50/70 text-amber-900 font-extrabold whitespace-nowrap min-w-[130px]"
                   >
-                    <span className="block text-[10px] opacity-80 font-bold">EXPIRING</span>
+                    <span className="block text-[9px] opacity-75 font-semibold">EXPIRING</span>
                     <span className="block text-xs font-black">91–120 DAYS</span>
                     <span className="block text-[9px] font-medium normal-case opacity-75">(4–6 Months)</span>
                   </th>
                   <th
                     rowSpan={2}
-                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-2.5 uppercase tracking-wider text-xs align-middle"
+                    className="px-4 py-3 text-center border-b border-gray-200 align-middle w-24"
                   >
                     ACTIONS
                   </th>
                 </tr>
                 <tr>
-                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                  <th className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
                     PERCENTAGE
                   </th>
-                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                  <th className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
                     CURRENT
                   </th>
-                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                  <th className="px-3 py-2 text-right border-b border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
                     CAPACITY
                   </th>
-                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                  <th className="px-3 py-2 text-center border-b border-r border-gray-200 bg-gray-50/90 text-gray-600 font-bold">
                     VARIANCE
                   </th>
                 </tr>
               </thead>
-              <tbody>
-                {/* TOTAL Row (Summary at the top of the table as per reference report) */}
-                <tr className="bg-[#FFF2CC] border-y-2 border-amber-300 font-bold text-gray-900 select-none">
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-center py-2 px-3 text-xs">
-                    {/* Empty cell */}
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {/* TOTAL Summary Row matching overall theme */}
+                <tr className="bg-slate-50 border-b-2 border-gray-200 font-bold text-gray-900 select-none">
+                  <td className="px-3 py-2.5 text-center">
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-900 border border-blue-200">
+                      SUMMARY
+                    </span>
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-center py-2 px-4 text-xs font-black uppercase tracking-wider">
-                    TOTAL
+                  <td className="px-5 py-2.5 text-left font-black tracking-wide text-gray-900">
+                    TOTAL MONITORED ({filteredLGUs.length})
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                  <td className="px-3 py-2.5 text-right font-extrabold text-blue-700 pr-4">
                     {tableTotals.percentage.toFixed(2)}%
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                  <td className="px-3 py-2.5 text-right font-black text-gray-900 pr-4">
                     {tableTotals.currentStockSum.toLocaleString()}
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                  <td className="px-3 py-2.5 text-right font-bold text-gray-700 pr-4">
                     {tableTotals.capacitySum.toLocaleString()}
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                  <td className="px-3 py-2.5 text-center font-bold text-gray-700">
                     {tableTotals.varianceSum > 0 ? tableTotals.varianceSum.toLocaleString() : '-'}
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                  <td className="px-4 py-2.5 text-right font-black text-rose-700 pr-4 bg-rose-50/30">
                     {tableTotals.expiring90Sum > 0 ? tableTotals.expiring90Sum.toLocaleString() : '-'}
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                  <td className="px-4 py-2.5 text-right font-black text-amber-700 pr-4 bg-amber-50/30">
                     {tableTotals.expiring120Sum > 0 ? tableTotals.expiring120Sum.toLocaleString() : '-'}
                   </td>
-                  <td className="bg-[#FFF2CC] border border-gray-300 text-center py-2 px-2 text-xs">
-                    {/* Empty cell */}
+                  <td className="px-3 py-2.5 text-center text-gray-400">
+                    -
                   </td>
                 </tr>
 
@@ -1048,27 +1084,38 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                 {paginatedLGUs.map((lgu) => {
                   const caps = getLguCapacities(lgu);
                   const stock = getLguCommodityStock(lgu);
-                  const effectiveCap = caps.forFilter(commodityTypeFilter);
-                  const effectiveStock = stock.forFilter(commodityTypeFilter);
+                  const effectiveCap = selectedCategory !== 'All'
+                    ? (isFoodItem(selectedCategory) ? caps.food : caps.nonFood)
+                    : caps.forFilter(commodityTypeFilter);
+                  const effectiveStock = selectedCategory !== 'All'
+                    ? getLguStockForCategory(lgu, selectedCategory)
+                    : stock.forFilter(commodityTypeFilter);
                   const occupancyPct = effectiveCap > 0 ? (effectiveStock / effectiveCap) * 100 : 0;
                   const variance = Math.max(0, effectiveCap - effectiveStock);
                   const statusCfg = getLguStatusConfig(effectiveStock, effectiveCap);
                   const expiry = lguExpiryBreakdown.get(lgu.id) || { expiring90: 0, expiring120: 0 };
 
                   return (
-                    <tr key={lgu.id} className="hover:bg-blue-50/30 transition-colors">
-                      <td className={`border border-gray-300 px-3 py-2 text-center text-xs font-bold tracking-wider ${statusCfg.bgClass}`}>
-                        {statusCfg.label}
+                    <tr key={lgu.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-3 py-3 text-center align-middle">
+                        <span className={`inline-flex items-center justify-center px-2.5 py-1 rounded-full text-[10px] font-bold border ${statusCfg.badgeClass}`}>
+                          {statusCfg.label}
+                        </span>
                       </td>
-                      <td className="bg-white border border-gray-300 px-4 py-2 text-xs whitespace-nowrap">
+                      <td className="px-5 py-3 align-middle">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             type="button"
                             onClick={() => openDetailModal(lgu)}
-                            className="font-semibold text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left"
+                            className="font-semibold text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left group"
                             title="Click to view detailed stock and FEFO expiry breakdown"
                           >
-                            {(lgu.province || '').toUpperCase()}, {lgu.municipality}01
+                            <p className="font-bold text-xs text-gray-900 group-hover:text-blue-600 transition-colors">
+                              {lgu.lguName || `${lgu.municipality} Municipal Office`}
+                            </p>
+                            <p className="text-[11px] text-gray-500 font-normal">
+                              {lgu.municipality}, {lgu.province}
+                            </p>
                           </button>
                           {lgu.isActive === false && (
                             <span className="px-1.5 py-0.2 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
@@ -1077,37 +1124,37 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                           )}
                         </div>
                       </td>
-                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-800 pr-4">
+                      <td className="px-3 py-3 text-right text-xs font-semibold text-gray-800 pr-4 align-middle">
                         {occupancyPct.toFixed(2)}%
                       </td>
-                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-900 pr-4">
+                      <td className="px-3 py-3 text-right text-xs font-bold text-gray-900 pr-4 align-middle">
                         {effectiveStock.toLocaleString()}
                       </td>
-                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-700 pr-4">
+                      <td className="px-3 py-3 text-right text-xs font-medium text-gray-600 pr-4 align-middle">
                         {effectiveCap.toLocaleString()}
                       </td>
-                      <td className="bg-white border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-700">
+                      <td className="px-3 py-3 text-center text-xs font-medium text-gray-700 border-r border-gray-100 align-middle">
                         {variance > 0 ? variance.toLocaleString() : '-'}
                       </td>
-                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium pr-4">
+                      <td className="px-4 py-3 text-right text-xs font-medium pr-4 align-middle bg-rose-50/20">
                         {expiry.expiring90 > 0 ? (
-                          <span className="font-bold text-rose-800">
+                          <span className="font-bold text-rose-700">
                             {expiry.expiring90.toLocaleString()}
                           </span>
                         ) : (
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
-                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium pr-4">
+                      <td className="px-4 py-3 text-right text-xs font-medium pr-4 align-middle bg-amber-50/20">
                         {expiry.expiring120 > 0 ? (
-                          <span className="font-bold text-amber-800">
+                          <span className="font-bold text-amber-700">
                             {expiry.expiring120.toLocaleString()}
                           </span>
                         ) : (
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
-                      <td className="bg-white border border-gray-300 px-2 py-2 text-center">
+                      <td className="px-3 py-3 text-center align-middle">
                         <div className="flex items-center justify-center gap-1">
                           <button
                             type="button"
@@ -1117,14 +1164,16 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                           >
                             <List className="w-3.5 h-3.5" />
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(lgu)}
-                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
-                            title="Edit LGU Info"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
+                          {adminActionsEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(lgu)}
+                              className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
+                              title="Edit LGU Info"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {adminActionsEnabled && (
                             <button
                               type="button"
