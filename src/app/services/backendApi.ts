@@ -2230,21 +2230,6 @@ export const backendApi = {
         throw updateErr;
       }
 
-      // 5. Append stock ledger movement for rollback if stock was restored
-      if (qtyToRestore > 0) {
-        await this.appendStockLedger({
-          facilityType: sourceType,
-          warehouseId: releaseRow.source_warehouse_id,
-          lguId: releaseRow.source_lgu_id,
-          kitTypeId: releaseRow.kit_type_id || category,
-          deltaQuantity: qtyToRestore,
-          balanceAfter: 0,
-          movementType: 'RELEASE_CANCELLED',
-          referenceDrId: releaseRow.dr_number,
-          drNumber: releaseRow.dr_number
-        }).catch(err => console.warn('appendStockLedger error on cancel release:', err));
-      }
-
       return { ok: true };
     } catch (err: any) {
       console.error('cancelOutgoingRequest error:', err);
