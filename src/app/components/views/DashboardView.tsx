@@ -230,6 +230,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
     lguPriorityReports = [],
     lgusList = [],
     synchronizedLgusList = [],
+    warehousesList = [],
     kitTypesList = [],
     discrepancyReports = []
   } = inventoryState;
