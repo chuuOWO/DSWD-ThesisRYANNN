@@ -1575,24 +1575,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         }).catch(() => {});
       }
 
-      // Deduct stock at origin source (Warehouse or Source LGU) when receiver takes initial custody
-      if (!isHandover) {
-        const originSource = custody.matchingRelease?.warehouse_source || payload.from || '';
-        const isLguSource = Boolean(
-          custody.matchingRelease?.source_type === 'LGU' ||
-          (!originSource.toLowerCase().includes('warehouse') && !originSource.toLowerCase().includes('dswd') && !originSource.toLowerCase().includes('hub'))
-        );
-
-        if (isLguSource && originSource) {
-          await backendApi.deductLguStock(originSource, payload.category, effectiveQty).catch((err) => {
-            console.warn('Failed to deduct source LGU stock on custody sign:', err);
-          });
-        } else {
-          await backendApi.deductWarehouseStock(originSource || 'DSWD Regional Warehouse', payload.category, effectiveQty).catch((err) => {
-            console.warn('Failed to deduct warehouse stock on custody sign:', err);
-          });
-        }
-      }
+      // Stock at origin source (Warehouse or Source LGU) is already authoritatively deducted upon Admin approval in useInventoryState.
+      // Do not deduct a second time when receiver takes initial custody.
 
       // Record custody hop in database
       const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);

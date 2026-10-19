@@ -2704,19 +2704,17 @@ export const backendApi = {
 
   async markTruckLiveLocationDone(truckId: string, drNumber?: string) {
     try {
-      if (drNumber) {
+      if (truckId && truckId.trim()) {
         await supabase
-          .from('outgoing_requests')
-          .update({ delivery_status: 'Delivered' })
-          .eq('dr_number', drNumber);
-      } else {
-        await supabase
-          .from('outgoing_requests')
-          .update({ delivery_status: 'Delivered' })
-          .eq('assigned_truck_id', truckId);
+          .from('truck_live_locations')
+          .delete()
+          .ilike('truck_id', truckId.trim());
+      }
+      if (drNumber && drNumber.trim()) {
+        await this.markTruckLiveLocationDoneByDr(drNumber);
       }
     } catch (error) {
-      console.warn('Failed to mark delivery done:', error);
+      console.warn('Failed to clean up truck live location:', error);
     }
     return { ok: true };
   },
