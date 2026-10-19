@@ -16,6 +16,7 @@ import {
   matchesCommodityFilter
 } from '../../lib/commodityClassification';
 import { useGuideMode } from '../../contexts/GuideContext';
+import { formatIncomingReference, isReplenishCode } from '../../lib/referenceCodeHelper';
 
 interface InventoryState {
   incomingGoodsList: IncomingGoods[];
@@ -502,7 +503,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
           <table className="w-full min-w-[1200px]">
             <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">RIS Number</th>
+                <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">RIS / DR Number</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Goods</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Destination</th>
                 <th className="px-4 py-4 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
@@ -511,11 +512,22 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {paginatedGoods.map((item) => (
+              {paginatedGoods.map((item) => {
+                const formattedCode = formatIncomingReference(item.manifestNumber, item.id);
+                const isReplenish = isReplenishCode(item.manifestNumber || item.id);
+
+                return (
                 <tr key={item.id} className="hover:bg-gray-50 transition-colors align-top">
-                  {/* RIS Number - Document Intake Slip */}
+                  {/* RIS / DR Number - Document Intake Slip */}
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <p className="font-bold text-sm text-gray-900 font-mono">{item.manifestNumber || item.id}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="font-bold text-sm text-gray-900 font-mono">{formattedCode}</p>
+                      {isReplenish && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                          DR
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 mt-1 text-xs text-gray-600">
                       <Calendar className="w-3 h-3 text-gray-400" /> {item.dateReceived}
                     </div>
@@ -625,7 +637,8 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
         </div>
@@ -747,7 +760,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-gray-900 truncate">{item.fnfiCategory}</span>
                           <span className="font-mono text-[11px] text-gray-500">
-                            {item.incidentCode ? item.incidentCode : item.id}
+                            {formatIncomingReference(item.manifestNumber, item.id)}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mt-0.5">
@@ -833,7 +846,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-900 truncate">{item.fnfiCategory}</span>
                         <span className="font-mono text-[11px] text-gray-500">
-                          {item.incidentCode ? item.incidentCode : item.id}
+                          {formatIncomingReference(item.manifestNumber, item.id)}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mt-0.5">

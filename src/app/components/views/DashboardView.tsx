@@ -55,6 +55,7 @@ import type { LguRecord, WarehouseRecord, KitTypeRecord } from '../../services/b
 import type { SynchronizedLgu } from '../../lib/lguSync';
 import { getLguStockForCategory, normalizeCategoryName } from '../../lib/lguSync';
 import { parseIncidentInfo, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
+import { formatOutgoingReference } from '../../lib/referenceCodeHelper';
 import { DEFAULT_KIT_NAMES } from '../../lib/lguMatching';
 import {
   evaluatePriorityIndicator,
@@ -1970,7 +1971,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                 <table className="w-full text-left text-xs">
                   <thead className="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold uppercase tracking-wider text-[10px]">
                     <tr>
-                      <th className="px-4 py-3">Reference / DR #</th>
+                      <th className="px-4 py-3">INC Code</th>
                       <th className="px-4 py-3">Date</th>
                       <th className="px-4 py-3">Disaster / Calamity</th>
                       <th className="px-4 py-3">Destination LGU</th>
@@ -1983,6 +1984,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {paginatedHistory.map((item) => {
+                      const displayCode = formatOutgoingReference(item);
                       const disaster = getReleaseDisaster(item);
                       const isDelivered = ['Delivered', 'Accepted', 'Distributed'].includes(item.deliveryStatus);
                       const isApproved = ['Approved', 'Packed', 'Released', 'In Transit'].includes(item.deliveryStatus);
@@ -1990,14 +1992,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                       return (
                         <tr key={item.drNumber} className="hover:bg-gray-50/70 transition">
                           <td className="px-4 py-3 font-mono font-bold text-gray-900">
-                            <div>
-                              <span>{item.drNumber}</span>
-                              {item.incidentCode && (
-                                <span className="block text-[10px] text-gray-400 font-normal truncate max-w-[140px]" title={item.incidentCode}>
-                                  {item.incidentCode}
-                                </span>
-                              )}
-                            </div>
+                            <span>{displayCode}</span>
                           </td>
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                             {item.dateAllocated || item.incidentDate || 'N/A'}

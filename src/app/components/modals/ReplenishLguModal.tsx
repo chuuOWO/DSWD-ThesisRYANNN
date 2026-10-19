@@ -139,12 +139,12 @@ export function ReplenishLguModal({
   const [fnfiCategory, setFnfiCategory] = useState<string>(categoryOptions[0] || 'Family Food Pack');
   const [transportMode, setTransportMode] = useState<'Delivery' | 'Pick up'>('Delivery');
 
-  // RIS Number & Date (No 'Transfer' word)
+  // DR Number & Date (Replenish LGU uses DR codes)
   const [manifestNumber, setManifestNumber] = useState<string>(() => {
     const d = new Date();
     const ds = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     const rand = Math.floor(1000 + Math.random() * 9000);
-    return `RIS-${ds}-${rand}`;
+    return `DR-${ds}-${rand}`;
   });
   const [transferDate, setTransferDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState<string>('');
@@ -378,11 +378,11 @@ export function ReplenishLguModal({
   const isSameLgu = sourceType === 'LGU' && sourceMunicipality.trim().toLowerCase() === destinationMunicipality.trim().toLowerCase();
   const isStockExceeded = totalAllocatedQuantity > sourceAvailableStock;
   const isQuantityInvalid = totalAllocatedQuantity <= 0 || !Number.isInteger(totalAllocatedQuantity);
-  const isMissingRis = !manifestNumber.trim();
+  const isMissingDr = !manifestNumber.trim();
   const isMissingDestination = !destinationMunicipality.trim();
   const isMissingSource = sourceType === 'LGU' ? !sourceMunicipality.trim() : !selectedWarehouse.trim();
 
-  const canSubmit = !isSameLgu && !isStockExceeded && !isQuantityInvalid && !isMissingRis && !isMissingDestination && !isMissingSource && !isSubmitting;
+  const canSubmit = !isSameLgu && !isStockExceeded && !isQuantityInvalid && !isMissingDr && !isMissingDestination && !isMissingSource && !isSubmitting;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -466,22 +466,22 @@ export function ReplenishLguModal({
             </div>
           )}
 
-          {/* RIS Control Number & Date Issued */}
+          {/* DR Control Number & Date Issued */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                RIS (Requisition and Issue Slip) Number <span className="text-red-500">*</span>
+                DR (Delivery Receipt) Number <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 value={manifestNumber}
                 onChange={(e) => setManifestNumber(sanitizeSlipReference(e.target.value))}
-                placeholder="RIS-YYYYMMDD-XXXX"
+                placeholder="DR-YYYYMMDD-XXXX"
                 className={`w-full px-3.5 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono font-medium ${
-                  isMissingRis ? 'border-red-400 bg-red-50/40' : 'border-gray-300'
+                  isMissingDr ? 'border-red-400 bg-red-50/40' : 'border-gray-300'
                 }`}
               />
-              <p className="text-[11px] text-gray-500 mt-0.5">Physical control voucher number.</p>
+              <p className="text-[11px] text-gray-500 mt-0.5">Physical Delivery Receipt voucher number for stock replenishment.</p>
             </div>
 
             <div>
@@ -1006,7 +1006,7 @@ export function ReplenishLguModal({
               }`}
             >
               <Check className="w-4 h-4" />
-              <span>{isSubmitting ? 'Processing...' : 'Confirm Replenishment (RIS)'}</span>
+              <span>{isSubmitting ? 'Processing...' : 'Confirm Replenishment (DR)'}</span>
             </button>
           </div>
         </div>

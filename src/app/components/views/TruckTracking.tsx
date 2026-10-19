@@ -22,6 +22,7 @@ import { authApi, type UserProfile } from '../../services/authApi';
 import { findMatchingLgu } from '../../lib/lguMatching';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import { useGuideMode } from '../../contexts/GuideContext';
+import { formatOutgoingReference } from '../../lib/referenceCodeHelper';
 
 type TruckStatus = 'In Transit' | 'Loading' | 'Delivered';
 
@@ -1165,7 +1166,7 @@ export function TruckTracking({
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b text-xs font-bold uppercase text-gray-400">
-                      <th className="pb-3">DR Number</th>
+                      <th className="pb-3">INC Code</th>
                       <th className="pb-3">Destination</th>
                       <th className="pb-3">Category</th>
                       <th className="pb-3">Amount</th>
@@ -1175,7 +1176,7 @@ export function TruckTracking({
                   <tbody className="divide-y divide-gray-100">
                     {activeReleases.map((item) => (
                       <tr key={item.drNumber} className="hover:bg-gray-50">
-                        <td className="py-3 font-mono font-bold text-blue-800">{item.drNumber}</td>
+                        <td className="py-3 font-mono font-bold text-blue-800">{formatOutgoingReference(item)}</td>
                         <td className="py-3 font-semibold text-gray-800">{item.lguName || item.municipality}</td>
                         <td className="py-3 text-gray-600">{item.fnfiCategory}</td>
                         <td className="py-3 font-semibold text-gray-900">{item.amountApproved.toLocaleString()}</td>

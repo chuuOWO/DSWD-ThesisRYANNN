@@ -24,6 +24,7 @@ import {
   getExpiryBadgeConfig,
   type ExpiryTier
 } from '../../lib/expiryConstants';
+import { formatIncomingReference } from '../../lib/referenceCodeHelper';
 import { useGuideMode } from '../../contexts/GuideContext';
 
 interface FefoLotsLedgerTableProps {
@@ -446,7 +447,7 @@ export function FefoLotsLedgerTable({
                         </span>
                         {batch.incomingManifestId && (
                           <span className="text-[10px] text-gray-400 font-normal">
-                            ({batch.incomingManifestId})
+                            ({formatIncomingReference(batch.incomingManifestId)})
                           </span>
                         )}
                       </div>

@@ -15,6 +15,7 @@ import {
   matchesCommodityFilter
 } from '../../lib/commodityClassification';
 import { useGuideMode } from '../../contexts/GuideContext';
+import { formatOutgoingReference } from '../../lib/referenceCodeHelper';
 
 interface InventoryState {
   inventory: InventoryItem[];
@@ -653,7 +654,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     <table className="w-full min-w-[1300px]">
       <thead className="sticky top-0 z-10 bg-slate-50 border-b border-gray-200">
         <tr>
-          <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider w-[18%]">Release Info</th>
+          <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider w-[18%]">INC Code</th>
           <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider w-[20%]">Destination</th>
           <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider w-[16%]">Goods & Allocation</th>
           <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider w-[18%]">Delivery Status</th>
@@ -663,8 +664,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       </thead>
       <tbody className="divide-y divide-gray-100">
         {paginatedReleases.map((release) => {
+          const displayCode = formatOutgoingReference(release);
           const incidentInfo = parseIncidentInfo(release.incidentCode);
-          const displayCode = incidentInfo.incidentCode || release.incidentCode || release.drNumber;
           const calamityReason = resolveDisasterReason(release.incidentCode, release.reportReason);
           const reasonStyle = getDisasterReasonStyle(calamityReason);
           const disasterDate = incidentInfo.incidentDate || release.incidentDate;
@@ -677,14 +678,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               className="hover:bg-blue-50/40 transition-colors align-top cursor-pointer border-b border-gray-100 group"
               title="Click row to inspect complete transaction details"
             >
-              {/* Column 1: Release Information */}
+              {/* Column 1: Incident / Outgoing Code */}
               <td className="px-4 py-3.5">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-bold text-sm text-gray-900 group-hover:text-blue-900 transition-colors">
+                  <span className="font-bold text-sm text-gray-900 font-mono group-hover:text-blue-900 transition-colors">
                     {displayCode}
-                  </span>
-                  <span className="text-[10px] text-gray-400 font-mono">
-                    Inv Ref: #{release.drNumber}
                   </span>
                 </div>
                 <div className="mt-1 space-y-0.5 text-xs text-gray-500">

@@ -21,6 +21,7 @@ import type {
 import type { LguRecord } from '../../services/backendApi';
 import type { SynchronizedLgu } from '../../lib/lguSync';
 import type { UserProfile } from '../../services/authApi';
+import { formatOutgoingReference } from '../../lib/referenceCodeHelper';
 
 interface AnalyticsReportPdfModalProps {
   isOpen: boolean;
@@ -809,7 +810,7 @@ export function AnalyticsReportPdfModal({
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-gray-100 border-b border-gray-200 text-gray-700 font-bold uppercase text-[8px]">
-                        <th className="py-1.5 px-2">DR Number</th>
+                        <th className="py-1.5 px-2">INC Code</th>
                         <th className="py-1.5 px-2">Date</th>
                         <th className="py-1.5 px-2">Calamity / Incident</th>
                         <th className="py-1.5 px-2">Destination LGU</th>
@@ -824,7 +825,7 @@ export function AnalyticsReportPdfModal({
                       {filteredReleases.length > 0 ? (
                         filteredReleases.slice(0, 25).map((r) => (
                           <tr key={r.drNumber} className="hover:bg-gray-50/50">
-                            <td className="py-1.5 px-2 font-bold font-mono text-blue-900">{r.drNumber}</td>
+                            <td className="py-1.5 px-2 font-bold font-mono text-blue-900">{formatOutgoingReference(r)}</td>
                             <td className="py-1.5 px-2 text-gray-600 whitespace-nowrap">{r.dateAllocated || 'N/A'}</td>
                             <td className="py-1.5 px-2 text-gray-800">{r.reportReason || 'General Relief'}</td>
                             <td className="py-1.5 px-2 font-semibold text-gray-900">{r.municipality || 'LGU'}</td>

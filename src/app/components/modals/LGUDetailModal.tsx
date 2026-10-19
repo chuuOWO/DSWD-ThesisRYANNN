@@ -46,6 +46,12 @@ import {
 } from '../../lib/commodityClassification';
 import { LGUReportPdfModal } from './LGUReportPdfModal';
 import { getLguCategoryStock } from './ReplenishLguModal';
+import {
+  formatIncomingReference,
+  formatOutgoingReference,
+  formatReplenishReference,
+  isReplenishCode
+} from '../../lib/referenceCodeHelper';
 
 export interface LGUTransaction {
   id: string;
@@ -347,12 +353,13 @@ export function LGUDetailModal({
 
         const daysRemaining = effectiveExp ? getDaysRemaining(effectiveExp) : undefined;
         const expiryTier = effectiveExp ? getExpiryTier(effectiveExp) : undefined;
+        const outIncCode = formatOutgoingReference(r);
 
         list.push({
-          id: `OUT-DR-${r.id || r.drNumber || Math.random()}`,
+          id: `OUT-INC-${r.id || r.drNumber || Math.random()}`,
           type: 'Outgoing',
-          flowLabel: 'Outgoing Release (DR)',
-          referenceCode: r.drNumber || r.id || 'N/A',
+          flowLabel: 'Outgoing Release (INC)',
+          referenceCode: outIncCode,
           category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
           quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
           unit: 'kits',
@@ -380,12 +387,16 @@ export function LGUDetailModal({
           const exp = inc.expirationDate || null;
           const days = exp ? getDaysRemaining(exp) : undefined;
           const tier = exp ? getExpiryTier(exp) : undefined;
+          const isReplenish = isReplenishCode(inc.manifestNumber || inc.id);
+          const incCode = isReplenish
+            ? formatReplenishReference(inc.manifestNumber || inc.id)
+            : formatIncomingReference(inc.manifestNumber, inc.id);
 
           list.push({
             id: `INC-DIRECT-${inc.id}`,
             type: 'Incoming',
-            flowLabel: 'Incoming Intake (RIS)',
-            referenceCode: inc.incidentCode || inc.id,
+            flowLabel: isReplenish ? 'LGU Replenishment (DR)' : 'Incoming Intake (RIS)',
+            referenceCode: incCode,
             category: normalizeCategoryName(inc.fnfiCategory) || inc.fnfiCategory || 'Relief Goods',
             quantity: Number(inc.quantity) || 0,
             unit: inc.unitType || 'packs',
@@ -393,7 +404,7 @@ export function LGUDetailModal({
             destination: `${lgu.municipality} LGU`,
             date: inc.dateReceived || '',
             status: inc.status === 'Verified' ? 'Delivered' : inc.status,
-            deliveryMode: 'Direct Logistics',
+            deliveryMode: isReplenish ? 'LGU Replenishment' : 'Direct Logistics',
             expirationDate: exp,
             daysRemaining: days,
             expiryTier: tier,
@@ -409,11 +420,12 @@ export function LGUDetailModal({
       if (r.sourceType === 'LGU' && r.deliveryStatus !== 'Cancelled') {
         const source = (r.warehouseSource || '').trim().toLowerCase();
         if (source === muniLower || (muniLower.length > 2 && source.includes(muniLower))) {
+          const lguOutCode = formatOutgoingReference(r);
           list.push({
             id: `OUT-LGU-${r.id || r.drNumber || Math.random()}`,
             type: 'Outgoing',
-            flowLabel: 'Local Distribution',
-            referenceCode: r.drNumber || r.id || 'N/A',
+            flowLabel: 'Outgoing Release (INC)',
+            referenceCode: lguOutCode,
             category: normalizeCategoryName(r.fnfiCategory) || r.fnfiCategory || 'Relief Goods',
             quantity: Number(r.amountApproved) || Number(r.amountRequested) || 0,
             unit: 'kits',
@@ -508,12 +520,24 @@ export function LGUDetailModal({
       if (alreadyLogged) return;
 
       const mvType = String(row.movement_type || '').toUpperCase();
+      const isReplenishTransfer = mvType.includes('TRANSFER') || String(row.reference_dr_id || '').startsWith('DR-') || String(row.reference_manifest_id || '').startsWith('DR-') || refCode.startsWith('DR-');
+
+      if (isReplenishTransfer) {
+        refCode = formatReplenishReference(row.reference_dr_id || row.reference_manifest_id || resolvedDrNum || resolvedManifestNum || refCode);
+      } else if (isIncoming) {
+        refCode = formatIncomingReference(resolvedManifestNum || row.reference_manifest_id, refCode);
+      } else {
+        refCode = formatOutgoingReference(resolvedDrNum || row.reference_dr_id ? { drNumber: resolvedDrNum || String(row.reference_dr_id) } : refCode);
+      }
+
       let sourceName = `${lgu.municipality} LGU`;
       let destName = 'Local Relief Distribution';
 
-      let ledgerFlowLabel = isIncoming ? 'Incoming Intake (RIS)' : 'Local Distribution';
-      if (row.reference_dr_id || refCode.startsWith('DR-')) {
-        ledgerFlowLabel = 'Outgoing Release (DR)';
+      let ledgerFlowLabel = 'Incoming Intake (RIS)';
+      if (isReplenishTransfer) {
+        ledgerFlowLabel = 'LGU Replenishment (DR)';
+      } else if (!isIncoming) {
+        ledgerFlowLabel = 'Outgoing Release (INC)';
       } else if (mvType === 'MUTUAL_AID_OUT') {
         ledgerFlowLabel = 'Mutual Aid Out';
       }
@@ -1850,7 +1874,7 @@ export function LGUDetailModal({
                     {activeTab === 'transactions' ? (
                       <tr>
                         <th className="px-4 py-3">Flow</th>
-                        <th className="px-4 py-3">Reference / DR</th>
+                        <th className="px-4 py-3">Reference Code</th>
                         <th className="px-4 py-3">Commodity Item</th>
                         <th className="px-4 py-3 text-right">Quantity</th>
                         <th className="px-4 py-3">Route (Origin &rarr; Destination)</th>
@@ -1876,7 +1900,7 @@ export function LGUDetailModal({
                     ) : (
                       <tr>
                         <th className="px-4 py-3">Batch Token / Lot</th>
-                        <th className="px-4 py-3">Reference / DR</th>
+                        <th className="px-4 py-3">Reference Code</th>
                         <th className="px-4 py-3">Commodity Item</th>
                         <th className="px-4 py-3 text-right">Quantity</th>
                         <th className="px-4 py-3">Origin Facility</th>
@@ -1906,12 +1930,17 @@ export function LGUDetailModal({
                       (paginatedItems as LGUTransaction[]).map((tx) => (
                         <tr key={tx.id} className="hover:bg-gray-50/80 transition-colors">
                           <td className="px-4 py-3 whitespace-nowrap">
-                            {tx.flowLabel === 'Outgoing Release (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-')) ? (
+                            {tx.flowLabel === 'LGU Replenishment (DR)' || tx.referenceCode?.startsWith('DR-') ? (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                                <RotateCcw className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                LGU Replenishment (DR)
+                              </span>
+                            ) : tx.flowLabel === 'Outgoing Release (INC)' || tx.referenceCode?.startsWith('INC-') || tx.type === 'Outgoing' ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
                                 <ArrowUpRight className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                                Outgoing Release (DR)
+                                Outgoing Release (INC)
                               </span>
-                            ) : tx.flowLabel === 'Incoming Intake (RIS)' || tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && (tx.type === 'Incoming' || tx.referenceCode?.startsWith('RIS-') || tx.referenceCode?.startsWith('INC-'))) ? (
+                            ) : tx.flowLabel === 'Incoming Intake (RIS)' || tx.flowLabel === 'Intake (RIS)' || tx.referenceCode?.startsWith('RIS-') || tx.type === 'Incoming' ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
                                 <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                 Incoming Intake (RIS)

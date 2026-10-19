@@ -1325,7 +1325,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
     // First create incoming manifest in database to have real UUID
     let createdManifestId: string | undefined;
-    const manifestHash = `OFFCHAIN-RIS-${Date.now()}`;
+    const manifestHash = `OFFCHAIN-DR-${Date.now()}`;
     try {
       const incRes = await backendApi.createIncoming({
         manifestNumber: cleanId,

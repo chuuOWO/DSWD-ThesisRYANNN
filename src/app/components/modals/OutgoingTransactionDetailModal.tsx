@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
 import { parseIncidentInfo, resolveDisasterReason } from '../../lib/incidentHelper';
+import { formatOutgoingReference } from '../../lib/referenceCodeHelper';
 import { resolveEscortName } from '../../lib/escortHelper';
 import type { EscortProfile } from '../../services/backendApi';
 
@@ -93,7 +94,7 @@ export function OutgoingTransactionDetailModal({
   if (!isOpen || !release) return null;
 
   const incidentInfo = parseIncidentInfo(release.incidentCode);
-  const displayCode = incidentInfo.incidentCode || release.incidentCode || release.drNumber;
+  const displayCode = formatOutgoingReference(release);
   const calamityReason = resolveDisasterReason(release.incidentCode, release.reportReason);
   const disasterDate = incidentInfo.incidentDate || release.incidentDate;
 
@@ -139,9 +140,6 @@ export function OutgoingTransactionDetailModal({
               <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-200 border border-blue-400/30">
                   {displayCode}
-                </span>
-                <span className="text-xs text-gray-300 font-mono">
-                  Inv Ref: #{release.drNumber}
                 </span>
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusConfig.badge}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot}`} />

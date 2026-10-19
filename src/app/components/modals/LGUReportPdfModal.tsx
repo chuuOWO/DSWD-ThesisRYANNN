@@ -431,7 +431,7 @@ export function LGUReportPdfModal({
                     <thead className="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold uppercase text-[10px]">
                       <tr>
                         <th className="px-3 py-2">Lot Token ID</th>
-                        <th className="px-3 py-2">Reference / DR</th>
+                        <th className="px-3 py-2">Reference Code</th>
                         <th className="px-3 py-2">Commodity</th>
                         <th className="px-3 py-2 text-right">Quantity</th>
                         <th className="px-3 py-2">Origin Facility</th>
@@ -499,7 +499,7 @@ export function LGUReportPdfModal({
                     <thead className="bg-gray-50 border-b border-gray-200 text-gray-600 font-bold uppercase text-[10px]">
                       <tr>
                         <th className="px-3 py-2">Flow</th>
-                        <th className="px-3 py-2">Reference / DR</th>
+                        <th className="px-3 py-2">Reference Code</th>
                         <th className="px-3 py-2">Commodity Item</th>
                         <th className="px-3 py-2 text-right">Quantity</th>
                         <th className="px-3 py-2">Route / Origin</th>
@@ -513,14 +513,14 @@ export function LGUReportPdfModal({
                           <td className="px-3 py-1.5 whitespace-nowrap">
                             <span
                               className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold ${
-                                tx.flowLabel === 'Outgoing Release (DR)' || (!tx.flowLabel && tx.referenceCode?.startsWith('DR-'))
+                                tx.flowLabel === 'LGU Replenishment (DR)' || tx.referenceCode?.startsWith('DR-')
+                                  ? 'bg-indigo-100 text-indigo-800'
+                                  : tx.flowLabel === 'Outgoing Release (INC)' || tx.referenceCode?.startsWith('INC-') || tx.type === 'Outgoing'
                                   ? 'bg-blue-100 text-blue-800'
-                                  : tx.flowLabel === 'Incoming Intake (RIS)' || tx.flowLabel === 'Intake (RIS)' || (!tx.flowLabel && (tx.type === 'Incoming' || tx.referenceCode?.startsWith('RIS-') || tx.referenceCode?.startsWith('INC-')))
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-purple-100 text-purple-800'
+                                  : 'bg-emerald-100 text-emerald-800'
                               }`}
                             >
-                              {tx.flowLabel || (tx.type === 'Outgoing' ? 'Outgoing Release (DR)' : 'Incoming Intake (RIS)')}
+                              {tx.flowLabel || (tx.type === 'Outgoing' ? 'Outgoing Release (INC)' : 'Incoming Intake (RIS)')}
                             </span>
                           </td>
                           <td className="px-3 py-1.5 font-mono font-bold text-gray-900">{tx.referenceCode}</td>

@@ -313,7 +313,7 @@ export function AddIncomingGoodsModal({
               className="px-4 py-2 text-xs font-semibold text-gray-500 hover:text-emerald-700 hover:bg-gray-100 rounded-t-lg transition flex items-center gap-1.5 cursor-pointer"
             >
               <Truck className="w-3.5 h-3.5" />
-              Replenish LGU (RIS)
+              Replenish LGU (DR)
             </button>
           </div>
         )}
