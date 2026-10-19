@@ -8,7 +8,8 @@ import { OutgoingTransactionDetailModal } from '../modals/OutgoingTransactionDet
 import { blockchain } from '../../services/blockchain';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import type { DiscrepancyReport, InventoryItem, OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
-import type { LguRecord, ProvinceRecord, WarehouseRecord, SupplySourceRecord, KitTypeRecord, TruckRecord } from '../../services/backendApi';
+import { backendApi, type LguRecord, type ProvinceRecord, type WarehouseRecord, type SupplySourceRecord, type KitTypeRecord, type TruckRecord, type EscortProfile } from '../../services/backendApi';
+import { resolveEscortName, registerEscortProfiles } from '../../lib/escortHelper';
 
 interface InventoryState {
   inventory: InventoryItem[];
@@ -100,6 +101,32 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const [sortOrder, setSortOrder] = useState<
     'date_desc' | 'date_asc' | 'dr_asc' | 'dr_desc' | 'qty_desc' | 'qty_asc' | 'destination_asc'
   >('date_desc');
+
+  // Escort Officer Profiles for displaying officer human names instead of UUIDs
+  const [escortProfiles, setEscortProfiles] = useState<EscortProfile[]>([]);
+  const [, setProfileVersion] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    backendApi
+      .getEscortProfiles()
+      .then((list) => {
+        if (isMounted && list && list.length > 0) {
+          setEscortProfiles(list);
+          registerEscortProfiles(list);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleResolved = () => setProfileVersion((v) => v + 1);
+    window.addEventListener('escort-profile-resolved', handleResolved);
+    return () => window.removeEventListener('escort-profile-resolved', handleResolved);
+  }, []);
 
   // Maximize & Minimize Table States
   const [isTableMaximized, setIsTableMaximized] = useState(false);
@@ -475,6 +502,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         (release.blockchainTxHash || '').toLowerCase().includes(searchLower) ||
         (release.assignedTruckId || '').toLowerCase().includes(searchLower) ||
         (release.assignedEscortProfileId || '').toLowerCase().includes(searchLower) ||
+        resolveEscortName(release.assignedEscortProfileId || release.assignedDriverProfileId, escortProfiles).toLowerCase().includes(searchLower) ||
         batches
           .map((batch) => batch?.batchTokenId || batch?.batchNumber || '')
           .join(' ')
@@ -661,9 +689,12 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                 </span>
 
                 <div className="mt-2 space-y-1 text-xs text-gray-600">
-                  {release.assignedEscortProfileId && (
-                    <p className="text-[11px] text-indigo-700 font-medium truncate" title={release.assignedEscortProfileId}>
-                      Escort: {release.assignedEscortProfileId}
+                  {(release.assignedEscortProfileId || release.assignedDriverProfileId) && (
+                    <p
+                      className="text-[11px] text-indigo-700 font-medium truncate"
+                      title={resolveEscortName(release.assignedEscortProfileId || release.assignedDriverProfileId, escortProfiles)}
+                    >
+                      Escort: {resolveEscortName(release.assignedEscortProfileId || release.assignedDriverProfileId, escortProfiles)}
                     </p>
                   )}
                   {release.assignedTruckId && (
@@ -1535,6 +1566,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           supplySourcesList={supplySourcesList}
           kitTypesList={kitTypesList}
           trucksList={trucksList}
+          escortProfilesList={escortProfiles}
           mode="add"
         />
       )}
@@ -1550,6 +1582,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           supplySourcesList={supplySourcesList}
           kitTypesList={kitTypesList}
           trucksList={trucksList}
+          escortProfilesList={escortProfiles}
           mode="edit"
           initialData={{
             dateAllocated: editingRelease.dateAllocated,
@@ -1821,6 +1854,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           onApprove={(rel) => openApprovalModal(rel)}
           onCancel={(rel) => setCancellingRelease(rel)}
           currentRole={currentRole}
+          escortProfiles={escortProfiles}
         />
       )}
 

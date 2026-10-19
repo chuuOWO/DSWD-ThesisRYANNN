@@ -3752,8 +3752,7 @@ export const backendApi = {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, first_name, last_name, role, email, phone_number')
-        .or('role.eq.receiver,role.eq.driver,role.eq.escort,role.ilike.%escort%')
+        .select('id, first_name, last_name, role, email, phone_number, truck_id')
         .order('first_name', { ascending: true });
 
       if (error || !data || data.length === 0) {
@@ -3768,10 +3767,11 @@ export const backendApi = {
         const computedName = `${p.first_name || ''} ${p.last_name || ''}`.trim();
         return {
           id: p.id,
-          fullName: computedName || 'Relief Escort Officer',
+          fullName: computedName || p.email || 'Relief Escort Officer',
           role: p.role,
           email: p.email,
-          phone: p.phone_number || p.phone
+          phone: p.phone_number || p.phone,
+          truckId: p.truck_id
         };
       });
     } catch {

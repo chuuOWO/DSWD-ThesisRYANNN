@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import type { OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
 import { parseIncidentInfo, resolveDisasterReason } from '../../lib/incidentHelper';
+import { resolveEscortName } from '../../lib/escortHelper';
+import type { EscortProfile } from '../../services/backendApi';
 
 interface OutgoingTransactionDetailModalProps {
   isOpen: boolean;
@@ -33,6 +35,7 @@ interface OutgoingTransactionDetailModalProps {
   onApprove?: (release: OutgoingRelease) => void;
   onCancel?: (release: OutgoingRelease) => void;
   currentRole?: UserRole;
+  escortProfiles?: EscortProfile[];
 }
 
 const statusBadgeStyles: Record<OutgoingStatus, { badge: string; dot: string; label: string }> = {
@@ -57,10 +60,19 @@ export function OutgoingTransactionDetailModal({
   onEdit,
   onApprove,
   onCancel,
-  currentRole = 'Admin'
+  currentRole = 'Admin',
+  escortProfiles = []
 }: OutgoingTransactionDetailModalProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'goods' | 'tracking' | 'docs' | 'audit'>('all');
+  const [, setProfileVersion] = useState(0);
+
+  // Re-render when an escort profile resolves asynchronously
+  useEffect(() => {
+    const handleResolved = () => setProfileVersion((v) => v + 1);
+    window.addEventListener('escort-profile-resolved', handleResolved);
+    return () => window.removeEventListener('escort-profile-resolved', handleResolved);
+  }, []);
 
   // Close on Escape key
   useEffect(() => {
@@ -270,8 +282,11 @@ export function OutgoingTransactionDetailModal({
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Transit & Escort</p>
-              <p className="text-sm font-bold text-gray-900 mt-1 truncate">
-                {release.assignedEscortProfileId || release.assignedDriverProfileId || 'Unassigned Escort'}
+              <p
+                className="text-sm font-bold text-gray-900 mt-1 truncate"
+                title={resolveEscortName(release.assignedEscortProfileId || release.assignedDriverProfileId, escortProfiles)}
+              >
+                {resolveEscortName(release.assignedEscortProfileId || release.assignedDriverProfileId, escortProfiles)}
               </p>
               <p className="text-xs text-gray-500 mt-0.5">
                 Truck: {release.assignedTruckId || release.plateNumber || 'No truck selected'}
@@ -504,8 +519,8 @@ export function OutgoingTransactionDetailModal({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs mb-5">
                 <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
                   <span className="text-gray-500 block text-[11px]">Relief Escort Officer:</span>
-                  <p className="font-bold text-gray-900 mt-1">
-                    {release.assignedEscortProfileId || release.assignedDriverProfileId || 'Not assigned'}
+                  <p className="font-bold text-gray-900 mt-1 text-sm">
+                    {resolveEscortName(release.assignedEscortProfileId || release.assignedDriverProfileId, escortProfiles)}
                   </p>
                   <p className="text-[10px] text-gray-500 mt-0.5">Physical convoy custodian</p>
                 </div>
