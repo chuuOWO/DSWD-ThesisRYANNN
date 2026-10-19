@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { AlertCircle, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Edit, Filter, Loader2, MapPin, Maximize2, Minimize2, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
-import { parseIncidentInfo } from '../../lib/incidentHelper';
+import { parseIncidentInfo, resolveDisasterReason, getDisasterReasonStyle, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
 import { SuccessModal } from '../modals/SuccessModal';
 import { OutgoingTransactionDetailModal } from '../modals/OutgoingTransactionDetailModal';
@@ -176,6 +176,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       deliveryMode: updatedRelease.deliveryMode,
       deliveryStatus: updatedRelease.deliveryStatus,
       incidentCode: updatedRelease.incidentCode,
+      incidentDate: updatedRelease.incidentDate,
+      reportReason: updatedRelease.reportReason,
       receiverGps: updatedRelease.receiverGps,
       destinationAddress: updatedRelease.destinationAddress,
       assignedTruckId: updatedRelease.assignedTruckId,
@@ -389,13 +391,20 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
   const matchesIncident = (release: OutgoingRelease) => {
     if (selectedIncident === 'All') return true;
+    const resolvedReason = resolveDisasterReason(release.incidentCode, release.reportReason);
+    if (selectedIncident === 'with_incident') {
+      return resolvedReason !== 'Relief Prepositioning / Augmentation';
+    }
+    if (selectedIncident === 'no_incident') {
+      return resolvedReason === 'Relief Prepositioning / Augmentation';
+    }
     const rawCode = (release.incidentCode || '').trim();
-    const hasIncident = Boolean(rawCode && rawCode.toLowerCase() !== 'none');
-    if (selectedIncident === 'with_incident') return hasIncident;
-    if (selectedIncident === 'no_incident') return !hasIncident;
     const parsed = parseIncidentInfo(rawCode);
     const code = parsed.incidentCode || rawCode;
-    return code.toLowerCase() === selectedIncident.toLowerCase();
+    return (
+      resolvedReason.toLowerCase() === selectedIncident.toLowerCase() ||
+      code.toLowerCase() === selectedIncident.toLowerCase()
+    );
   };
 
   const activeFilterCount = useMemo(() => {
@@ -585,7 +594,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         {paginatedReleases.map((release) => {
           const incidentInfo = parseIncidentInfo(release.incidentCode);
           const displayCode = incidentInfo.incidentCode || release.incidentCode || release.drNumber;
-          const calamityReason = incidentInfo.reportReason || release.reportReason || 'Standard Relief Operation';
+          const calamityReason = resolveDisasterReason(release.incidentCode, release.reportReason);
+          const reasonStyle = getDisasterReasonStyle(calamityReason);
           const disasterDate = incidentInfo.incidentDate || release.incidentDate;
           const statusStyle = statusStyles[release.deliveryStatus] || 'bg-gray-100 text-gray-700 border border-gray-200';
 
@@ -682,28 +692,20 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                 )}
               </td>
 
-              {/* Column 5: Incident Reason (Replaces Release Record) */}
+              {/* Column 5: Incident Reason */}
               <td className="px-4 py-3.5">
-                <div className="space-y-1.5">
-                  <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-900 text-xs font-bold">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <div className="space-y-1">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold border ${reasonStyle}`}>
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 opacity-80" />
                     <span>{calamityReason}</span>
-                  </div>
+                  </span>
 
                   {disasterDate ? (
-                    <p className="text-xs text-gray-600 flex items-center gap-1">
+                    <p className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5">
                       <Calendar className="w-3 h-3 text-gray-400 shrink-0" />
-                      <span>Disaster Date: <strong className="text-gray-700">{disasterDate}</strong></span>
+                      <span>Date: <strong className="text-gray-700">{disasterDate}</strong></span>
                     </p>
-                  ) : (
-                    <p className="text-[11px] text-gray-400 italic">Disaster date not specified</p>
-                  )}
-
-                  {Array.isArray(release.allocatedBatches) && release.allocatedBatches.length > 0 && (
-                    <p className="text-[11px] text-blue-700 font-medium pt-1 border-t border-gray-100">
-                      {release.allocatedBatches.length} {release.allocatedBatches.length === 1 ? 'batch' : 'batches'} allocated ({release.allocatedBatches.reduce((s, b) => s + (b.quantity || 0), 0).toLocaleString()} kits)
-                    </p>
-                  )}
+                  ) : null}
                 </div>
               </td>
 
@@ -1047,9 +1049,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           </select>
         </div>
 
-        {/* Incident Code */}
+        {/* Incident Reason */}
         <div>
-          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">Disaster Incident</label>
+          <label className="block text-[10px] font-bold text-gray-600 uppercase mb-1">Incident Reason</label>
           <select
             value={selectedIncident}
             onChange={(e) => {
@@ -1058,11 +1060,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             }}
             className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
           >
-            <option value="All">All Allocations</option>
-            <option value="with_incident">Any Disaster Incident</option>
-            <option value="no_incident">Standard (No Disaster)</option>
-            {incidentOptions.map(inc => (
-              <option key={inc} value={inc}>{inc}</option>
+            <option value="All">All Incident Reasons</option>
+            <option value="with_incident">Any Active Calamity</option>
+            <option value="no_incident">Prepositioning / Non-Calamity</option>
+            {DISASTER_REPORT_REASONS.map(reason => (
+              <option key={reason} value={reason}>{reason}</option>
             ))}
           </select>
         </div>
@@ -1564,7 +1566,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             deliveryStatus: editingRelease.deliveryStatus,
             incidentCode: editingRelease.incidentCode,
             incidentDate: editingRelease.incidentDate || '',
-            reportReason: editingRelease.reportReason || '',
+            reportReason: editingRelease.reportReason || resolveDisasterReason(editingRelease.incidentCode, editingRelease.reportReason),
             receiverGps: editingRelease.receiverGps,
             destinationAddress: editingRelease.destinationAddress,
             assignedTruckId: editingRelease.assignedTruckId || editingRelease.assigned_truck_id,

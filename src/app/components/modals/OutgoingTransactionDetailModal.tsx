@@ -22,7 +22,7 @@ import {
   Navigation
 } from 'lucide-react';
 import type { OutgoingRelease, OutgoingStatus, UserRole } from '../../hooks/useInventoryState';
-import { parseIncidentInfo } from '../../lib/incidentHelper';
+import { parseIncidentInfo, resolveDisasterReason } from '../../lib/incidentHelper';
 
 interface OutgoingTransactionDetailModalProps {
   isOpen: boolean;
@@ -77,7 +77,7 @@ export function OutgoingTransactionDetailModal({
 
   const incidentInfo = parseIncidentInfo(release.incidentCode);
   const displayCode = incidentInfo.incidentCode || release.incidentCode || release.drNumber;
-  const calamityReason = incidentInfo.reportReason || release.reportReason || 'Standard Relief Operation';
+  const calamityReason = resolveDisasterReason(release.incidentCode, release.reportReason);
   const disasterDate = incidentInfo.incidentDate || release.incidentDate;
 
   const statusConfig = statusBadgeStyles[release.deliveryStatus] || {
