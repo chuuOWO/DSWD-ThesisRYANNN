@@ -1150,9 +1150,13 @@ export const backendApi = {
       let foodPacks = stockMapByKit.get(foodKitId || '') ?? latestRep?.food_packs ?? lgu.food_packs ?? 0;
       let hygieneKits = stockMapByKit.get(hygieneKitId || '') ?? latestRep?.hygiene_kits ?? lgu.hygiene_kits ?? 0;
       let familyKits = stockMapByKit.get(familyKitId || '') ?? latestRep?.family_kits ?? lgu.family_kits ?? 0;
+      let rtef = lgu.rtef ?? 0;
 
       let nextKitVal = 0;
-      if (canonical === 'Food Pack' || catLower.includes('food')) {
+      if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) {
+        rtef = Math.max(0, rtef - quantity);
+        nextKitVal = rtef;
+      } else if (canonical === 'Food Pack' || canonical === 'Family Food Pack' || catLower.includes('food pack')) {
         foodPacks = Math.max(0, foodPacks - quantity);
         nextKitVal = foodPacks;
       } else if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) {
@@ -1193,11 +1197,12 @@ export const backendApi = {
         updated_at: new Date().toISOString()
       };
 
-      const fullUpdates = {
+      const fullUpdates: Record<string, unknown> = {
         ...baseUpdates,
         food_packs: foodPacks,
         hygiene_kits: hygieneKits,
         family_kits: familyKits,
+        rtef,
         current_stock: stockMap
       };
 
@@ -1309,9 +1314,13 @@ export const backendApi = {
       let foodPacks = stockMapByKit.get(foodKitId || '') ?? latestRep?.food_packs ?? lgu.food_packs ?? 0;
       let hygieneKits = stockMapByKit.get(hygieneKitId || '') ?? latestRep?.hygiene_kits ?? lgu.hygiene_kits ?? 0;
       let familyKits = stockMapByKit.get(familyKitId || '') ?? latestRep?.family_kits ?? lgu.family_kits ?? 0;
+      let rtef = lgu.rtef ?? 0;
 
       let nextKitVal = 0;
-      if (canonical === 'Food Pack' || catLower.includes('food')) {
+      if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) {
+        rtef = rtef + quantity;
+        nextKitVal = rtef;
+      } else if (canonical === 'Food Pack' || canonical === 'Family Food Pack' || catLower.includes('food pack')) {
         foodPacks = foodPacks + quantity;
         nextKitVal = foodPacks;
       } else if (canonical === 'Hygiene Kit' || catLower.includes('hygiene')) {
@@ -1352,11 +1361,12 @@ export const backendApi = {
         updated_at: new Date().toISOString()
       };
 
-      const fullUpdates = {
+      const fullUpdates: Record<string, unknown> = {
         ...baseUpdates,
         food_packs: foodPacks,
         hygiene_kits: hygieneKits,
         family_kits: familyKits,
+        rtef,
         current_stock: stockMap
       };
 

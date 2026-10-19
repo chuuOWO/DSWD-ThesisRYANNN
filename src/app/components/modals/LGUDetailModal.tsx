@@ -414,17 +414,52 @@ export function LGUDetailModal({
     // 4. Incorporate database stock ledger movements (audits, recounts, mutual aid, receipts)
     dbLedgerEntries.forEach((row) => {
       if (!row) return;
+
+      let resolvedManifestNum = '';
+      if (row.reference_manifest_id) {
+        const foundM = dbManifests.find(
+          (m: any) => m.id === row.reference_manifest_id || m.manifest_number === row.reference_manifest_id
+        );
+        resolvedManifestNum = foundM?.manifest_number || '';
+      }
+
+      let resolvedDrNum = '';
+      if (row.reference_dr_id) {
+        const foundDr = outgoingReleases.find(
+          (r) => r.id === row.reference_dr_id || r.drNumber === row.reference_dr_id
+        );
+        resolvedDrNum = foundDr?.drNumber || '';
+      }
+
       const refCode =
+        resolvedDrNum ||
+        resolvedManifestNum ||
         row.reference_dr_id ||
         row.reference_manifest_id ||
         (row.id ? `LEDGER-${String(row.id).slice(0, 8).toUpperCase()}` : 'STOCK-AUDIT');
 
-      // Deduplicate if already present in list
-      const alreadyLogged = list.some((item) =>
-        item.referenceCode === refCode ||
-        item.id.includes(refCode) ||
-        (row.reference_dr_id && item.referenceCode.includes(row.reference_dr_id))
-      );
+      // Deduplicate if already present in list (either from outgoing releases, incoming goods, or previous entries)
+      const alreadyLogged = list.some((item) => {
+        if (row.reference_manifest_id) {
+          if (
+            item.referenceCode === row.reference_manifest_id ||
+            item.id.includes(row.reference_manifest_id) ||
+            (resolvedManifestNum && (item.referenceCode === resolvedManifestNum || item.id.includes(resolvedManifestNum)))
+          ) {
+            return true;
+          }
+        }
+        if (row.reference_dr_id) {
+          if (
+            item.referenceCode === row.reference_dr_id ||
+            item.id.includes(row.reference_dr_id) ||
+            (resolvedDrNum && (item.referenceCode === resolvedDrNum || item.id.includes(resolvedDrNum)))
+          ) {
+            return true;
+          }
+        }
+        return item.referenceCode === refCode || item.id.includes(refCode);
+      });
       if (alreadyLogged) return;
 
       const delta = Number(row.delta_quantity) || 0;
@@ -466,7 +501,7 @@ export function LGUDetailModal({
     });
 
     return list;
-  }, [lgu, outgoingReleases, incomingGoods, dbLedgerEntries, expiryMap]);
+  }, [lgu, outgoingReleases, incomingGoods, dbLedgerEntries, dbManifests, expiryMap]);
 
   // Aggregate individual inventory lots / batches received and prepositioned at this LGU
   const allLots = useMemo<LGUExpiryLot[]>(() => {

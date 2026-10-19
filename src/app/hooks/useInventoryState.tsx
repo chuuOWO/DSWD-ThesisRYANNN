@@ -945,13 +945,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       if (!matchMuni || !matchProv) return lgu;
 
       const updated = { ...lgu };
-      if (catLower.includes('food') || canonical === 'Family Food Pack' || canonical === 'Food Pack') updated.foodPacks = (updated.foodPacks || 0) + quantity;
+      if (canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF' || catLower.includes('rtef') || catLower.includes('ready-to-eat')) updated.rtef = (updated.rtef || 0) + quantity;
+      else if (canonical === 'Family Food Pack' || canonical === 'Food Pack' || catLower.includes('food pack')) updated.foodPacks = (updated.foodPacks || 0) + quantity;
       else if (catLower.includes('hygiene') || canonical === 'Hygiene Kit') updated.hygieneKits = (updated.hygieneKits || 0) + quantity;
       else if (catLower.includes('family') || canonical === 'Family Kit') updated.familyKits = (updated.familyKits || 0) + quantity;
       else if (catLower.includes('sleeping') || canonical === 'Sleeping Kit') updated.sleepingKits = (updated.sleepingKits || 0) + quantity;
       else if (catLower.includes('kitchen') || canonical === 'Kitchen Kit') updated.kitchenKits = (updated.kitchenKits || 0) + quantity;
       else if (catLower.includes('sack') || canonical === 'Laminated Sacks' || canonical === 'Laminated Sack') updated.laminatedSacks = (updated.laminatedSacks || 0) + quantity;
-      else if (catLower.includes('rtef') || canonical === 'Ready-to-Eat Food (RTEF)' || canonical === 'RTEF') updated.rtef = (updated.rtef || 0) + quantity;
+      else updated.foodPacks = (updated.foodPacks || 0) + quantity;
 
       const currentMap = { ...(updated.currentStock || {}) };
       const canonicalKey = canonical || category;
@@ -972,7 +973,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       const matchProv = !province || rep.province.toLowerCase() === province.toLowerCase();
       if (!matchMuni || !matchProv) return rep;
 
-      const isFood = catLower.includes('food') || canonical === 'Family Food Pack' || canonical === 'Food Pack';
+      const isFood = (canonical === 'Family Food Pack' || canonical === 'Food Pack' || catLower.includes('food pack')) && !catLower.includes('rtef') && !catLower.includes('ready-to-eat');
       const updatedFood = isFood ? (rep.foodPacks || 0) + quantity : rep.foodPacks;
       const updatedHygiene = (catLower.includes('hygiene') || canonical === 'Hygiene Kit') ? (rep.hygieneKits || 0) + quantity : rep.hygieneKits;
       const updatedFamily = (catLower.includes('family') || canonical === 'Family Kit') ? (rep.familyKits || 0) + quantity : rep.familyKits;
