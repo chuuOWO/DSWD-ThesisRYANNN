@@ -186,7 +186,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
       destinationLguId: updatedRelease.destinationLguId
     });
     setEditingRelease(null);
-    showResult(`Release request ${editingRelease.drNumber} updated successfully.`);
+    const releaseDisplayCode = parseIncidentInfo(editingRelease.incidentCode).incidentCode || editingRelease.incidentCode || editingRelease.drNumber;
+    showResult(`Release request ${releaseDisplayCode} updated successfully.`);
   };
 
   const openApprovalModal = (release: OutgoingRelease) => {
@@ -512,10 +513,14 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         return (a.drNumber || '').localeCompare(b.drNumber || '');
       }
       if (sortOrder === 'dr_asc') {
-        return (a.drNumber || '').localeCompare(b.drNumber || '');
+        const codeA = parseIncidentInfo(a.incidentCode).incidentCode || a.incidentCode || a.drNumber || '';
+        const codeB = parseIncidentInfo(b.incidentCode).incidentCode || b.incidentCode || b.drNumber || '';
+        return codeA.localeCompare(codeB);
       }
       if (sortOrder === 'dr_desc') {
-        return (b.drNumber || '').localeCompare(a.drNumber || '');
+        const codeA = parseIncidentInfo(a.incidentCode).incidentCode || a.incidentCode || a.drNumber || '';
+        const codeB = parseIncidentInfo(b.incidentCode).incidentCode || b.incidentCode || b.drNumber || '';
+        return codeB.localeCompare(codeA);
       }
       if (sortOrder === 'qty_desc') {
         const qtyA = a.amountApproved || a.amountRequested || 0;
@@ -566,7 +571,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
     <table className="w-full min-w-[1300px]">
       <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
         <tr>
-          <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Release</th>
+          <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Incident Code</th>
           <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Destination</th>
           <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Goods</th>
           <th className="px-4 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Status</th>
@@ -578,8 +583,17 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
         {paginatedReleases.map((release) => (
           <tr key={release.drNumber} className="hover:bg-gray-50 transition-colors align-top">
             <td className="px-4 py-4">
-              <p className="font-bold text-sm text-green-700">{release.drNumber}</p>
-              <p className="text-xs text-gray-500">Allocated: {release.dateAllocated || '-'}</p>
+              {(() => {
+                const incidentInfo = parseIncidentInfo(release.incidentCode);
+                const displayCode = incidentInfo.incidentCode || release.incidentCode || release.drNumber;
+                return (
+                  <>
+                    <p className="font-bold text-sm text-green-700">{displayCode}</p>
+                    <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{release.drNumber}</p>
+                  </>
+                );
+              })()}
+              <p className="text-xs text-gray-500 mt-1">Allocated: {release.dateAllocated || '-'}</p>
               <p className="text-xs text-gray-500">Mode: {release.deliveryMode || '-'}</p>
               <p className="text-xs text-gray-500">Source: {release.warehouseSource || '-'}</p>
             </td>
@@ -602,14 +616,9 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               </p>
               {(() => {
                 const incidentInfo = parseIncidentInfo(release.incidentCode);
-                const displayCode = incidentInfo.incidentCode || release.incidentCode;
-                if (!displayCode || displayCode.toLowerCase() === 'none') return null;
+                if (!incidentInfo.reportReason && !incidentInfo.incidentDate) return null;
                 return (
                   <div className="mt-2 space-y-1 pt-1.5 border-t border-gray-100">
-                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-900 text-[11px] font-bold">
-                      <span className="text-[10px] uppercase font-bold text-blue-600">Incident:</span>
-                      <span>{displayCode}</span>
-                    </div>
                     {incidentInfo.reportReason && (
                       <p className="text-xs text-gray-700 font-medium">
                         <span className="text-gray-500 font-normal">Reason:</span> {incidentInfo.reportReason}
@@ -877,7 +886,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="DR#, LGU, Batch, Incident, Hash..."
+              placeholder="Incident Code, LGU, Batch, Inv Ref, Hash..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);
@@ -1075,8 +1084,8 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
           >
             <option value="date_desc">Date Allocated (Newest)</option>
             <option value="date_asc">Date Allocated (Oldest)</option>
-            <option value="dr_asc">DR Number (Ascending)</option>
-            <option value="dr_desc">DR Number (Descending)</option>
+            <option value="dr_asc">Incident Code (Ascending)</option>
+            <option value="dr_desc">Incident Code (Descending)</option>
             <option value="qty_desc">Quantity (High to Low)</option>
             <option value="qty_asc">Quantity (Low to High)</option>
             <option value="destination_asc">Destination (A to Z)</option>
@@ -1363,7 +1372,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
                       type="text"
-                      placeholder="Search DR, LGU, batch record, release record..."
+                      placeholder="Search Incident Code, LGU, batch record, Inv Ref..."
                       value={searchTerm}
                       onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -1449,7 +1458,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
               {outgoingDiscrepancies.slice(0, 5).map(report => (
                 <div key={report.id} className="flex items-start justify-between gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-gray-900">{report.drNumber || 'Unknown DR'}</p>
+                    {(() => {
+                      const rel = outgoingReleasesList.find(r => r.drNumber === report.drNumber);
+                      const incInfo = rel ? parseIncidentInfo(rel.incidentCode) : null;
+                      const incCode = incInfo?.incidentCode || rel?.incidentCode;
+                      return (
+                        <>
+                          <p className="text-sm font-bold text-gray-900">{incCode || report.drNumber || 'Unknown Release'}</p>
+                          {report.drNumber && (
+                            <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{report.drNumber}</p>
+                          )}
+                        </>
+                      );
+                    })()}
                     <p className="text-xs text-gray-600 mt-1">{report.note}</p>
                     <p className="text-[11px] text-gray-500 mt-2">Reported {report.reportedAt}</p>
                   </div>
@@ -1532,7 +1553,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             <div className="p-6 space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div><span className="text-gray-600">DR Number:</span><p className="font-bold text-blue-600">{selectedRelease.drNumber}</p></div>
+                  <div>
+                    <span className="text-gray-600">Incident Code:</span>
+                    {(() => {
+                      const incidentInfo = parseIncidentInfo(selectedRelease.incidentCode);
+                      const displayCode = incidentInfo.incidentCode || selectedRelease.incidentCode || selectedRelease.drNumber;
+                      return (
+                        <>
+                          <p className="font-bold text-blue-600">{displayCode}</p>
+                          <p className="text-[10px] text-gray-400 font-mono">Inv Ref: #{selectedRelease.drNumber}</p>
+                        </>
+                      );
+                    })()}
+                  </div>
                   <div><span className="text-gray-600">LGU:</span><p className="font-bold text-gray-900">{selectedRelease.lguName}</p></div>
                   <div><span className="text-gray-600">Category:</span><p className="font-bold text-gray-900">{selectedRelease.fnfiCategory}</p></div>
                   <div><span className="text-gray-600">Warehouse:</span><p className="font-bold text-gray-900">{selectedRelease.warehouseSource}</p></div>
@@ -1612,7 +1645,12 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                   {actionModal.type === 'receiverAccept' && 'Confirm LGU Receipt'}
                   {actionModal.type === 'correction' && 'File Correction Record'}
                 </h2>
-                {actionModal.release && <p className="text-sm text-gray-500 mt-1">{actionModal.release.drNumber} | {actionModal.release.lguName}</p>}
+                {actionModal.release && (
+                  <p className="text-sm text-gray-500 mt-1">
+                    {parseIncidentInfo(actionModal.release.incidentCode).incidentCode || actionModal.release.incidentCode || actionModal.release.drNumber}
+                    <span className="text-[11px] text-gray-400 ml-1.5 font-mono">(Inv Ref: #{actionModal.release.drNumber})</span> | {actionModal.release.lguName}
+                  </p>
+                )}
               </div>
               <button type="button" onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100">
                 <X className="w-5 h-5 text-gray-500" />
@@ -1693,7 +1731,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
             <div className="p-6 space-y-3">
               <p className="text-sm text-gray-700">
-                Are you sure you want to cancel outgoing release <strong className="font-semibold text-gray-900">{cancellingRelease.drNumber}</strong>?
+                Are you sure you want to cancel outgoing release{' '}
+                <strong className="font-semibold text-gray-900">
+                  {parseIncidentInfo(cancellingRelease.incidentCode).incidentCode || cancellingRelease.incidentCode || cancellingRelease.drNumber}
+                </strong>{' '}
+                <span className="text-xs text-gray-400 font-mono">(Inv Ref: #{cancellingRelease.drNumber})</span>?
               </p>
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1">
                 <p className="font-bold">What will happen:</p>
