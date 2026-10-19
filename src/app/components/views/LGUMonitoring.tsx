@@ -83,6 +83,14 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
     return false;
   });
 
+  const [capacityVersion, setCapacityVersion] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setCapacityVersion(v => v + 1);
+    window.addEventListener('dswd_capacities_updated', handleUpdate);
+    return () => window.removeEventListener('dswd_capacities_updated', handleUpdate);
+  }, []);
+
   useEffect(() => {
     if (typeof inventoryState?.adminActionsEnabled === 'boolean') {
       setInternalAdminActions(inventoryState.adminActionsEnabled);
@@ -605,7 +613,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
 
                   {/* On-Hand Relief Inventory (Prominent & Automated) */}
                   {(() => {
-                    const caps = getLguCapacities(lgu.maxStock);
+                    const caps = getLguCapacities(lgu);
                     const stock = getLguCommodityStock(lgu);
                     const effectiveCap = caps.forFilter(commodityTypeFilter);
                     const effectiveStock = stock.forFilter(commodityTypeFilter);
@@ -767,7 +775,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
                     </td>
                     <td className="px-6 py-4">
                       {(() => {
-                        const caps = getLguCapacities(lgu.maxStock);
+                        const caps = getLguCapacities(lgu);
                         const stock = getLguCommodityStock(lgu);
                         const effectiveCap = caps.forFilter(commodityTypeFilter);
                         const effectiveStock = stock.forFilter(commodityTypeFilter);

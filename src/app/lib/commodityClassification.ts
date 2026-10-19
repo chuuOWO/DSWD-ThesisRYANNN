@@ -2,6 +2,29 @@ import { normalizeCategoryName } from './lguSync';
 
 export type CommodityTypeFilter = 'All' | 'Food Items' | 'Non-Food Items';
 
+export interface WarehouseCapacityConfig {
+  food: number;
+  nonFood: number;
+  total: number;
+}
+
+export interface LguCapacityConfig {
+  food: number;
+  nonFood: number;
+  total: number;
+}
+
+const WAREHOUSE_STORAGE_KEY = 'dswd_custom_warehouse_capacities';
+const LGU_STORAGE_KEY = 'dswd_custom_lgu_capacities';
+
+// Known initial defaults if no user input has been saved yet
+const DEFAULT_WAREHOUSE_PRESETS: Record<string, { food: number; nonFood: number }> = {
+  'wh-oton': { food: 60000, nonFood: 40000 },
+  'oton': { food: 60000, nonFood: 40000 },
+  'wh-pototan': { food: 48000, nonFood: 32000 },
+  'pototan': { food: 48000, nonFood: 32000 }
+};
+
 /**
  * Checks if a commodity category qualifies as a Food Item.
  * Definition: Family Food Pack and Ready-to-Eat Food (RTEF) are Food Items.
@@ -36,7 +59,6 @@ export function matchesCommodityFilter(category?: string | null, filter?: string
   if (filter === 'Non-Food Items' || filter === 'Non-Food Item' || filter === 'Non-Food' || filter === 'non-food' || filter === 'NFI') {
     return isNonFoodItem(category);
   }
-  // If specific category is selected
   const canonicalFilter = normalizeCategoryName(filter);
   const canonicalCat = normalizeCategoryName(category);
   if (canonicalFilter && canonicalCat) {
@@ -46,12 +68,162 @@ export function matchesCommodityFilter(category?: string | null, filter?: string
 }
 
 /**
- * Splits warehouse capacity into Food Items capacity (60%) and Non-Food Items capacity (40%).
+ * Retrieves user-configured warehouse capacity for food and non-food items.
  */
-export function getWarehouseCapacities(capacityPacks: number = 50000) {
-  const total = Math.max(0, Number(capacityPacks) || 50000);
-  const food = Math.round(total * 0.6);
-  const nonFood = Math.max(0, total - food);
+export function getStoredWarehouseCapacities(idOrName?: string, defaultTotal?: number): WarehouseCapacityConfig {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(WAREHOUSE_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const key = (idOrName || '').trim().toLowerCase();
+        if (parsed[key]) {
+          const f = Math.max(0, Number(parsed[key].food) || 0);
+          const nf = Math.max(0, Number(parsed[key].nonFood) || 0);
+          return { food: f, nonFood: nf, total: f + nf };
+        }
+        // Also check if key matches any stored partial name
+        for (const [storedKey, val] of Object.entries(parsed)) {
+          if (storedKey && key && (key.includes(storedKey) || storedKey.includes(key))) {
+            const castVal = val as { food?: number; nonFood?: number };
+            const f = Math.max(0, Number(castVal.food) || 0);
+            const nf = Math.max(0, Number(castVal.nonFood) || 0);
+            return { food: f, nonFood: nf, total: f + nf };
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Fallback to presets or total
+  const key = (idOrName || '').trim().toLowerCase();
+  for (const [k, v] of Object.entries(DEFAULT_WAREHOUSE_PRESETS)) {
+    if (key.includes(k)) {
+      return { food: v.food, nonFood: v.nonFood, total: v.food + v.nonFood };
+    }
+  }
+
+  const tot = Math.max(0, Number(defaultTotal) || 50000);
+  const f = Math.round(tot * 0.5);
+  return { food: f, nonFood: tot - f, total: tot };
+}
+
+/**
+ * Persists user-configured warehouse capacity for food and non-food items.
+ */
+export function saveWarehouseCapacities(idOrName: string, food: number, nonFood: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(WAREHOUSE_STORAGE_KEY);
+    const map = stored ? JSON.parse(stored) : {};
+    const key = idOrName.trim().toLowerCase();
+    const cleanFood = Math.max(0, Math.round(food));
+    const cleanNonFood = Math.max(0, Math.round(nonFood));
+    map[key] = { food: cleanFood, nonFood: cleanNonFood, total: cleanFood + cleanNonFood };
+    localStorage.setItem(WAREHOUSE_STORAGE_KEY, JSON.stringify(map));
+    window.dispatchEvent(new CustomEvent('dswd_capacities_updated'));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Retrieves user-configured LGU capacity for food and non-food items.
+ */
+export function getStoredLguCapacities(idOrMuni?: string, defaultMaxStock?: number): LguCapacityConfig {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(LGU_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const key = (idOrMuni || '').trim().toLowerCase();
+        if (parsed[key]) {
+          const f = Math.max(0, Number(parsed[key].food) || 0);
+          const nf = Math.max(0, Number(parsed[key].nonFood) || 0);
+          return { food: f, nonFood: nf, total: f + nf };
+        }
+        for (const [storedKey, val] of Object.entries(parsed)) {
+          if (storedKey && key && (key.includes(storedKey) || storedKey.includes(key))) {
+            const castVal = val as { food?: number; nonFood?: number };
+            const f = Math.max(0, Number(castVal.food) || 0);
+            const nf = Math.max(0, Number(castVal.nonFood) || 0);
+            return { food: f, nonFood: nf, total: f + nf };
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const tot = Math.max(0, Number(defaultMaxStock) || 3000);
+  const f = Math.round(tot * 0.6);
+  const nf = Math.max(0, tot - f);
+  return { food: f, nonFood: nf, total: tot };
+}
+
+/**
+ * Persists user-configured LGU capacity for food and non-food items.
+ */
+export function saveLguCapacities(idOrMuni: string, food: number, nonFood: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(LGU_STORAGE_KEY);
+    const map = stored ? JSON.parse(stored) : {};
+    const key = idOrMuni.trim().toLowerCase();
+    const cleanFood = Math.max(0, Math.round(food));
+    const cleanNonFood = Math.max(0, Math.round(nonFood));
+    map[key] = { food: cleanFood, nonFood: cleanNonFood, total: cleanFood + cleanNonFood };
+    localStorage.setItem(LGU_STORAGE_KEY, JSON.stringify(map));
+    window.dispatchEvent(new CustomEvent('dswd_capacities_updated'));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Calculates warehouse capacity for food and non-food based on user configuration.
+ */
+export function getWarehouseCapacities(target?: { id?: string; name?: string; capacityPacks?: number; foodCapacity?: number; nonFoodCapacity?: number } | number) {
+  let food = 0;
+  let nonFood = 0;
+  let total = 0;
+
+  if (typeof target === 'object' && target !== null) {
+    if (target.foodCapacity !== undefined && target.nonFoodCapacity !== undefined) {
+      food = Math.max(0, Number(target.foodCapacity) || 0);
+      nonFood = Math.max(0, Number(target.nonFoodCapacity) || 0);
+      total = food + nonFood;
+    } else {
+      const stored = getStoredWarehouseCapacities(target.id || target.name, target.capacityPacks);
+      food = stored.food;
+      nonFood = stored.nonFood;
+      total = stored.total;
+    }
+  } else if (typeof target === 'number') {
+    if (target === 100000) {
+      const stored = getStoredWarehouseCapacities('wh-oton', 100000);
+      food = stored.food;
+      nonFood = stored.nonFood;
+      total = stored.total;
+    } else if (target === 80000) {
+      const stored = getStoredWarehouseCapacities('wh-pototan', 80000);
+      food = stored.food;
+      nonFood = stored.nonFood;
+      total = stored.total;
+    } else {
+      const stored = getStoredWarehouseCapacities(undefined, target);
+      food = stored.food;
+      nonFood = stored.nonFood;
+      total = stored.total;
+    }
+  } else {
+    food = 50000;
+    nonFood = 50000;
+    total = 100000;
+  }
 
   return {
     total,
@@ -66,12 +238,34 @@ export function getWarehouseCapacities(capacityPacks: number = 50000) {
 }
 
 /**
- * Splits LGU storage buffer capacity into Food Items capacity (60%) and Non-Food Items capacity (40%).
+ * Calculates LGU capacity for food and non-food based on user configuration.
  */
-export function getLguCapacities(maxStock: number = 3000) {
-  const total = Math.max(0, Number(maxStock) || 3000);
-  const food = Math.round(total * 0.6);
-  const nonFood = Math.max(0, total - food);
+export function getLguCapacities(target?: { id?: string; municipality?: string; maxStock?: number; foodCapacity?: number; nonFoodCapacity?: number } | number) {
+  let food = 0;
+  let nonFood = 0;
+  let total = 0;
+
+  if (typeof target === 'object' && target !== null) {
+    if (target.foodCapacity !== undefined && target.nonFoodCapacity !== undefined) {
+      food = Math.max(0, Number(target.foodCapacity) || 0);
+      nonFood = Math.max(0, Number(target.nonFoodCapacity) || 0);
+      total = food + nonFood;
+    } else {
+      const stored = getStoredLguCapacities(target.id || target.municipality, target.maxStock);
+      food = stored.food;
+      nonFood = stored.nonFood;
+      total = stored.total;
+    }
+  } else if (typeof target === 'number') {
+    const stored = getStoredLguCapacities(undefined, target);
+    food = stored.food;
+    nonFood = stored.nonFood;
+    total = stored.total;
+  } else {
+    food = 2000;
+    nonFood = 1000;
+    total = 3000;
+  }
 
   return {
     total,
@@ -98,7 +292,7 @@ export function getLguCommodityStock(lgu: {
   kitchenKits?: number;
   laminatedSacks?: number;
 } | null | undefined) {
-  if (!lgu) return { food: 0, nonFood: 0, total: 0 };
+  if (!lgu) return { food: 0, nonFood: 0, total: 0, forFilter: () => 0 };
 
   const raw = lgu.currentStock || {};
   let food = 0;
@@ -131,4 +325,3 @@ export function getLguCommodityStock(lgu: {
     }
   };
 }
-

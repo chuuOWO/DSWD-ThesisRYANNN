@@ -246,6 +246,13 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
   const [selectedLguFilter, setSelectedLguFilter] = useState<string>('All');
   const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('All');
+  const [capacityVersion, setCapacityVersion] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setCapacityVersion(v => v + 1);
+    window.addEventListener('dswd_capacities_updated', handleUpdate);
+    return () => window.removeEventListener('dswd_capacities_updated', handleUpdate);
+  }, []);
 
   // Chart 1 mode: Disaster vs Monthly timeline
   const [chartViewMode, setChartViewMode] = useState<'disaster' | 'timeline'>('disaster');
@@ -568,17 +575,17 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
     });
   }, [outgoingReleasesList, timeFilter, selectedQuarter, selectedMonth, selectedDisasterFilter, selectedLguFilter, commodityTypeFilter, selectedCategoryFilter]);
 
-  // Warehouse Capacities partitioned into 2: Food Items (60%) and Non-Food Items (40%)
+  // Warehouse Capacities partitioned into 2: Food Items and Non-Food Items (User-configured)
   const warehouseCapacityTotals = useMemo(() => {
     const whList = (warehousesList && warehousesList.length > 0) ? warehousesList : [
-      { capacityPacks: 100000 },
-      { capacityPacks: 80000 }
+      { id: 'wh-oton', name: 'Oton Regional Hub', capacityPacks: 100000 },
+      { id: 'wh-pototan', name: 'Pototan Main Warehouse', capacityPacks: 80000 }
     ];
     let totalCap = 0;
     let foodCap = 0;
     let nonFoodCap = 0;
     whList.forEach(w => {
-      const caps = getWarehouseCapacities(w.capacityPacks);
+      const caps = getWarehouseCapacities(w);
       totalCap += caps.total;
       foodCap += caps.food;
       nonFoodCap += caps.nonFood;
@@ -589,15 +596,15 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
       nonFood: nonFoodCap,
       effective: commodityTypeFilter === 'Food Items' ? foodCap : (commodityTypeFilter === 'Non-Food Items' ? nonFoodCap : totalCap)
     };
-  }, [warehousesList, commodityTypeFilter]);
+  }, [warehousesList, commodityTypeFilter, capacityVersion]);
 
-  // LGU Capacities partitioned into 2: Food Items (60%) and Non-Food Items (40%)
+  // LGU Capacities partitioned into 2: Food Items and Non-Food Items (User-configured)
   const lguCapacityTotals = useMemo(() => {
     let totalCap = 0;
     let foodCap = 0;
     let nonFoodCap = 0;
     effectiveLgus.forEach(lgu => {
-      const caps = getLguCapacities(lgu.maxStock);
+      const caps = getLguCapacities(lgu);
       totalCap += caps.total;
       foodCap += caps.food;
       nonFoodCap += caps.nonFood;
@@ -608,7 +615,7 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
       nonFood: nonFoodCap,
       effective: commodityTypeFilter === 'Food Items' ? foodCap : (commodityTypeFilter === 'Non-Food Items' ? nonFoodCap : totalCap)
     };
-  }, [effectiveLgus, commodityTypeFilter]);
+  }, [effectiveLgus, commodityTypeFilter, capacityVersion]);
 
   // Total Metric KPI Computations
   const totalWarehouseInventory = useMemo(() => {
@@ -970,18 +977,30 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                 <button
                   type="button"
                   onClick={() => setShowWarehouseOverview(curr => !curr)}
-                  className="bg-white rounded-xl p-5 border border-blue-200/80 shadow-xs text-left hover:border-blue-400 hover:shadow-md transition cursor-pointer relative overflow-hidden group"
+                  className={`bg-white rounded-xl p-5 shadow-xs text-left transition cursor-pointer relative overflow-hidden group ${
+                    commodityTypeFilter === 'Food Items'
+                      ? 'border-2 border-amber-400 bg-amber-50/25 hover:border-amber-500'
+                      : commodityTypeFilter === 'Non-Food Items'
+                      ? 'border-2 border-indigo-400 bg-indigo-50/25 hover:border-indigo-500'
+                      : 'border border-blue-200/80 hover:border-blue-400'
+                  }`}
                 >
                   <div className="flex items-start justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                      commodityTypeFilter === 'Food Items'
+                        ? 'bg-amber-500 text-white shadow-xs'
+                        : commodityTypeFilter === 'Non-Food Items'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-blue-50 text-blue-700'
+                    }`}>
                       <Package className="w-5 h-5" />
                     </div>
                     <div className="flex items-center gap-1.5">
                       {commodityTypeFilter !== 'All' && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        <span className={`text-[11px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider shadow-2xs ${
                           commodityTypeFilter === 'Food Items'
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                            ? 'bg-amber-500 text-white ring-2 ring-amber-400/50'
+                            : 'bg-indigo-600 text-white ring-2 ring-indigo-400/50'
                         }`}>
                           {commodityTypeFilter}
                         </span>
@@ -990,7 +1009,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     </div>
                   </div>
                   <p className="text-2xl font-bold text-gray-900 mt-3 font-mono">{totalWarehouseInventory.toLocaleString()}</p>
-                  <p className="text-xs font-bold text-gray-700 mt-0.5">Warehouse Inventory</p>
+                  <p className="text-xs font-bold text-gray-700 mt-0.5">
+                    {commodityTypeFilter === 'Food Items' ? 'Warehouse Food Stocks' : commodityTypeFilter === 'Non-Food Items' ? 'Warehouse Non-Food Stocks' : 'Warehouse Inventory'}
+                  </p>
                   <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
                     <div className="flex items-center justify-between text-[11px] text-gray-600">
                       <span>
@@ -1011,18 +1032,30 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                 <button
                   type="button"
                   onClick={() => onNavigate('lgu-monitoring')}
-                  className="bg-white rounded-xl p-5 border border-purple-200/80 shadow-xs text-left hover:border-purple-400 hover:shadow-md transition cursor-pointer group"
+                  className={`bg-white rounded-xl p-5 shadow-xs text-left transition cursor-pointer group ${
+                    commodityTypeFilter === 'Food Items'
+                      ? 'border-2 border-amber-400 bg-amber-50/25 hover:border-amber-500'
+                      : commodityTypeFilter === 'Non-Food Items'
+                      ? 'border-2 border-indigo-400 bg-indigo-50/25 hover:border-indigo-500'
+                      : 'border border-purple-200/80 hover:border-purple-400'
+                  }`}
                 >
                   <div className="flex items-start justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                      commodityTypeFilter === 'Food Items'
+                        ? 'bg-amber-500 text-white shadow-xs'
+                        : commodityTypeFilter === 'Non-Food Items'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-purple-50 text-purple-700'
+                    }`}>
                       <Building2 className="w-5 h-5" />
                     </div>
                     <div className="flex items-center gap-1.5">
                       {commodityTypeFilter !== 'All' && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                        <span className={`text-[11px] font-black px-2.5 py-1 rounded-lg uppercase tracking-wider shadow-2xs ${
                           commodityTypeFilter === 'Food Items'
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                            ? 'bg-amber-500 text-white ring-2 ring-amber-400/50'
+                            : 'bg-indigo-600 text-white ring-2 ring-indigo-400/50'
                         }`}>
                           {commodityTypeFilter}
                         </span>
@@ -1033,7 +1066,9 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
                     </div>
                   </div>
                   <p className="text-2xl font-bold text-gray-900 mt-3 font-mono">{totalLguOnHand.toLocaleString()}</p>
-                  <p className="text-xs font-bold text-gray-700 mt-0.5">Total LGU Stock On-Hand</p>
+                  <p className="text-xs font-bold text-gray-700 mt-0.5">
+                    {commodityTypeFilter === 'Food Items' ? 'LGU Food Stocks On-Hand' : commodityTypeFilter === 'Non-Food Items' ? 'LGU Non-Food Stocks On-Hand' : 'Total LGU Stock On-Hand'}
+                  </p>
                   <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
                     <div className="flex items-center justify-between text-[11px] text-gray-600">
                       <span>
@@ -2125,26 +2160,43 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {/* Quick Commodity Toggle Pills */}
-            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
-              {(['All', 'Food Items', 'Non-Food Items'] as const).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setCommodityTypeFilter(tab)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
-                    commodityTypeFilter === tab
-                      ? tab === 'Food Items'
-                        ? 'bg-amber-600 text-white shadow-xs'
-                        : tab === 'Non-Food Items'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'bg-white text-gray-900 shadow-xs'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  {tab === 'All' ? 'All Commodities' : tab}
-                </button>
-              ))}
+            {/* Quick Commodity Toggle Pills (Large Visual Scope Selector) */}
+            <div className="flex items-center gap-1.5 bg-gray-100 p-1.5 rounded-xl border border-gray-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setCommodityTypeFilter('All')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  commodityTypeFilter === 'All'
+                    ? 'bg-white text-gray-950 shadow-xs ring-1 ring-gray-300 font-extrabold'
+                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200/60'
+                }`}
+              >
+                All Commodities
+              </button>
+              <button
+                type="button"
+                onClick={() => setCommodityTypeFilter('Food Items')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  commodityTypeFilter === 'Food Items'
+                    ? 'bg-amber-500 text-white shadow-sm ring-2 ring-amber-400 font-extrabold'
+                    : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <span>Food Items</span>
+                {commodityTypeFilter === 'Food Items' && <span className="text-[9px] bg-amber-600 px-1.5 py-0.2 rounded font-black tracking-wider">ACTIVE</span>}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCommodityTypeFilter('Non-Food Items')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  commodityTypeFilter === 'Non-Food Items'
+                    ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-400 font-extrabold'
+                    : 'text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200'
+                }`}
+              >
+                <span>Non-Food Items</span>
+                {commodityTypeFilter === 'Non-Food Items' && <span className="text-[9px] bg-indigo-700 px-1.5 py-0.2 rounded font-black tracking-wider">ACTIVE</span>}
+              </button>
             </div>
 
             <button
@@ -2293,6 +2345,147 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
           </div>
         </div>
       </div>
+
+      {/* 3. PROMINENT COMMODITY FILTER INDICATION BANNER */}
+      {commodityTypeFilter === 'Food Items' && (
+        <div className="rounded-2xl p-5 border-2 border-amber-400 bg-gradient-to-r from-amber-50 via-amber-100/70 to-orange-50 shadow-md animate-in fade-in duration-200">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500 text-white flex items-center justify-center shadow-md shrink-0">
+                <Package className="w-8 h-8" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-amber-900 bg-amber-200/90 px-3 py-0.5 rounded-full border border-amber-300 shadow-2xs">
+                    Active Operational Scope
+                  </span>
+                  <span className="text-xs font-bold text-amber-800">
+                    Family Food Packs (FFP) & Ready-to-Eat Food (RTEF)
+                  </span>
+                </div>
+                <h2 className="text-2xl md:text-3xl font-black text-amber-950 tracking-tight mt-1">
+                  FOOD ITEMS ONLY
+                </h2>
+                <p className="text-xs text-amber-900 max-w-2xl mt-1 font-medium leading-relaxed">
+                  All warehouse inventory, LGU prepositioning buffers, stock-vs-demand projections, FEFO expiration lots, and delivery manifests are filtered exclusively to Food items.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="bg-white/95 backdrop-blur-xs rounded-xl px-4 py-2.5 border border-amber-300 shadow-xs">
+                <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wide block">Warehouse Food Capacity</span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-black font-mono text-gray-950">{totalWarehouseInventory.toLocaleString()}</span>
+                  <span className="text-xs text-gray-500">/ {warehouseCapacityTotals.food.toLocaleString()} packs</span>
+                  <span className="text-xs font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded ml-1">
+                    {Math.round((totalWarehouseInventory / (warehouseCapacityTotals.food || 1)) * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-white/95 backdrop-blur-xs rounded-xl px-4 py-2.5 border border-amber-300 shadow-xs">
+                <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wide block">LGU Food Buffer</span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-black font-mono text-gray-950">{totalLguOnHand.toLocaleString()}</span>
+                  <span className="text-xs text-gray-500">/ {lguCapacityTotals.food.toLocaleString()} packs</span>
+                  <span className="text-xs font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded ml-1">
+                    {Math.round((totalLguOnHand / (lguCapacityTotals.food || 1)) * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCommodityTypeFilter('Non-Food Items')}
+                  className="px-4 py-2.5 rounded-xl bg-indigo-700 hover:bg-indigo-800 text-white font-extrabold text-xs transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>Switch to Non-Food</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCommodityTypeFilter('All')}
+                  className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-amber-50 text-amber-950 border border-amber-300 font-bold text-xs transition shadow-xs cursor-pointer"
+                >
+                  Show All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {commodityTypeFilter === 'Non-Food Items' && (
+        <div className="rounded-2xl p-5 border-2 border-indigo-400 bg-gradient-to-r from-indigo-50 via-indigo-100/70 to-blue-50 shadow-md animate-in fade-in duration-200">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-md shrink-0">
+                <Layers className="w-8 h-8" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-indigo-900 bg-indigo-200/90 px-3 py-0.5 rounded-full border border-indigo-300 shadow-2xs">
+                    Active Operational Scope
+                  </span>
+                  <span className="text-xs font-bold text-indigo-800">
+                    Hygiene, Sleeping, Kitchen, Family Kits & Sacks
+                  </span>
+                </div>
+                <h2 className="text-2xl md:text-3xl font-black text-indigo-950 tracking-tight mt-1">
+                  NON-FOOD ITEMS ONLY
+                </h2>
+                <p className="text-xs text-indigo-900 max-w-2xl mt-1 font-medium leading-relaxed">
+                  All warehouse inventory, LGU prepositioning buffers, stock-vs-demand projections, FEFO expiration lots, and delivery manifests are filtered exclusively to Non-Food items.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="bg-white/95 backdrop-blur-xs rounded-xl px-4 py-2.5 border border-indigo-300 shadow-xs">
+                <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wide block">Warehouse Non-Food Capacity</span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-black font-mono text-gray-950">{totalWarehouseInventory.toLocaleString()}</span>
+                  <span className="text-xs text-gray-500">/ {warehouseCapacityTotals.nonFood.toLocaleString()} units</span>
+                  <span className="text-xs font-extrabold text-indigo-800 bg-indigo-100 border border-indigo-300 px-2 py-0.5 rounded ml-1">
+                    {Math.round((totalWarehouseInventory / (warehouseCapacityTotals.nonFood || 1)) * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-white/95 backdrop-blur-xs rounded-xl px-4 py-2.5 border border-indigo-300 shadow-xs">
+                <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wide block">LGU Non-Food Buffer</span>
+                <div className="flex items-baseline gap-1.5 mt-0.5">
+                  <span className="text-xl font-black font-mono text-gray-950">{totalLguOnHand.toLocaleString()}</span>
+                  <span className="text-xs text-gray-500">/ {lguCapacityTotals.nonFood.toLocaleString()} units</span>
+                  <span className="text-xs font-extrabold text-indigo-800 bg-indigo-100 border border-indigo-300 px-2 py-0.5 rounded ml-1">
+                    {Math.round((totalLguOnHand / (lguCapacityTotals.nonFood || 1)) * 100)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCommodityTypeFilter('Food Items')}
+                  className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Switch to Food</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCommodityTypeFilter('All')}
+                  className="px-3.5 py-2.5 rounded-xl bg-white hover:bg-indigo-50 text-indigo-950 border border-indigo-300 font-bold text-xs transition shadow-xs cursor-pointer"
+                >
+                  Show All
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Dynamic Movable & Collapsible Sections */}
       {sectionOrder.map((sectionId, index) => renderSection(sectionId, index))}

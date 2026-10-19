@@ -78,6 +78,13 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [stockHealthFilter, setStockHealthFilter] = useState<'all' | 'low' | 'expiring' | 'optimal'>('all');
+  const [capacityVersion, setCapacityVersion] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setCapacityVersion(v => v + 1);
+    window.addEventListener('dswd_capacities_updated', handleUpdate);
+    return () => window.removeEventListener('dswd_capacities_updated', handleUpdate);
+  }, []);
 
   // Collapse toggles for notices and comparison chart - notices minimized by default
   const [isLowStockCollapsed, setIsLowStockCollapsed] = useState(true);
@@ -533,16 +540,16 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, currentPage, pageSize]);
 
-  // Warehouse Capacities partitioned into 2: Food Items (60%) and Non-Food Items (40%)
+  // Warehouse Capacities partitioned into 2: Food Items and Non-Food Items (User-configured)
   const otonCaps = useMemo(() => {
     const wh = warehousesList.find(w => w.name.toLowerCase().includes('oton'));
-    return getWarehouseCapacities(wh?.capacityPacks || 100000);
-  }, [warehousesList]);
+    return getWarehouseCapacities(wh || { id: 'wh-oton', name: 'Oton Regional Hub', capacityPacks: 100000 });
+  }, [warehousesList, capacityVersion]);
 
   const pototanCaps = useMemo(() => {
     const wh = warehousesList.find(w => w.name.toLowerCase().includes('pototan'));
-    return getWarehouseCapacities(wh?.capacityPacks || 80000);
-  }, [warehousesList]);
+    return getWarehouseCapacities(wh || { id: 'wh-pototan', name: 'Pototan Main Warehouse', capacityPacks: 80000 });
+  }, [warehousesList, capacityVersion]);
 
   const totalHubCaps = useMemo(() => {
     const total = otonCaps.total + pototanCaps.total;
@@ -561,15 +568,15 @@ export function InventoryMonitoring({ inventoryState, adminProfile }: InventoryM
     let food = 0;
     let nonFood = 0;
     lgusList.forEach(lgu => {
-      const caps = getLguCapacities(lgu.maxStock);
+      const caps = getLguCapacities(lgu);
       total += caps.total;
       food += caps.food;
       nonFood += caps.nonFood;
     });
     if (total === 0) {
       total = 3000 * Math.max(1, lgusList.length || 1);
-      food = Math.round(total * 0.6);
-      nonFood = total - food;
+      food = 2000 * Math.max(1, lgusList.length || 1);
+      nonFood = 1000 * Math.max(1, lgusList.length || 1);
     }
     return {
       total,

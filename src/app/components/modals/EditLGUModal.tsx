@@ -3,6 +3,7 @@ import { X, MapPin, AlertCircle, Edit, Lock, Unlock, Package, ShieldAlert } from
 import { sanitizeTextOnly, sanitizePhone } from '../../lib/inputValidation';
 import { REGIONAL_PROVINCES } from '../../lib/lguMatching';
 import { normalizeCategoryName, getLguStockForCategory } from '../../lib/lguSync';
+import { getLguCapacities, saveLguCapacities } from '../../lib/commodityClassification';
 import type { LGUDelivery } from '../views/LGUMonitoring';
 
 interface EditLGUModalProps {
@@ -24,8 +25,11 @@ export function EditLGUModal({
   onOpenEmergencyCorrection,
   adminActionsEnabled = false
 }: EditLGUModalProps) {
+  const initialCaps = useMemo(() => getLguCapacities(lgu), [lgu]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [foodCap, setFoodCap] = useState<number>(initialCaps.food);
+  const [nonFoodCap, setNonFoodCap] = useState<number>(initialCaps.nonFood);
   const [formData, setFormData] = useState<LGUDelivery>({
     ...lgu,
     maxStock: lgu.maxStock !== undefined ? Number(lgu.maxStock) || 3000 : 3000,
@@ -119,7 +123,13 @@ export function EditLGUModal({
       setIsSubmitting(true);
       setSubmitError(null);
       try {
-        await onSubmit(formData);
+        const totalQuota = foodCap + nonFoodCap;
+        saveLguCapacities(formData.id, foodCap, nonFoodCap);
+        saveLguCapacities(formData.municipality, foodCap, nonFoodCap);
+        await onSubmit({
+          ...formData,
+          maxStock: totalQuota
+        });
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : 'Failed to update LGU in database.');
       } finally {
@@ -351,15 +361,15 @@ export function EditLGUModal({
             )}
           </div>
 
-          {/* Maximum Stock Capacity (Admin Mode Restricted) */}
+          {/* LGU Buffer Stock Capacity (Separate Food & Non-Food Inputs) */}
           <div className={`p-4 rounded-xl border ${
             adminActionsEnabled
               ? 'bg-blue-50/60 border-blue-200'
               : 'bg-gray-50 border-gray-200'
-          } space-y-2`}>
+          } space-y-3`}>
             <div className="flex items-center justify-between">
               <label className="block text-sm font-bold text-gray-800">
-                Maximum Stock Capacity (Units)
+                LGU Buffer Stock Capacities
               </label>
               {adminActionsEnabled ? (
                 <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
@@ -373,24 +383,62 @@ export function EditLGUModal({
               )}
             </div>
             <p className="text-xs text-gray-600 leading-relaxed">
-              Target baseline capacity used by the prioritization engine to evaluate completion and stock sufficiency rates (default: 3,000 units).
+              Target baseline capacities for Food Items (Family Food Packs & RTEF) and Non-Food Items (Hygiene, Sleeping, Kitchen, Family Kits & Sacks).
             </p>
-            <input
-              type="number"
-              min="1"
-              step="1"
-              value={formData.maxStock !== undefined ? formData.maxStock : 3000}
-              disabled={!adminActionsEnabled}
-              onChange={(e) => {
-                const val = e.target.value === '' ? 3000 : Math.max(1, parseInt(e.target.value, 10) || 3000);
-                handleChange('maxStock', val);
-              }}
-              className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold text-sm ${
-                adminActionsEnabled
-                  ? 'bg-white border-blue-300 text-gray-900'
-                  : 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed'
-              }`}
-            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div className="bg-amber-50/70 border border-amber-200 p-3 rounded-xl space-y-1">
+                <label className="block text-xs font-bold text-amber-900">
+                  Food Items Buffer Capacity (Packs)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={foodCap}
+                  disabled={!adminActionsEnabled}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0);
+                    setFoodCap(val);
+                    handleChange('maxStock', val + nonFoodCap);
+                  }}
+                  className={`w-full px-3 py-2 border rounded-lg font-semibold text-sm ${
+                    adminActionsEnabled
+                      ? 'bg-white border-amber-300 text-gray-900 focus:ring-2 focus:ring-amber-500'
+                      : 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed'
+                  }`}
+                />
+              </div>
+
+              <div className="bg-blue-50/70 border border-blue-200 p-3 rounded-xl space-y-1">
+                <label className="block text-xs font-bold text-blue-900">
+                  Non-Food Items Buffer Capacity (Units)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={nonFoodCap}
+                  disabled={!adminActionsEnabled}
+                  onChange={(e) => {
+                    const val = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0);
+                    setNonFoodCap(val);
+                    handleChange('maxStock', foodCap + val);
+                  }}
+                  className={`w-full px-3 py-2 border rounded-lg font-semibold text-sm ${
+                    adminActionsEnabled
+                      ? 'bg-white border-blue-300 text-gray-900 focus:ring-2 focus:ring-blue-500'
+                      : 'bg-gray-100 border-gray-200 text-gray-500 cursor-not-allowed'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-gray-200">
+              <span className="font-semibold text-gray-600">Total Combined Stock Quota:</span>
+              <strong className="text-gray-900 font-mono text-sm">{(foodCap + nonFoodCap).toLocaleString()} units</strong>
+            </div>
+
             {!adminActionsEnabled && (
               <p className="text-[11px] text-gray-500 italic">
                 Enable Administrative Mode in the dashboard to modify stock capacity thresholds.

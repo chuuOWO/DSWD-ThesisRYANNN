@@ -16,7 +16,10 @@ import {
   Search,
   Archive,
   RotateCcw,
-  Truck
+  Truck,
+  Package,
+  Layers,
+  Settings
 } from 'lucide-react';
 import {
   backendApi,
@@ -28,6 +31,12 @@ import {
   type TruckRecord,
   type TruckInput
 } from '../../services/backendApi';
+import {
+  getWarehouseCapacities,
+  saveWarehouseCapacities,
+  getLguCapacities,
+  saveLguCapacities
+} from '../../lib/commodityClassification';
 
 type MasterTab = 'kits' | 'sources' | 'lgus' | 'warehouses' | 'trucks';
 
@@ -108,8 +117,27 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [newWhProvince, setNewWhProvince] = useState('');
   const [newWhMuni, setNewWhMuni] = useState('Oton');
   const [newWhCapacity, setNewWhCapacity] = useState('50000');
+  const [newWhFoodCapacity, setNewWhFoodCapacity] = useState('30000');
+  const [newWhNonFoodCapacity, setNewWhNonFoodCapacity] = useState('20000');
   const [newWhLat, setNewWhLat] = useState('10.7000');
   const [newWhLng, setNewWhLng] = useState('122.5000');
+
+  // Custom Capacity Editing Modals State
+  const [editingWh, setEditingWh] = useState<WarehouseRecord | null>(null);
+  const [editWhFoodCapacity, setEditWhFoodCapacity] = useState('60000');
+  const [editWhNonFoodCapacity, setEditWhNonFoodCapacity] = useState('40000');
+
+  const [editingLgu, setEditingLgu] = useState<LguRecord | null>(null);
+  const [editLguFoodCapacity, setEditLguFoodCapacity] = useState('1800');
+  const [editLguNonFoodCapacity, setEditLguNonFoodCapacity] = useState('1200');
+
+  const [capacityVersion, setCapacityVersion] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setCapacityVersion(v => v + 1);
+    window.addEventListener('dswd_capacities_updated', handleUpdate);
+    return () => window.removeEventListener('dswd_capacities_updated', handleUpdate);
+  }, []);
 
   const [newTruckId, setNewTruckId] = useState('');
   const [newTruckPlate, setNewTruckPlate] = useState('');
@@ -419,20 +447,28 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     if (!newWhName.trim()) return;
 
     try {
+      const fCap = Math.max(0, parseInt(newWhFoodCapacity, 10) || 0);
+      const nfCap = Math.max(0, parseInt(newWhNonFoodCapacity, 10) || 0);
+      const totalCap = (fCap + nfCap) || 50000;
+
       const res = await backendApi.createWarehouse({
         name: newWhName.trim(),
         province: newWhProvince || provinces[0]?.name || 'Iloilo',
         municipality: newWhMuni.trim(),
-        capacityPacks: parseInt(newWhCapacity, 10) || 50000,
+        capacityPacks: totalCap,
         latitude: parseFloat(newWhLat) || 10.7000,
         longitude: parseFloat(newWhLng) || 122.5000
       });
+      const whId = (res as any)?.id || newWhName.trim();
+      saveWarehouseCapacities(whId, fCap, nfCap);
+      saveWarehouseCapacities(newWhName.trim(), fCap, nfCap);
+
       await backendApi.logActivity({
         action: 'WAREHOUSE_CREATED',
         entityType: 'Warehouse',
-        entityId: (res as any)?.id || newWhName.trim(),
-        details: `Registered warehouse storage facility: ${newWhName.trim()} in ${newWhMuni.trim()}, ${newWhProvince || provinces[0]?.name || 'Iloilo'} (Capacity: ${newWhCapacity})`,
-        metadata: { name: newWhName.trim(), municipality: newWhMuni.trim(), capacity: newWhCapacity }
+        entityId: whId,
+        details: `Registered warehouse storage facility: ${newWhName.trim()} in ${newWhMuni.trim()}, ${newWhProvince || provinces[0]?.name || 'Iloilo'} (Food: ${fCap.toLocaleString()}, Non-Food: ${nfCap.toLocaleString()}, Total: ${totalCap.toLocaleString()})`,
+        metadata: { name: newWhName.trim(), municipality: newWhMuni.trim(), foodCapacity: fCap, nonFoodCapacity: nfCap, capacity: totalCap }
       }).catch(() => {});
 
       const updated = await backendApi.getWarehouses();
@@ -444,6 +480,66 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to register warehouse');
     }
+  };
+
+  const openEditWhCapacityModal = (wh: WarehouseRecord) => {
+    const caps = getWarehouseCapacities(wh);
+    setEditingWh(wh);
+    setEditWhFoodCapacity(String(caps.food));
+    setEditWhNonFoodCapacity(String(caps.nonFood));
+  };
+
+  const handleSaveWarehouseCapacity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingWh) return;
+
+    const fCap = Math.max(0, parseInt(editWhFoodCapacity, 10) || 0);
+    const nfCap = Math.max(0, parseInt(editWhNonFoodCapacity, 10) || 0);
+    const totalCap = fCap + nfCap;
+
+    saveWarehouseCapacities(editingWh.id, fCap, nfCap);
+    saveWarehouseCapacities(editingWh.name, fCap, nfCap);
+
+    try {
+      await backendApi.updateWarehouse(editingWh.id, { capacityPacks: totalCap });
+    } catch {
+      // ignore
+    }
+
+    setWarehouses(prev => prev.map(w => w.id === editingWh.id ? { ...w, capacityPacks: totalCap } : w));
+    setEditingWh(null);
+    await inventoryState?.refreshWarehouses?.();
+    showToast(`Updated capacity for ${editingWh.name}: ${fCap.toLocaleString()} Food / ${nfCap.toLocaleString()} Non-Food`);
+  };
+
+  const openEditLguQuotaModal = (lgu: LguRecord) => {
+    const caps = getLguCapacities(lgu);
+    setEditingLgu(lgu);
+    setEditLguFoodCapacity(String(caps.food));
+    setEditLguNonFoodCapacity(String(caps.nonFood));
+  };
+
+  const handleSaveLguCapacity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLgu) return;
+
+    const fCap = Math.max(0, parseInt(editLguFoodCapacity, 10) || 0);
+    const nfCap = Math.max(0, parseInt(editLguNonFoodCapacity, 10) || 0);
+    const totalCap = fCap + nfCap;
+
+    saveLguCapacities(editingLgu.id, fCap, nfCap);
+    saveLguCapacities(editingLgu.municipality, fCap, nfCap);
+
+    try {
+      await backendApi.updateLgu(editingLgu.id, { maxStock: totalCap });
+    } catch {
+      // ignore
+    }
+
+    setDbLgus(prev => prev.map(l => l.id === editingLgu.id ? { ...l, maxStock: totalCap } : l));
+    setEditingLgu(null);
+    await inventoryState?.refreshLgus?.();
+    showToast(`Updated quota for ${editingLgu.municipality}: ${fCap.toLocaleString()} Food / ${nfCap.toLocaleString()} Non-Food`);
   };
 
   const filteredKitTypes = kitTypes.filter(k => {
@@ -1039,6 +1135,25 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                 {lgu.contactPerson && (
                   <p className="text-[11px] text-gray-600">Officer: {lgu.contactPerson}</p>
                 )}
+                {(() => {
+                  const caps = getLguCapacities(lgu);
+                  return (
+                    <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px]">
+                      <div className="flex items-center gap-1.5 text-gray-600">
+                        <span>Food: <strong className="text-amber-800">{caps.food.toLocaleString()}</strong></span>
+                        <span>&bull;</span>
+                        <span>NFI: <strong className="text-blue-800">{caps.nonFood.toLocaleString()}</strong></span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openEditLguQuotaModal(lgu)}
+                        className="text-[10px] font-bold text-[#2500ba] hover:underline cursor-pointer"
+                      >
+                        Edit Quota
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
             {filteredLgus.length === 0 && (
@@ -1070,33 +1185,48 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
 
           <div className="max-h-[380px] overflow-y-auto pr-1">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {warehouses.map((wh) => (
-                <div key={wh.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-gray-900">{wh.name}</h3>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                      Active Storage
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-600 space-y-1.5">
-                    <p>Location: <strong>{wh.municipality}, {wh.province}</strong></p>
-                    <p>Total Holding Capacity: <strong>{wh.capacityPacks.toLocaleString()} relief items</strong></p>
-                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                      <div className="bg-amber-50 border border-amber-200 rounded p-1.5 text-amber-900">
-                        <span className="font-semibold block text-[10px] text-amber-700">Food Capacity (60%)</span>
-                        <strong>{Math.round(wh.capacityPacks * 0.6).toLocaleString()}</strong> packs
-                      </div>
-                      <div className="bg-blue-50 border border-blue-200 rounded p-1.5 text-blue-900">
-                        <span className="font-semibold block text-[10px] text-blue-700">Non-Food Capacity (40%)</span>
-                        <strong>{(wh.capacityPacks - Math.round(wh.capacityPacks * 0.6)).toLocaleString()}</strong> kits/units
+              {warehouses.map((wh) => {
+                const caps = getWarehouseCapacities(wh);
+                return (
+                  <div key={wh.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-gray-900">{wh.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditWhCapacityModal(wh)}
+                          className="text-[11px] font-bold text-[#2500ba] bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition cursor-pointer flex items-center gap-1"
+                        >
+                          <Settings size={12} />
+                          <span>Edit Capacity</span>
+                        </button>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          Active Storage
+                        </span>
                       </div>
                     </div>
-                    <p className="font-mono text-[11px] text-gray-500 pt-0.5">
-                      GPS Coordinates: {wh.latitude.toFixed(4)}, {wh.longitude.toFixed(4)}
-                    </p>
+                    <div className="text-xs text-gray-600 space-y-1.5">
+                      <p>Location: <strong>{wh.municipality}, {wh.province}</strong></p>
+                      <p>Total Holding Capacity: <strong>{caps.total.toLocaleString()} relief items</strong></p>
+                      <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-900">
+                          <span className="font-bold block text-[10px] text-amber-700 uppercase tracking-wide">Food Items Capacity</span>
+                          <span className="text-base font-extrabold text-amber-950 font-mono">{caps.food.toLocaleString()}</span>
+                          <span className="text-[10px] text-amber-700 ml-1">packs</span>
+                        </div>
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-blue-900">
+                          <span className="font-bold block text-[10px] text-blue-700 uppercase tracking-wide">Non-Food Capacity</span>
+                          <span className="text-base font-extrabold text-blue-950 font-mono">{caps.nonFood.toLocaleString()}</span>
+                          <span className="text-[10px] text-blue-700 ml-1">units/kits</span>
+                        </div>
+                      </div>
+                      <p className="font-mono text-[11px] text-gray-500 pt-0.5">
+                        GPS Coordinates: {wh.latitude.toFixed(4)}, {wh.longitude.toFixed(4)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1669,15 +1799,37 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Capacity (Food Packs)</label>
-                <input
-                  type="number"
-                  value={newWhCapacity}
-                  onChange={(e) => setNewWhCapacity(e.target.value)}
-                  placeholder="50000"
-                  className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-medium"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-amber-900 mb-1">Food Items Capacity (Packs) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={newWhFoodCapacity}
+                    onChange={(e) => setNewWhFoodCapacity(e.target.value)}
+                    placeholder="30000"
+                    className="w-full px-3 py-2 rounded-xl border border-amber-300 text-xs font-semibold bg-amber-50/30"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-blue-900 mb-1">Non-Food Capacity (Units) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={newWhNonFoodCapacity}
+                    onChange={(e) => setNewWhNonFoodCapacity(e.target.value)}
+                    placeholder="20000"
+                    className="w-full px-3 py-2 rounded-xl border border-blue-300 text-xs font-semibold bg-blue-50/30"
+                  />
+                </div>
+              </div>
+              <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-between text-xs">
+                <span className="font-semibold text-gray-600">Total Holding Capacity:</span>
+                <strong className="text-gray-900 font-mono text-sm">
+                  {((parseInt(newWhFoodCapacity, 10) || 0) + (parseInt(newWhNonFoodCapacity, 10) || 0)).toLocaleString()} items
+                </strong>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1714,6 +1866,148 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                   className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800"
                 >
                   Save Warehouse
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: EDIT WAREHOUSE CAPACITY */}
+      {editingWh && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Configure Warehouse Holding Capacity</h3>
+                <p className="text-xs text-gray-500">{editingWh.name} ({editingWh.municipality}, {editingWh.province})</p>
+              </div>
+              <button type="button" onClick={() => setEditingWh(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveWarehouseCapacity} className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Specify separate holding capacities for Food Items (Family Food Packs & RTEF) and Non-Food Items (Hygiene, Sleeping, Kitchen, Family Kits & Sacks).
+              </p>
+              <div className="space-y-3">
+                <div className="bg-amber-50/60 border border-amber-200 p-3 rounded-xl space-y-1">
+                  <label className="block text-xs font-bold text-amber-900 mb-1">
+                    Food Items Capacity (FFP & RTEF Packs) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={editWhFoodCapacity}
+                    onChange={(e) => setEditWhFoodCapacity(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-amber-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 bg-white"
+                  />
+                </div>
+                <div className="bg-blue-50/60 border border-blue-200 p-3 rounded-xl space-y-1">
+                  <label className="block text-xs font-bold text-blue-900 mb-1">
+                    Non-Food Items Capacity (NFIs & Kits) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={editWhNonFoodCapacity}
+                    onChange={(e) => setEditWhNonFoodCapacity(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-blue-300 text-xs font-semibold focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                </div>
+                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-between text-xs">
+                  <span className="font-bold text-gray-700">Total Holding Capacity:</span>
+                  <span className="font-extrabold text-gray-900 font-mono text-sm">
+                    {((parseInt(editWhFoodCapacity, 10) || 0) + (parseInt(editWhNonFoodCapacity, 10) || 0)).toLocaleString()} units
+                  </span>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingWh(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition shadow-xs"
+                >
+                  Save Capacity
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: EDIT LGU QUOTA */}
+      {editingLgu && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Configure Municipality Relief Quota</h3>
+                <p className="text-xs text-gray-500">{editingLgu.municipality}, {editingLgu.province}</p>
+              </div>
+              <button type="button" onClick={() => setEditingLgu(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveLguCapacity} className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Specify separate target buffer stock capacities for Food Items (Family Food Packs & RTEF) and Non-Food Items (Hygiene, Sleeping, Kitchen, Family Kits & Sacks).
+              </p>
+              <div className="space-y-3">
+                <div className="bg-amber-50/60 border border-amber-200 p-3 rounded-xl space-y-1">
+                  <label className="block text-xs font-bold text-amber-900 mb-1">
+                    Food Items Buffer Quota (Packs) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={editLguFoodCapacity}
+                    onChange={(e) => setEditLguFoodCapacity(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-amber-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 bg-white"
+                  />
+                </div>
+                <div className="bg-blue-50/60 border border-blue-200 p-3 rounded-xl space-y-1">
+                  <label className="block text-xs font-bold text-blue-900 mb-1">
+                    Non-Food Items Buffer Quota (Units) *
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={editLguNonFoodCapacity}
+                    onChange={(e) => setEditLguNonFoodCapacity(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-blue-300 text-xs font-semibold focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                </div>
+                <div className="p-3 rounded-xl bg-gray-50 border border-gray-200 flex items-center justify-between text-xs">
+                  <span className="font-bold text-gray-700">Total Combined Quota:</span>
+                  <span className="font-extrabold text-gray-900 font-mono text-sm">
+                    {((parseInt(editLguFoodCapacity, 10) || 0) + (parseInt(editLguNonFoodCapacity, 10) || 0)).toLocaleString()} units
+                  </span>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingLgu(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 transition shadow-xs"
+                >
+                  Save Quota
                 </button>
               </div>
             </form>
