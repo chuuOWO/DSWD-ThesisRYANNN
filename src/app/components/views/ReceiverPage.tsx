@@ -1477,7 +1477,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       await backendApi.updateOutgoing(payload.drNumber, {
         deliveryStatus: 'Delivered',
         receiverGps: gpsString,
-        deliveredAt: new Date().toISOString(),
         handoverContractId: resolvedContractId,
         receiverSignature: dropOffRef,
         walletAddress: activeWalletAddr,
