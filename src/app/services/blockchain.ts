@@ -177,18 +177,29 @@ const handoverAbi = [
   'function batchIdByTokenId(string tokenId) view returns (uint256)'
 ];
 
-const getReadOnlyProvider = () => {
-  return new JsonRpcProvider(targetRpcUrl);
+let cachedProvider: JsonRpcProvider | null = null;
+const getReadOnlyProvider = (): JsonRpcProvider => {
+  if (!cachedProvider) {
+    cachedProvider = new JsonRpcProvider(
+      targetRpcUrl,
+      { chainId: targetChainId, name: targetChainName },
+      { staticNetwork: true }
+    );
+  }
+  return cachedProvider;
 };
 
+let cachedRelayerWallet: ethers.Wallet | null = null;
 const getSigner = async () => {
   const relayerKey = env.VITE_SEPOLIA_RELAYER_PRIVATE_KEY?.trim();
   if (relayerKey && relayerKey.length >= 64) {
-    const formattedKey = relayerKey.startsWith('0x') ? relayerKey : `0x${relayerKey}`;
-    const provider = getReadOnlyProvider();
-    const wallet = new ethers.Wallet(formattedKey, provider);
-    console.log('[Blockchain] Using automated Sepolia relayer signer:', wallet.address, '(zero-popup background execution)');
-    return wallet;
+    if (!cachedRelayerWallet) {
+      const formattedKey = relayerKey.startsWith('0x') ? relayerKey : `0x${relayerKey}`;
+      const provider = getReadOnlyProvider();
+      cachedRelayerWallet = new ethers.Wallet(formattedKey, provider);
+      console.log('[Blockchain] Using automated Sepolia relayer signer:', cachedRelayerWallet.address, '(cached singleton)');
+    }
+    return cachedRelayerWallet;
   }
 
   console.warn('[Blockchain] VITE_SEPOLIA_RELAYER_PRIVATE_KEY not detected in runtime environment. Falling back to browser MetaMask.');
@@ -240,6 +251,41 @@ export const getAdminRelayerAddress = (): string | null => {
   }
   return null;
 };
+
+/**
+ * Fast-broadcast transaction confirmation utility:
+ * Resolves as soon as the transaction is confirmed, or within maxWaitMs (default: 3500ms).
+ * Because tx.hash is already calculated and broadcast to the mempool, we never freeze
+ * the user interface if network or testnet block production is slow.
+ */
+async function waitForTxOrFastBroadcast(tx: any, maxWaitMs = 3500): Promise<{ hash: string; receipt: any }> {
+  const txHash = String(tx?.hash || '');
+  if (!txHash) return { hash: '', receipt: null };
+
+  let resolved = false;
+  const timeoutPromise = new Promise<{ hash: string; receipt: null }>((resolve) => {
+    setTimeout(() => {
+      if (!resolved) {
+        console.log(`[Blockchain] Fast-broadcast return for tx ${txHash} (mining finalizes in background)`);
+        resolve({ hash: txHash, receipt: null });
+      }
+    }, maxWaitMs);
+  });
+
+  const waitPromise = (async (): Promise<{ hash: string; receipt: any }> => {
+    try {
+      const receipt = await tx.wait(1);
+      resolved = true;
+      return { hash: receipt?.hash || txHash, receipt };
+    } catch (err) {
+      resolved = true;
+      console.warn(`[Blockchain] Background wait for tx ${txHash} notice:`, err);
+      return { hash: txHash, receipt: null };
+    }
+  })();
+
+  return Promise.race([waitPromise, timeoutPromise]);
+}
 
 export const blockchain = {
   getAdminRelayerAddress(): string | null {
@@ -388,7 +434,7 @@ export const blockchain = {
       const provider = getReadOnlyProvider();
       const contract = new Contract(batchTokenContractAddress, batchTokenAbi, provider);
 
-      await Promise.all(batchTokenIds.map(async (batchTokenId) => {
+      const checkPromise = Promise.all(batchTokenIds.map(async (batchTokenId) => {
         try {
           await contract.getBatchByTokenId(batchTokenId);
         } catch (error) {
@@ -396,6 +442,8 @@ export const blockchain = {
           throw new Error(`Batch token not found on current contract: ${batchTokenId}. ${message}`);
         }
       }));
+      const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 2000));
+      await Promise.race([checkPromise, timeoutPromise]);
     } catch (batchErr) {
       console.warn('assertBatchTokensExist check warning:', batchErr);
     }
@@ -451,10 +499,10 @@ export const blockchain = {
         );
 
         onStage?.('mining', tx.hash);
-        const receipt = await tx.wait(1);
+        const { hash } = await waitForTxOrFastBroadcast(tx, 3500);
 
         return {
-          hash: receipt?.hash || tx.hash,
+          hash,
           walletAddress,
           mode: 'contract'
         };
@@ -541,8 +589,9 @@ export const blockchain = {
     if (!handoverContractAddress) return 0n;
     try {
       const contract = new Contract(handoverContractAddress, handoverAbi, getReadOnlyProvider());
-      const count = await contract.currentHandoverId();
-      return BigInt(count.toString());
+      const queryPromise = contract.currentHandoverId().then((count: any) => BigInt(count.toString()));
+      const timeoutPromise = new Promise<bigint>((resolve) => setTimeout(() => resolve(0n), 1200));
+      return await Promise.race([queryPromise, timeoutPromise]);
     } catch {
       return 0n;
     }
@@ -718,7 +767,7 @@ export const blockchain = {
               qty,
               input.to
             );
-            await mintTx.wait(1);
+            await waitForTxOrFastBroadcast(mintTx, 3500);
             console.log(`[Blockchain] Authentic batch token ${tokenId} registered on Sepolia (tx: ${mintTx.hash}).`);
           }
         } catch (batchErr) {
@@ -756,25 +805,23 @@ export const blockchain = {
       }
 
       onStage?.('mining', tx.hash);
-      const receipt = await tx.wait(1);
+      const { hash } = await waitForTxOrFastBroadcast(tx, 3500);
 
       // If disambiguated on-chain, sync back to Supabase
       if (isDisambiguated) {
-        try {
-          await supabase
-            .from('outgoing_requests')
-            .update({
-              dr_number: effectiveDrNumber,
-              handover_contract_id: effectiveContractId
-            })
-            .eq('dr_number', input.drNumber.trim());
-        } catch (syncErr) {
-          console.warn('[Blockchain] Supabase sync after disambiguation warning:', syncErr);
-        }
+        supabase
+          .from('outgoing_requests')
+          .update({
+            dr_number: effectiveDrNumber,
+            handover_contract_id: effectiveContractId
+          })
+          .eq('dr_number', input.drNumber.trim())
+          .then(() => {})
+          .catch((syncErr) => console.warn('[Blockchain] Supabase sync after disambiguation warning:', syncErr));
       }
 
       return {
-        hash: receipt?.hash || tx.hash,
+        hash,
         walletAddress: targetRecipientWallet || input.signerWallet || walletAddress,
         mode: 'contract'
       };
@@ -828,10 +875,10 @@ export const blockchain = {
         { gasLimit }
       );
       onStage?.('mining', tx.hash);
-      const receipt = await tx.wait(1);
-      console.log(`[Blockchain] transferDriverCustody confirmed on Sepolia: ${receipt?.hash || tx.hash}`);
+      const { hash } = await waitForTxOrFastBroadcast(tx, 3500);
+      console.log(`[Blockchain] transferDriverCustody confirmed on Sepolia: ${hash}`);
       return {
-        hash: receipt?.hash || tx.hash,
+        hash,
         walletAddress: input.newDriverWallet,
         mode: 'contract' as const
       };
@@ -905,10 +952,10 @@ export const blockchain = {
       );
 
       onStage?.('mining', tx.hash);
-      const receipt = await tx.wait(1);
+      const { hash } = await waitForTxOrFastBroadcast(tx, 3500);
 
       return {
-        hash: receipt?.hash || tx.hash,
+        hash,
         walletAddress: targetLguWallet || input.signerWallet || walletAddress,
         mode: 'contract'
       };

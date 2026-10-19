@@ -2175,34 +2175,68 @@ export const backendApi = {
   },
 
   async createOutgoing(payload: OutgoingPayload) {
-    // 1. Resolve source warehouse or source LGU to satisfy chk_outgoing_source_mutex
+    // 1. Prepare parallel lookups
     const isSourceWh = (payload.sourceType ?? payload.source_type ?? 'Warehouse') === 'Warehouse';
-    let srcWhId = payload.sourceWarehouseId ?? payload.source_warehouse_id ?? null;
-    let srcLguId = payload.sourceLguId ?? payload.source_lgu_id ?? null;
+    const rawSrcWhId = payload.sourceWarehouseId ?? payload.source_warehouse_id ?? null;
+    const rawSrcLguId = payload.sourceLguId ?? payload.source_lgu_id ?? null;
 
-    if (isSourceWh) {
-      srcLguId = null;
-      if (!isUuid(srcWhId)) {
-        srcWhId = await this.resolveWarehouseId(payload.warehouseSource || srcWhId);
+    const resolveSourcePromise = (async () => {
+      let srcWhId = rawSrcWhId;
+      let srcLguId = rawSrcLguId;
+      if (isSourceWh) {
+        srcLguId = null;
+        if (!isUuid(srcWhId)) {
+          srcWhId = await this.resolveWarehouseId(payload.warehouseSource || srcWhId);
+        }
+      } else {
+        srcWhId = null;
+        if (!isUuid(srcLguId)) {
+          srcLguId = await this.resolveLguId(payload.warehouseSource || srcLguId);
+        }
       }
-    } else {
-      srcWhId = null;
-      if (!isUuid(srcLguId)) {
-        srcLguId = await this.resolveLguId(payload.warehouseSource || srcLguId);
-      }
-    }
+      return { srcWhId, srcLguId };
+    })();
 
-    // 2. Resolve destination LGU (required NOT NULL in outgoing_requests)
-    let destLguId = payload.destinationLguId ?? payload.destination_lgu_id ?? payload.lguId ?? payload.lgu_id ?? null;
-    if (!isUuid(destLguId)) {
-      destLguId = await this.resolveLguId(payload.municipality || payload.lguName || destLguId);
-    }
+    const rawDestLguId = payload.destinationLguId ?? payload.destination_lgu_id ?? payload.lguId ?? payload.lgu_id ?? null;
+    const resolveDestPromise = isUuid(rawDestLguId)
+      ? Promise.resolve(rawDestLguId)
+      : this.resolveLguId(payload.municipality || payload.lguName || rawDestLguId);
 
-    // 3. Resolve kit type ID
-    let kitId = payload.kitTypeId ?? payload.kit_type_id ?? null;
-    if (!isUuid(kitId)) {
-      kitId = await this.resolveKitTypeId(payload.fnfiCategory || payload.category || kitId);
-    }
+    const rawKitId = payload.kitTypeId ?? payload.kit_type_id ?? null;
+    const resolveKitPromise = isUuid(rawKitId)
+      ? Promise.resolve(rawKitId)
+      : this.resolveKitTypeId(payload.fnfiCategory || payload.category || rawKitId);
+
+    const rawIncident = payload.incidentCode?.trim();
+    const resolveIncidentPromise = rawIncident
+      ? (async () => {
+          const parsed = parseIncidentInfo(rawIncident).incidentCode || rawIncident;
+          return await this.ensureIncidentExists(parsed);
+        })()
+      : Promise.resolve(null);
+
+    const rawOutgoingCode = (payload.drNumber || '').trim().toUpperCase();
+    const resolveCodePromise = (async () => {
+      if (rawOutgoingCode.startsWith('INC-')) return rawOutgoingCode;
+      if (rawOutgoingCode.startsWith('DR-')) return `INC-${rawOutgoingCode.slice(3)}`;
+      if (rawOutgoingCode) return `INC-${rawOutgoingCode}`;
+      return await this.generateNextDrNumber();
+    })();
+
+    // Await all 5 resolutions concurrently in parallel
+    const [
+      { srcWhId, srcLguId },
+      destLguId,
+      kitId,
+      effectiveIncident,
+      finalOutgoingCode
+    ] = await Promise.all([
+      resolveSourcePromise,
+      resolveDestPromise,
+      resolveKitPromise,
+      resolveIncidentPromise,
+      resolveCodePromise
+    ]);
 
     // 4. Resolve truck (must be valid truck_id or null)
     const rawTruck = payload.assignedTruckId ?? payload.assigned_truck_id;
@@ -2211,21 +2245,6 @@ export const backendApi = {
     // 5. Resolve escort profile ID (must be a valid UUID or null to prevent 22P02 errors)
     const rawDriverId = payload.assignedEscortProfileId ?? payload.assigned_driver_profile_id;
     const driverProfileId = isUuid(rawDriverId) ? rawDriverId : null;
-
-    // 6. Clean and ensure incident code exists in incidents table
-    const rawIncident = payload.incidentCode?.trim();
-    let effectiveIncident: string | null = null;
-    if (rawIncident) {
-      const parsed = parseIncidentInfo(rawIncident).incidentCode || rawIncident;
-      effectiveIncident = await this.ensureIncidentExists(parsed);
-    }
-
-    const rawOutgoingCode = (payload.drNumber || '').trim().toUpperCase();
-    const finalOutgoingCode = rawOutgoingCode.startsWith('INC-')
-      ? rawOutgoingCode
-      : (rawOutgoingCode.startsWith('DR-')
-        ? `INC-${rawOutgoingCode.slice(3)}`
-        : (rawOutgoingCode ? `INC-${rawOutgoingCode}` : await this.generateNextDrNumber()));
 
     const insertPayload: Record<string, any> = {
       dr_number: finalOutgoingCode,
@@ -2529,50 +2548,48 @@ export const backendApi = {
 
   async getNextDrIndex(): Promise<number> {
     try {
-      // 1. App counters baseline
-      const { data } = await supabase
-        .from('app_counters')
-        .select('value')
-        .eq('key', 'dr_index')
-        .maybeSingle();
-
-      let maxIndex = (data as { value?: number } | null)?.value ?? 0;
-
-      // 2. Scan highest existing Outgoing code in outgoing_requests table
-      try {
-        const { data: outReqs } = await supabase
+      const [counterRes, outReqsRes, onChainCount] = await Promise.all([
+        supabase
+          .from('app_counters')
+          .select('value')
+          .eq('key', 'dr_index')
+          .maybeSingle()
+          .catch(() => ({ data: null })),
+        supabase
           .from('outgoing_requests')
-          .select('dr_number');
+          .select('dr_number')
+          .order('created_at', { ascending: false })
+          .limit(50)
+          .catch(() => ({ data: null })),
+        blockchain.getCurrentHandoverCount().catch(() => 0n)
+      ]);
 
-        if (outReqs) {
-          for (const req of outReqs) {
-            const match = req.dr_number?.match(/(?:DR|INC)-\d{4}-(\d+)/i);
-            if (match) {
-              const num = parseInt(match[1], 10);
-              if (!isNaN(num) && num > maxIndex) {
-                maxIndex = num;
-              }
+      let maxIndex = (counterRes.data as { value?: number } | null)?.value ?? 0;
+
+      if (outReqsRes.data) {
+        for (const req of outReqsRes.data) {
+          const match = req.dr_number?.match(/(?:DR|INC)-\d{4}-(\d+)/i);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > maxIndex) {
+              maxIndex = num;
             }
           }
         }
-      } catch (dbErr) {
-        console.warn('Outgoing requests code scan warning:', dbErr);
       }
 
-      // 3. Scan highest existing handover on Sepolia smart contract
-      try {
-        const onChainCount = await blockchain.getCurrentHandoverCount();
-        if (Number(onChainCount) > maxIndex) {
-          maxIndex = Number(onChainCount);
-        }
-      } catch (chainErr) {
-        console.warn('On-chain handover count scan warning:', chainErr);
+      if (Number(onChainCount) > maxIndex) {
+        maxIndex = Number(onChainCount);
       }
 
       const nextValue = Math.max(maxIndex, 0) + 1;
-      await supabase
+      // Background the counter upsert so it does not block the caller
+      supabase
         .from('app_counters')
-        .upsert({ key: 'dr_index', value: nextValue, updated_at: new Date().toISOString() });
+        .upsert({ key: 'dr_index', value: nextValue, updated_at: new Date().toISOString() })
+        .then(() => {})
+        .catch((err) => console.warn('Counter upsert notice:', err));
+
       return nextValue;
     } catch {
       return 1;

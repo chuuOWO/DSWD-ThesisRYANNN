@@ -1113,50 +1113,48 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
 
       const receiptTxHash = (acceptResult as any)?.txHash || '';
 
-      // Record direct custody acceptance in Supabase
-      await backendApi.recordLguReceipt({
-        drNumber,
-        lguName: finalMuni,
-        municipality: finalMuni,
-        category,
-        quantity: effectiveQty,
-        receiverGps: receiverGpsString,
-        receiverSignature: receiptTxHash || `LGU-RECEIVER-${Date.now()}`,
-        txHash: receiptTxHash
-      });
-
-      // Record final handover hop in custody_hops
+      // Record final handover hop note
       const hopNote = isWarehousePickup
         ? `Final custody handover verified and accepted by LGU Receiver at ${targetFacilityName} (Direct Warehouse Pickup).`
         : matchingRelease?.deliveryStatus === 'Delivered'
         ? `Final physical intake verified and accepted by LGU Receiver at ${targetFacilityName} (Post-Drop-Off Delivery). Escort custody fulfilled.`
         : `Final direct intake verified and accepted by LGU Receiver at ${targetFacilityName} (Direct Intake Handover from Convoy ${matchingRelease?.assignedTruckId || 'Truck'}).`;
 
-      await backendApi.recordCustodyHop({
-        outgoingRequestId: matchingRelease?.id || drNumber,
-        sequence: 99,
-        fromDriverProfileId: matchingRelease?.assignedDriverProfileId || undefined,
-        toDriverProfileId: profile.id,
-        fromTruckId: matchingRelease?.assignedTruckId || undefined,
-        gpsCoordinates: receiverGpsString,
-        blockchainTxHash: receiptTxHash,
-        notes: hopNote
-      }).catch(() => {});
-
-      // Append LGU_RECEIVED to stock_ledger
-      await backendApi.appendStockLedger({
-        movementType: 'LGU_RECEIVED',
-        outgoingRequestId: matchingRelease?.id,
-        drNumber,
-        destinationLguId: matchingRelease?.destinationLguId || matchingRelease?.lguId,
-        quantityChange: effectiveQty,
-        referenceTable: 'lgu_inventory_reports',
-        referenceId: drNumber,
-        gpsCoordinates: receiverGpsString,
-        blockchainTxHash: receiptTxHash,
-        performedByProfileId: profile.id,
-        notes: `Physical relief goods received and verified on-site at ${targetFacilityName}`
-      }).catch(() => {});
+      const backgroundWrites: Promise<any>[] = [
+        backendApi.recordLguReceipt({
+          drNumber,
+          lguName: finalMuni,
+          municipality: finalMuni,
+          category,
+          quantity: effectiveQty,
+          receiverGps: receiverGpsString,
+          receiverSignature: receiptTxHash || `LGU-RECEIVER-${Date.now()}`,
+          txHash: receiptTxHash
+        }),
+        backendApi.recordCustodyHop({
+          outgoingRequestId: matchingRelease?.id || drNumber,
+          sequence: 99,
+          fromDriverProfileId: matchingRelease?.assignedDriverProfileId || undefined,
+          toDriverProfileId: profile.id,
+          fromTruckId: matchingRelease?.assignedTruckId || undefined,
+          gpsCoordinates: receiverGpsString,
+          blockchainTxHash: receiptTxHash,
+          notes: hopNote
+        }).catch(() => {}),
+        backendApi.appendStockLedger({
+          movementType: 'LGU_RECEIVED',
+          outgoingRequestId: matchingRelease?.id,
+          drNumber,
+          destinationLguId: matchingRelease?.destinationLguId || matchingRelease?.lguId,
+          quantityChange: effectiveQty,
+          referenceTable: 'lgu_inventory_reports',
+          referenceId: drNumber,
+          gpsCoordinates: receiverGpsString,
+          blockchainTxHash: receiptTxHash,
+          performedByProfileId: profile.id,
+          notes: `Physical relief goods received and verified on-site at ${targetFacilityName}`
+        }).catch(() => {})
+      ];
 
       // If discrepancy or inspection notes present, submit discrepancy report
       if (verificationRemarks.trim() || effectiveQty !== pendingVerification.quantity) {
@@ -1167,24 +1165,27 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
           verificationRemarks.trim()
         ].filter(Boolean).join(' ');
 
-        await backendApi.createDiscrepancyReport({
-          reportType: 'Outgoing',
-          drNumber,
-          note: noteText,
-          reportedByRole: 'LGU Receiver',
-          reportedByWallet: profile?.walletAddress || undefined,
-          reportedByProfileId: profile?.id
-        }).catch(() => {});
+        backgroundWrites.push(
+          backendApi.createDiscrepancyReport({
+            reportType: 'Outgoing',
+            drNumber,
+            note: noteText,
+            reportedByRole: 'LGU Receiver',
+            reportedByWallet: profile?.walletAddress || undefined,
+            reportedByProfileId: profile?.id
+          }).catch(() => {})
+        );
       }
 
       // Clean up truck live location since delivery is finalized
       const deliveredTruckId = matchingRelease?.assignedTruckId || (matchingRelease as any)?.assigned_truck_id;
       if (deliveredTruckId) {
-        await backendApi.markTruckLiveLocationDone(deliveredTruckId, drNumber).catch(() => {});
+        backgroundWrites.push(backendApi.markTruckLiveLocationDone(deliveredTruckId, drNumber).catch(() => {}));
       }
-      await backendApi.markTruckLiveLocationDoneByDr(drNumber).catch(() => {});
+      backgroundWrites.push(backendApi.markTruckLiveLocationDoneByDr(drNumber).catch(() => {}));
 
-      await loadLguStock();
+      await Promise.all(backgroundWrites);
+      loadLguStock().catch(() => {});
 
       setConfirmedDeliveryReceipt({
         drNumber,

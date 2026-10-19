@@ -1472,7 +1472,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setDropOffTxHash(dropOffRef);
 
       // 1. Update outgoing_requests: delivery_status = 'Delivered' (so LGU can subsequently scan and accept)
-      await backendApi.updateOutgoing(payload.drNumber, {
+      const updatePromise = backendApi.updateOutgoing(payload.drNumber, {
         deliveryStatus: 'Delivered',
         receiverGps: gpsString,
         handoverContractId: resolvedContractId,
@@ -1481,62 +1481,72 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         amountApproved: effectiveQty
       }).catch((e) => console.warn('updateOutgoing error:', e));
 
-      // 2. Report discrepancy if verified quantity differs or remarks entered
+      // 2. Fire secondary tasks concurrently
+      const backgroundTasks: Promise<any>[] = [];
+
       if (dropOffRemarks.trim() || effectiveQty !== payload.quantity) {
         const noteText = [
           effectiveQty !== payload.quantity ? `Drop-off verified count ${effectiveQty} vs manifest ${payload.quantity}.` : '',
           dropOffRemarks.trim()
         ].filter(Boolean).join(' ');
 
-        await backendApi.createDiscrepancyReport({
-          reportType: 'Outgoing',
-          drNumber: payload.drNumber,
-          note: noteText,
-          reportedByRole: 'Escort',
-          reportedByWallet: profile?.walletAddress || undefined,
-          reportedByProfileId: profile?.id
-        }).catch(() => {});
+        backgroundTasks.push(
+          backendApi.createDiscrepancyReport({
+            reportType: 'Outgoing',
+            drNumber: payload.drNumber,
+            note: noteText,
+            reportedByRole: 'Escort',
+            reportedByWallet: profile?.walletAddress || undefined,
+            reportedByProfileId: profile?.id
+          }).catch(() => {})
+        );
       }
 
-      // 3. Record drop-off hop in custody_hops (Escort -> Destination Site)
-      const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);
-      const nextSequence = (existingHops.length || 0) + 1;
-      await backendApi.recordCustodyHop({
-        outgoingRequestId: matchingRelease?.id || payload.drNumber,
-        sequence: nextSequence,
-        fromDriverProfileId: profile?.id,
-        fromTruckId: activeTruckId,
-        gpsCoordinates: gpsString,
-        blockchainTxHash: dropOffRef,
-        notes: `Shipment dropped off at destination facility (${destinationText}) by Escort ${profile?.fullName || receiverId}. Awaiting physical intake scan by LGU Receiver.`
-      }).catch(() => {});
+      backgroundTasks.push(
+        (async () => {
+          const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);
+          const nextSequence = (existingHops.length || 0) + 1;
+          await backendApi.recordCustodyHop({
+            outgoingRequestId: matchingRelease?.id || payload.drNumber,
+            sequence: nextSequence,
+            fromDriverProfileId: profile?.id,
+            fromTruckId: activeTruckId,
+            gpsCoordinates: gpsString,
+            blockchainTxHash: dropOffRef,
+            notes: `Shipment dropped off at destination facility (${destinationText}) by Escort ${profile?.fullName || receiverId}. Awaiting physical intake scan by LGU Receiver.`
+          }).catch(() => {});
+        })()
+      );
 
-      // 4. Clean up truck live location since this shipment's transit is finished
-      await backendApi.markTruckLiveLocationDoneByDr(payload.drNumber).catch(() => {});
+      backgroundTasks.push(backendApi.markTruckLiveLocationDoneByDr(payload.drNumber).catch(() => {}));
       if (activeTruckId) {
-        await backendApi.markTruckLiveLocationDone(activeTruckId, payload.drNumber).catch(() => {});
+        backgroundTasks.push(backendApi.markTruckLiveLocationDone(activeTruckId, payload.drNumber).catch(() => {}));
       }
 
-      // 5. Activity log
-      await backendApi.logActivity({
-        actorId: profile?.id,
-        actorName: profile?.fullName || receiverId,
-        actorEmail: profile?.email,
-        actorRole: 'escort',
-        actorWallet: activeWalletAddr,
-        action: 'DELIVERY_DROPOFF_COMPLETED',
-        entityType: 'outgoing_request',
-        entityId: payload.drNumber,
-        details: `Relief delivery ${payload.drNumber} dropped off inside geofence at ${destinationText}. Awaiting LGU receiver intake.`,
-        metadata: {
-          drNumber: payload.drNumber,
-          truckId: activeTruckId,
-          destination: destinationText,
-          quantity: effectiveQty,
-          gps: gpsString,
-          dropOffRef
-        }
-      }).catch(() => {});
+      backgroundTasks.push(
+        backendApi.logActivity({
+          actorId: profile?.id,
+          actorName: profile?.fullName || receiverId,
+          actorEmail: profile?.email,
+          actorRole: 'escort',
+          actorWallet: activeWalletAddr,
+          action: 'DELIVERY_DROPOFF_COMPLETED',
+          entityType: 'outgoing_request',
+          entityId: payload.drNumber,
+          details: `Relief delivery ${payload.drNumber} dropped off inside geofence at ${destinationText}. Awaiting LGU receiver intake.`,
+          metadata: {
+            drNumber: payload.drNumber,
+            truckId: activeTruckId,
+            destination: destinationText,
+            quantity: effectiveQty,
+            gps: gpsString,
+            dropOffRef
+          }
+        }).catch(() => {})
+      );
+
+      await updatePromise;
+      Promise.all(backgroundTasks).catch(() => {});
 
       // 6. Remove from active packages (Escort custody completed)
       const remaining = activePackages.filter((p) => p.drNumber.toUpperCase() !== payload.drNumber.toUpperCase());
@@ -1864,12 +1874,11 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         setConfirmedTxHash(proof.hash);
       }
 
-      // Ensure the typed vehicle exists in the convoy fleet table
-      await backendApi.ensureTruckExists(effectiveTruckId, truckModel.trim()).catch(() => {});
-
-      await backendApi.assignEscortAndTruckToRelease(payload.drNumber, effectiveTruckId, profile?.id, 'In Transit');
-      if (activeProofHash) {
-        await backendApi.updateOutgoing(payload.drNumber, {
+      // Fire assignment and status update concurrently
+      await Promise.all([
+        backendApi.ensureTruckExists(effectiveTruckId, truckModel.trim()).catch(() => {}),
+        backendApi.assignEscortAndTruckToRelease(payload.drNumber, effectiveTruckId, profile?.id, 'In Transit'),
+        activeProofHash ? backendApi.updateOutgoing(payload.drNumber, {
           senderSignature: activeProofHash,
           txHash: activeProofHash,
           handoverContractId: resolvedContractId,
@@ -1880,13 +1889,15 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           assignedEscortProfileId: profile?.id,
           assignedDriverProfileId: profile?.id,
           amountApproved: effectiveQty
-        }).catch(() => {});
-      }
+        }).catch(() => {}) : Promise.resolve()
+      ]);
 
       // Check if escort adjusted package count or recorded transit remarks
       const origQty = payload.quantity;
       const hasCountDiscrepancy = effectiveQty !== origQty;
       const hasRemarks = Boolean(transitRemarks && transitRemarks.trim());
+
+      const backgroundTasks: Promise<any>[] = [];
 
       if (hasRemarks || hasCountDiscrepancy) {
         const noteText = [
@@ -1894,95 +1905,99 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           hasRemarks ? transitRemarks.trim() : ''
         ].filter(Boolean).join(' ');
 
-        await backendApi.createDiscrepancyReport({
-          reportType: 'Outgoing',
-          drNumber: payload.drNumber,
-          note: noteText,
-          reportedByRole: 'Escort',
-          reportedByWallet: profile?.walletAddress || undefined,
-          reportedByProfileId: profile?.id
-        }).catch((err) => console.warn('Discrepancy report error:', err));
+        backgroundTasks.push(
+          backendApi.createDiscrepancyReport({
+            reportType: 'Outgoing',
+            drNumber: payload.drNumber,
+            note: noteText,
+            reportedByRole: 'Escort',
+            reportedByWallet: profile?.walletAddress || undefined,
+            reportedByProfileId: profile?.id
+          }).catch((err) => console.warn('Discrepancy report error:', err))
+        );
 
-        await backendApi.logActivity({
+        backgroundTasks.push(
+          backendApi.logActivity({
+            actorId: profile?.id,
+            actorName: profile?.fullName || receiverId,
+            actorEmail: profile?.email,
+            actorRole: 'escort',
+            actorWallet: activeWalletAddr,
+            action: 'DISCREPANCY_REPORTED',
+            entityType: 'outgoing_request',
+            entityId: payload.drNumber,
+            details: `Relief Escort Officer reported discrepancy for ${payload.drNumber}: ${noteText}`,
+            metadata: { drNumber: payload.drNumber, truckId: effectiveTruckId, verifiedQuantity: effectiveQty, origQty, note: noteText }
+          }).catch(() => {})
+        );
+      }
+
+      backgroundTasks.push(
+        (async () => {
+          const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);
+          const nextSequence = (existingHops.length || 0) + 1;
+          await backendApi.recordCustodyHop({
+            outgoingRequestId: custody.matchingRelease?.id || payload.drNumber,
+            sequence: nextSequence,
+            fromDriverProfileId: isHandover ? previousCarrierDriver : undefined,
+            toDriverProfileId: profile?.id,
+            fromTruckId: isHandover ? previousCarrierTruck : undefined,
+            toTruckId: effectiveTruckId,
+            gpsCoordinates: `${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`,
+            blockchainTxHash: activeProofHash,
+            notes: isHandover
+              ? `Convoy relay from ${previousCarrierTruck || 'convoy'} to ${effectiveTruckId}: Escort ${profile?.fullName || receiverId} accepted custody via physical QR scan.`
+              : `Relief Escort Officer ${profile?.fullName || receiverId} took initial physical custody on convoy vehicle ${effectiveTruckId}.`
+          }).catch(() => {});
+        })()
+      );
+
+      backgroundTasks.push(
+        backendApi.appendStockLedger({
+          movementType: 'CUSTODY_TRANSFER',
+          outgoingRequestId: custody.matchingRelease?.id,
+          drNumber: payload.drNumber,
+          destinationLguId: custody.matchingRelease?.destination_lgu_id,
+          quantityChange: payload.quantity,
+          referenceTable: 'custody_hops',
+          referenceId: payload.drNumber,
+          gpsCoordinates: `${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`,
+          blockchainTxHash: activeProofHash,
+          performedByProfileId: profile?.id,
+          notes: isHandover
+            ? `Relief Escort relay: transferred cargo to vehicle ${effectiveTruckId}.`
+            : `Relief Escort custody accepted for ${payload.drNumber} on vehicle ${effectiveTruckId}.`
+        }).catch(() => {})
+      );
+
+      backgroundTasks.push(
+        backendApi.logActivity({
           actorId: profile?.id,
           actorName: profile?.fullName || receiverId,
           actorEmail: profile?.email,
           actorRole: 'escort',
           actorWallet: activeWalletAddr,
-          action: 'DISCREPANCY_REPORTED',
+          action: isHandover ? 'CUSTODY_TRANSFERRED' : 'CUSTODY_ACCEPTED',
           entityType: 'outgoing_request',
           entityId: payload.drNumber,
-          details: `Relief Escort Officer reported discrepancy for ${payload.drNumber}: ${noteText}`,
-          metadata: { drNumber: payload.drNumber, truckId: effectiveTruckId, verifiedQuantity: effectiveQty, origQty, note: noteText }
-        }).catch(() => {});
-      }
+          details: isHandover
+            ? `Relief Escort custody handover confirmed for ${payload.drNumber}. Transferred from ${previousCarrierTruck || 'convoy'} to ${effectiveTruckId}.`
+            : `Relief Escort custody confirmed for ${payload.drNumber}. Transferred to convoy vehicle ${effectiveTruckId} at GPS ${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}.`,
+          metadata: {
+            drNumber: payload.drNumber,
+            truckId: effectiveTruckId,
+            fromTruckId: previousCarrierTruck,
+            escortProfileId: profile?.id,
+            gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
+            quantity: payload.quantity,
+            category: payload.category,
+            destination: payload.to,
+            contractId: resolvedContractId
+          }
+        }).catch(() => {})
+      );
 
-      // Stock at origin source (Warehouse or Source LGU) is already authoritatively deducted upon Admin approval in useInventoryState.
-      // Do not deduct a second time when receiver takes initial custody.
-
-      // Record custody hop in database
-      const existingHops = await backendApi.getCustodyHops(payload.drNumber).catch(() => []);
-      const nextSequence = (existingHops.length || 0) + 1;
-
-      await backendApi.recordCustodyHop({
-        outgoingRequestId: custody.matchingRelease?.id || payload.drNumber,
-        sequence: nextSequence,
-        fromDriverProfileId: isHandover ? previousCarrierDriver : undefined,
-        toDriverProfileId: profile?.id,
-        fromTruckId: isHandover ? previousCarrierTruck : undefined,
-        toTruckId: effectiveTruckId,
-        gpsCoordinates: `${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`,
-        blockchainTxHash: activeProofHash,
-        notes: isHandover
-          ? `Convoy relay from ${previousCarrierTruck || 'convoy'} to ${effectiveTruckId}: Escort ${profile?.fullName || receiverId} accepted custody via physical QR scan.`
-          : `Relief Escort Officer ${profile?.fullName || receiverId} took initial physical custody on convoy vehicle ${effectiveTruckId}.`
-      }).catch(() => {});
-
-      // Record CUSTODY_TRANSFER movement in stock_ledger
-      await backendApi.appendStockLedger({
-        movementType: 'CUSTODY_TRANSFER',
-        outgoingRequestId: custody.matchingRelease?.id,
-        drNumber: payload.drNumber,
-        destinationLguId: custody.matchingRelease?.destination_lgu_id,
-        quantityChange: payload.quantity,
-        referenceTable: 'custody_hops',
-        referenceId: payload.drNumber,
-        gpsCoordinates: `${nextLocation.latitude.toFixed(6)}, ${nextLocation.longitude.toFixed(6)}`,
-        blockchainTxHash: activeProofHash,
-        performedByProfileId: profile?.id,
-        notes: isHandover
-          ? `Relief Escort relay: transferred cargo to vehicle ${effectiveTruckId}.`
-          : `Relief Escort custody accepted for ${payload.drNumber} on vehicle ${effectiveTruckId}.`
-      }).catch(() => {});
-
-      // Log custody acceptance / transfer to activity_logs
-      await backendApi.logActivity({
-        actorId: profile?.id,
-        actorName: profile?.fullName || receiverId,
-        actorEmail: profile?.email,
-        actorRole: 'escort',
-        actorWallet: activeWalletAddr,
-        action: isHandover ? 'CUSTODY_TRANSFERRED' : 'CUSTODY_ACCEPTED',
-        entityType: 'outgoing_request',
-        entityId: payload.drNumber,
-        details: isHandover
-          ? `Relief Escort custody handover confirmed for ${payload.drNumber}. Transferred from ${previousCarrierTruck || 'convoy'} to ${effectiveTruckId}.`
-          : `Relief Escort custody confirmed for ${payload.drNumber}. Transferred to convoy vehicle ${effectiveTruckId} at GPS ${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}.`,
-        metadata: {
-          drNumber: payload.drNumber,
-          truckId: effectiveTruckId,
-          fromTruckId: previousCarrierTruck,
-          escortProfileId: profile?.id,
-          gps: `${nextLocation.latitude.toFixed(5)}, ${nextLocation.longitude.toFixed(5)}`,
-          quantity: payload.quantity,
-          category: payload.category,
-          destination: payload.to,
-          contractId: resolvedContractId
-        },
-        txHash: activeProofHash
-      }).catch((logErr) => {
-        console.warn('Failed to log custody activity:', logErr);
-      });
+      Promise.all(backgroundTasks).catch(() => {});
 
       const updatedPackages = [
         ...activePackages.filter((p) => p.drNumber !== payload.drNumber),
