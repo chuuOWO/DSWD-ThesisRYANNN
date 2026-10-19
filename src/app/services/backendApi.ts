@@ -913,16 +913,45 @@ export const backendApi = {
     return { ok: true };
   },
 
-  async deleteWarehouse(id: string): Promise<{ ok: boolean }> {
+  async deleteWarehouse(id: string): Promise<{ ok: boolean; softDeleted?: boolean }> {
     const { error } = await supabase.from('warehouses').delete().eq('id', id);
-    throwIfError(error, 'Failed to delete warehouse');
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        const { error: softErr } = await supabase
+          .from('warehouses')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', id);
+        throwIfError(softErr, 'Failed to archive warehouse');
+        return { ok: true, softDeleted: true };
+      }
+      throwIfError(error, 'Failed to delete warehouse');
+    }
+    return { ok: true, softDeleted: false };
+  },
+
+  async deleteWarehousesBatch(ids: string[]): Promise<{ ok: boolean; softDeletedCount?: number }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('warehouses').delete().in('id', ids);
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        const { error: softErr } = await supabase
+          .from('warehouses')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .in('id', ids);
+        throwIfError(softErr, 'Failed to batch archive warehouses');
+        return { ok: true, softDeletedCount: ids.length };
+      }
+      throwIfError(error, 'Failed to batch delete warehouses');
+    }
     return { ok: true };
   },
 
-  async deleteWarehousesBatch(ids: string[]): Promise<{ ok: boolean }> {
-    if (ids.length === 0) return { ok: true };
-    const { error } = await supabase.from('warehouses').delete().in('id', ids);
-    throwIfError(error, 'Failed to batch delete warehouses');
+  async restoreWarehouse(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('warehouses')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to restore warehouse');
     return { ok: true };
   },
 
@@ -1562,21 +1591,50 @@ export const backendApi = {
     return { ok: true };
   },
 
-  async deleteSupplySource(id: string): Promise<{ ok: boolean }> {
+  async deleteSupplySource(id: string): Promise<{ ok: boolean; softDeleted?: boolean }> {
     const { error } = await supabase.from('supply_sources').delete().eq('id', id);
-    throwIfError(error, 'Failed to delete supply source');
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        const { error: softErr } = await supabase
+          .from('supply_sources')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', id);
+        throwIfError(softErr, 'Failed to archive supply source');
+        return { ok: true, softDeleted: true };
+      }
+      throwIfError(error, 'Failed to delete supply source');
+    }
+    return { ok: true, softDeleted: false };
+  },
+
+  async deleteSupplySourcesBatch(ids: string[]): Promise<{ ok: boolean; softDeletedCount?: number }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('supply_sources').delete().in('id', ids);
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        const { error: softErr } = await supabase
+          .from('supply_sources')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .in('id', ids);
+        throwIfError(softErr, 'Failed to batch archive supply sources');
+        return { ok: true, softDeletedCount: ids.length };
+      }
+      throwIfError(error, 'Failed to batch delete supply sources');
+    }
     return { ok: true };
   },
 
-  async deleteSupplySourcesBatch(ids: string[]): Promise<{ ok: boolean }> {
-    if (ids.length === 0) return { ok: true };
-    const { error } = await supabase.from('supply_sources').delete().in('id', ids);
-    throwIfError(error, 'Failed to batch delete supply sources');
+  async restoreSupplySource(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('supply_sources')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to restore supply source');
     return { ok: true };
   },
 
   // --- KIT TYPES ---
-  async getKitTypes(): Promise<KitTypeRecord[]> {
+  async getKitTypes(includeArchived = false): Promise<KitTypeRecord[]> {
     try {
       const { data, error } = await supabase
         .from('kit_types')
@@ -1584,10 +1642,10 @@ export const backendApi = {
         .order('name', { ascending: true });
 
       if (error) {
-        return DEFAULT_KIT_TYPES;
+        return includeArchived ? DEFAULT_KIT_TYPES : DEFAULT_KIT_TYPES.filter(k => k.isActive !== false);
       }
 
-      const activeKits = (data ?? []).filter((r: any) => r.is_active !== false);
+      const activeKits = includeArchived ? (data ?? []) : (data ?? []).filter((r: any) => r.is_active !== false);
 
       return activeKits.map(row => ({
         id: String(row.id),
@@ -1600,7 +1658,7 @@ export const backendApi = {
         updatedAt: row.updated_at
       }));
     } catch {
-      return DEFAULT_KIT_TYPES;
+      return includeArchived ? DEFAULT_KIT_TYPES : DEFAULT_KIT_TYPES.filter(k => k.isActive !== false);
     }
   },
 
@@ -1637,16 +1695,45 @@ export const backendApi = {
     return { ok: true };
   },
 
-  async deleteKitType(id: string): Promise<{ ok: boolean }> {
+  async deleteKitType(id: string): Promise<{ ok: boolean; softDeleted?: boolean }> {
     const { error } = await supabase.from('kit_types').delete().eq('id', id);
-    throwIfError(error, 'Failed to delete kit type');
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        const { error: softErr } = await supabase
+          .from('kit_types')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', id);
+        throwIfError(softErr, 'Failed to archive kit type');
+        return { ok: true, softDeleted: true };
+      }
+      throwIfError(error, 'Failed to delete kit type');
+    }
+    return { ok: true, softDeleted: false };
+  },
+
+  async deleteKitTypesBatch(ids: string[]): Promise<{ ok: boolean; softDeletedCount?: number }> {
+    if (ids.length === 0) return { ok: true };
+    const { error } = await supabase.from('kit_types').delete().in('id', ids);
+    if (error) {
+      if (error.code === '23503' || error.message?.includes('foreign key constraint') || error.message?.includes('violates foreign key')) {
+        const { error: softErr } = await supabase
+          .from('kit_types')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .in('id', ids);
+        throwIfError(softErr, 'Failed to batch archive kit types');
+        return { ok: true, softDeletedCount: ids.length };
+      }
+      throwIfError(error, 'Failed to batch delete kit types');
+    }
     return { ok: true };
   },
 
-  async deleteKitTypesBatch(ids: string[]): Promise<{ ok: boolean }> {
-    if (ids.length === 0) return { ok: true };
-    const { error } = await supabase.from('kit_types').delete().in('id', ids);
-    throwIfError(error, 'Failed to batch delete kit types');
+  async restoreKitType(id: string): Promise<{ ok: boolean }> {
+    const { error } = await supabase
+      .from('kit_types')
+      .update({ is_active: true, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    throwIfError(error, 'Failed to restore kit type');
     return { ok: true };
   },
 

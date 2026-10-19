@@ -54,6 +54,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedProvinceFilter, setSelectedProvinceFilter] = useState('All');
   const [lguStatusFilter, setLguStatusFilter] = useState<'active' | 'archived'>('active');
+  const [kitStatusFilter, setKitStatusFilter] = useState<'active' | 'archived'>('active');
 
   // Search & Filter state
   const [kitSearch, setKitSearch] = useState('');
@@ -126,7 +127,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
     setIsLoading(true);
     try {
       const [kits, srcs, whs, provs, lgus, trks] = await Promise.all([
-        backendApi.getKitTypes(),
+        backendApi.getKitTypes(true),
         backendApi.getSupplySources(),
         backendApi.getWarehouses(),
         backendApi.getProvinces(true),
@@ -173,7 +174,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         metadata: { name: newKitName.trim(), category: newKitCategory, unitType: newKitUnit.trim() || 'kits' }
       }).catch(() => {});
 
-      const updated = await backendApi.getKitTypes();
+      const updated = await backendApi.getKitTypes(true);
       setKitTypes(updated);
       setNewKitName('');
       setNewKitDesc('');
@@ -204,7 +205,7 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
         metadata: { id: editingKit.id, name: editKitName.trim(), category: editKitCategory }
       }).catch(() => {});
 
-      const updated = await backendApi.getKitTypes();
+      const updated = await backendApi.getKitTypes(true);
       setKitTypes(updated);
       setEditingKit(null);
       await inventoryState?.refreshKitTypes?.();
@@ -217,19 +218,43 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const handleDeleteKit = async (id: string) => {
     try {
       const kit = kitTypes.find(k => k.id === id);
-      await backendApi.deleteKitType(id);
+      const res = await backendApi.deleteKitType(id);
       await backendApi.logActivity({
         action: 'KIT_TYPE_DELETED',
         entityType: 'KitType',
         entityId: id,
-        details: `Deleted commodity kit type: ${kit?.name || id}`
+        details: `${res?.softDeleted ? 'Archived (deactivated)' : 'Deleted'} commodity kit type: ${kit?.name || id}`
       }).catch(() => {});
 
-      setKitTypes(prev => prev.filter(k => k.id !== id));
+      if (res?.softDeleted) {
+        setKitTypes(prev => prev.map(k => k.id === id ? { ...k, isActive: false } : k));
+        showToast('Kit type has historical inventory records and was safely archived from active operations');
+      } else {
+        setKitTypes(prev => prev.filter(k => k.id !== id));
+        showToast('Kit type removed');
+      }
       await inventoryState?.refreshKitTypes?.();
-      showToast('Kit type removed');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete kit type');
+    }
+  };
+
+  const handleRestoreKit = async (id: string) => {
+    try {
+      const kit = kitTypes.find(k => k.id === id);
+      await backendApi.restoreKitType(id);
+      await backendApi.logActivity({
+        action: 'KIT_TYPE_RESTORED',
+        entityType: 'KitType',
+        entityId: id,
+        details: `Restored commodity kit type: ${kit?.name || id}`
+      }).catch(() => {});
+
+      setKitTypes(prev => prev.map(k => k.id === id ? { ...k, isActive: true } : k));
+      await inventoryState?.refreshKitTypes?.();
+      showToast(`Restored kit type: ${kit?.name || id}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to restore kit type');
     }
   };
 
@@ -267,17 +292,22 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   const handleDeleteSource = async (id: string) => {
     try {
       const src = sources.find(s => s.id === id);
-      await backendApi.deleteSupplySource(id);
+      const res = await backendApi.deleteSupplySource(id);
       await backendApi.logActivity({
         action: 'SUPPLY_SOURCE_DELETED',
         entityType: 'SupplySource',
         entityId: id,
-        details: `Deleted logistics supply source: ${src?.name || id}`
+        details: `${res?.softDeleted ? 'Archived (deactivated)' : 'Deleted'} logistics supply source: ${src?.name || id}`
       }).catch(() => {});
 
-      setSources(prev => prev.filter(s => s.id !== id));
+      if (res?.softDeleted) {
+        setSources(prev => prev.map(s => s.id === id ? { ...s, isActive: false } : s));
+        showToast('Supply source has existing records and was safely archived from active operations');
+      } else {
+        setSources(prev => prev.filter(s => s.id !== id));
+        showToast('Supply source removed');
+      }
       await inventoryState?.refreshSupplySources?.();
-      showToast('Supply source removed');
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete supply source');
     }
@@ -417,6 +447,8 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
   };
 
   const filteredKitTypes = kitTypes.filter(k => {
+    const matchesStatus = kitStatusFilter === 'active' ? (k.isActive !== false) : (k.isActive === false);
+    if (!matchesStatus) return false;
     const matchesCategory = kitCategoryFilter === 'All' || k.category === kitCategoryFilter;
     if (!matchesCategory) return false;
     if (kitSearch.trim()) {
@@ -686,27 +718,50 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
             </button>
           </div>
 
-          {/* Search and Category Filter */}
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search kit types by name or description..."
-                value={kitSearch}
-                onChange={(e) => setKitSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 focus:border-[#2500ba]"
-              />
+          {/* Status, Search and Category Filter */}
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between">
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-gray-100 border border-gray-200">
+              <button
+                type="button"
+                onClick={() => setKitStatusFilter('active')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  kitStatusFilter === 'active' ? 'bg-[#2500ba] text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Active ({kitTypes.filter(k => k.isActive !== false).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setKitStatusFilter('archived')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  kitStatusFilter === 'archived' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Archived ({kitTypes.filter(k => k.isActive === false).length})
+              </button>
             </div>
-            <select
-              value={kitCategoryFilter}
-              onChange={(e) => setKitCategoryFilter(e.target.value as any)}
-              className="px-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 font-medium"
-            >
-              <option value="All">All Categories</option>
-              <option value="Food Item">Food Item</option>
-              <option value="Non-Food Item">Non-Food Item</option>
-            </select>
+
+            <div className="flex flex-1 sm:justify-end gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search kit types by name or description..."
+                  value={kitSearch}
+                  onChange={(e) => setKitSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 focus:border-[#2500ba] bg-white"
+                />
+              </div>
+              <select
+                value={kitCategoryFilter}
+                onChange={(e) => setKitCategoryFilter(e.target.value as any)}
+                className="px-3 py-2 rounded-xl border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-[#2500ba]/20 font-medium bg-white"
+              >
+                <option value="All">All Categories</option>
+                <option value="Food Item">Food Item</option>
+                <option value="Non-Food Item">Non-Food Item</option>
+              </select>
+            </div>
           </div>
 
           <div className="max-h-[380px] overflow-y-auto pr-1">
@@ -720,44 +775,70 @@ export function MasterDataView({ inventoryState }: MasterDataViewProps = {}) {
                   <div key={kit.id} className="p-4 rounded-2xl border border-gray-200 bg-white shadow-xs space-y-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
-                          kit.category === 'Food Item' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
-                        }`}>
-                          {kit.category}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
+                            kit.category === 'Food Item' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {kit.category}
+                          </span>
+                          {kit.isActive === false && (
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-300">
+                              Archived
+                            </span>
+                          )}
+                        </div>
                         <h3 className="text-sm font-bold text-gray-900 mt-1">{kit.name}</h3>
                       </div>
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingKit(kit);
-                            setEditKitName(kit.name);
-                            setEditKitCategory(kit.category);
-                            setEditKitUnit(kit.unitType);
-                            setEditKitDesc(kit.description || '');
-                          }}
-                          className="p-1 rounded-lg text-gray-400 hover:text-[#2500ba] hover:bg-blue-50 transition cursor-pointer"
-                          title="Edit kit type"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteKit(kit.id)}
-                          className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
-                          title="Remove kit type"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {kit.isActive === false ? (
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreKit(kit.id)}
+                            className="p-1 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition cursor-pointer"
+                            title="Restore kit type to active catalog"
+                          >
+                            <RotateCcw size={13} />
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingKit(kit);
+                                setEditKitName(kit.name);
+                                setEditKitCategory(kit.category);
+                                setEditKitUnit(kit.unitType);
+                                setEditKitDesc(kit.description || '');
+                              }}
+                              className="p-1 rounded-lg text-gray-400 hover:text-[#2500ba] hover:bg-blue-50 transition cursor-pointer"
+                              title="Edit kit type"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteKit(kit.id)}
+                              className="p-1 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer"
+                              title="Remove kit type"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                     <p className="text-xs text-gray-600 leading-relaxed">{kit.description}</p>
                     <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] text-gray-500">
                       <span>Unit: <strong className="text-gray-800">{kit.unitType}</strong></span>
-                      <span className="flex items-center gap-1 text-emerald-600 font-semibold">
-                        <ShieldCheck size={12} /> Active FNFI
-                      </span>
+                      {kit.isActive === false ? (
+                        <span className="flex items-center gap-1 text-amber-600 font-semibold">
+                          <Archive size={12} /> Archived FNFI
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                          <ShieldCheck size={12} /> Active FNFI
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
