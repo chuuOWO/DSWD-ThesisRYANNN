@@ -45,6 +45,7 @@ interface TruckRoute {
   destination: string;
   cargo: string;
   eta: string;
+  transitStartedAt?: string | null;
   updatedAt: string;
   originPosition: [number, number];
   position: [number, number];
@@ -120,6 +121,20 @@ const formatDuration = (minutes: number) => {
   return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
 };
 
+const formatTimeElapsed = (startedAt?: string | null): string => {
+  if (!startedAt) return 'Standby';
+  const startMs = new Date(startedAt).getTime();
+  if (isNaN(startMs) || startMs <= 0) return 'Standby';
+  const diffMs = Math.max(0, Date.now() - startMs);
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return '< 1 min';
+  const hours = Math.floor(diffMins / 60);
+  const remainingMinutes = diffMins % 60;
+  return hours > 0
+    ? (remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`)
+    : `${remainingMinutes}m`;
+};
+
 const shortWallet = (address?: string | null) => {
   if (!address) return 'Receiver account';
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -177,14 +192,21 @@ const toTruckRoute = (
   profiles: UserProfile[] = [],
   lgus: LguRecord[] = []
 ): TruckRoute => {
-  // 1. Look for verified receiver profile by exact truck_id match first (1-to-1 unique receiver UID mapping)
-  let matchingProfile = profiles.find((p) =>
-    p.role === 'receiver' &&
-    p.truckId &&
-    p.truckId.trim().toUpperCase() === location.truck_id.trim().toUpperCase()
-  );
+  // 1. Look for verified receiver profile by driver_profile_id first
+  let matchingProfile = location.driver_profile_id
+    ? profiles.find((p) => p.id === location.driver_profile_id)
+    : undefined;
 
-  // 2. Fallback: match by receiver wallet address only if not found by truck_id
+  // 2. Look by exact truck_id (plate number or truck id)
+  if (!matchingProfile && location.truck_id) {
+    matchingProfile = profiles.find((p) =>
+      p.role === 'receiver' &&
+      p.truckId &&
+      p.truckId.trim().toUpperCase() === location.truck_id.trim().toUpperCase()
+    );
+  }
+
+  // 3. Fallback: match by receiver wallet address
   if (!matchingProfile && location.wallet_address) {
     matchingProfile = profiles.find((p) =>
       p.role === 'receiver' &&
@@ -193,7 +215,27 @@ const toTruckRoute = (
     );
   }
 
+  // 4. Fallback: match by assigned releases driver profile
+  if (!matchingProfile) {
+    const matchedRel = releases.find(r => 
+      (r.assigned_truck_id && r.assigned_truck_id.trim().toUpperCase() === location.truck_id.trim().toUpperCase()) &&
+      r.assigned_driver_profile_id
+    ) ?? outgoingReleasesList.find(r => 
+      ((r.assignedTruckId || r.assigned_truck_id)?.trim().toUpperCase() === location.truck_id.trim().toUpperCase()) &&
+      (r.assignedDriverProfileId || r.assignedEscortProfileId)
+    );
+    const driverId = (matchedRel as any)?.assigned_driver_profile_id || (matchedRel as any)?.assignedDriverProfileId || (matchedRel as any)?.assignedEscortProfileId;
+    if (driverId) {
+      matchingProfile = profiles.find(p => p.id === driverId);
+    }
+  }
+
   const driverName = matchingProfile?.fullName || undefined;
+  const escortName = driverName || 'Relief Escort';
+  const truckPlate = location.truck_id;
+  const truckDisplayName = truckPlate.toLowerCase().includes(escortName.toLowerCase())
+    ? truckPlate
+    : `${escortName} (${truckPlate})`;
   const hasActiveProfile = Boolean(
     matchingProfile &&
     matchingProfile.role === 'receiver' &&
@@ -254,6 +296,9 @@ const toTruckRoute = (
   }
 
   const assignedPackages = Array.from(uniqueMap.values()).filter((r) => {
+    if (location.driver_profile_id && r.assigned_driver_profile_id) {
+      if (r.assigned_driver_profile_id === location.driver_profile_id) return true;
+    }
     if (!r.assigned_truck_id || !location.truck_id) return false;
     return r.assigned_truck_id.trim().toUpperCase() === location.truck_id.trim().toUpperCase();
   });
@@ -367,9 +412,13 @@ const toTruckRoute = (
     ? `${Math.max(1, Math.round(ageMs / 1000))}s ago`
     : `${Math.round(ageMs / 60000)}m ago`;
 
+  const transitStartedAt = activeAssigned.length > 0
+    ? (activeAssigned[0].date_allocated || activeAssigned[0].created_at || location.updated_at)
+    : location.updated_at;
+
   return {
     id: location.truck_id,
-    truckName: location.truck_id,
+    truckName: truckDisplayName,
     driver: shortWallet(location.wallet_address),
     driverName,
     hasActiveProfile,
@@ -378,6 +427,7 @@ const toTruckRoute = (
     destination,
     cargo,
     eta: 'Calculating...',
+    transitStartedAt,
     updatedAt: formatDateTime(location.updated_at),
     originPosition,
     position: [location.latitude, location.longitude],
@@ -1172,7 +1222,7 @@ export function TruckTracking({
                   >
                     {liveTruckRoutes.map((truck) => (
                       <option key={truck.id} value={truck.id}>
-                        {truck.truckName} {truck.driverName ? `(${truck.driverName})` : ''}
+                        {truck.truckName}
                       </option>
                     ))}
                   </select>
@@ -1323,12 +1373,12 @@ export function TruckTracking({
                 </div>
                 <div className="rounded-lg border border-gray-200 p-3">
                   <span className="text-[11px] font-bold text-gray-400 uppercase flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-amber-600" /> Drive Time
+                    <Clock className="w-3.5 h-3.5 text-amber-600" /> Time Elapsed
                   </span>
                   <p className="mt-1 text-base font-bold text-gray-900">
                     {selectedTruck.status !== 'In Transit'
                       ? 'Standby'
-                      : (routeMetrics ? formatDuration(routeMetrics.durationMinutes) : (selectedTruck.destinationPosition ? 'Calculating...' : 'No Pin'))}
+                      : formatTimeElapsed(selectedTruck.transitStartedAt)}
                   </p>
                 </div>
               </div>

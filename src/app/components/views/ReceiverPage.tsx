@@ -796,17 +796,39 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const storageKey = `trucker_active_packages_${receiverId}`;
   const lastKnownPosKey = `trucker_last_known_pos_${receiverId}`;
 
-  // Trucks list and active convoy truck
-  const [trucksList, setTrucksList] = useState<TruckRecord[]>(DEFAULT_TRUCKS);
+  // Transport vehicle details typed by the escort
+  const [truckPlateNumber, setTruckPlateNumber] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(`escort_truck_plate_${receiverId}`);
+      if (saved?.trim()) return saved.trim().toUpperCase();
+    } catch {}
+    if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim().toUpperCase();
+    return '';
+  });
+  const [truckModel, setTruckModel] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(`escort_truck_model_${receiverId}`);
+      if (saved?.trim()) return saved.trim();
+    } catch {}
+    return 'DSWD Relief Cargo Truck';
+  });
   const [activeTruckId, setActiveTruckId] = useState<string>(() => {
-    if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim();
-    return 'TRUCK-01';
+    try {
+      const saved = localStorage.getItem(`escort_truck_plate_${receiverId}`);
+      if (saved?.trim()) return saved.trim().toUpperCase();
+    } catch {}
+    if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim().toUpperCase();
+    return '';
   });
   const [selectedTruckId, setSelectedTruckId] = useState<string>(() => {
-    if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim();
-    return 'TRUCK-01';
+    try {
+      const saved = localStorage.getItem(`escort_truck_plate_${receiverId}`);
+      if (saved?.trim()) return saved.trim().toUpperCase();
+    } catch {}
+    if (profile?.truckId && profile.truckId.trim()) return profile.truckId.trim().toUpperCase();
+    return '';
   });
-  const [rememberTruckChoice, setRememberTruckChoice] = useState<boolean>(true);
+  const [trucksList, setTrucksList] = useState<TruckRecord[]>(DEFAULT_TRUCKS);
 
   useEffect(() => {
     let isMounted = true;
@@ -927,44 +949,14 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const [dropOffRemarks, setDropOffRemarks] = useState('');
   const [dropOffTxHash, setDropOffTxHash] = useState<string | null>(null);
 
-  const occupiedTruckIds = useMemo(() => {
-    const occupied = new Set<string>();
-    allReleases.forEach((r) => {
-      if (r.assigned_truck_id && ['In Transit', 'Packed'].includes(r.delivery_status ?? '')) {
-        const isCurrentDriver =
-          (r.assigned_driver_profile_id && profile?.id && r.assigned_driver_profile_id === profile.id) ||
-          (r.assigned_truck_id === activeTruckId && activePackages.length > 0);
-        if (!isCurrentDriver) {
-          occupied.add(r.assigned_truck_id.trim().toUpperCase());
-        }
-      }
-    });
-    return occupied;
-  }, [allReleases, profile?.id, activeTruckId, activePackages.length]);
-
-  const availableTrucks = useMemo(() => {
-    return trucksList.filter((t) => !occupiedTruckIds.has(t.truckId.trim().toUpperCase()));
-  }, [trucksList, occupiedTruckIds]);
-
-  const hasActiveVehicleSession = useMemo(() => {
-    return activePackages.length > 0 && Boolean(activeTruckId);
-  }, [activePackages.length, activeTruckId]);
-
-  useEffect(() => {
-    if (availableTrucks.length > 0 && !hasActiveVehicleSession) {
-      if (!availableTrucks.some((t) => t.truckId === selectedTruckId)) {
-        setSelectedTruckId(availableTrucks[0].truckId);
-      }
-    }
-  }, [availableTrucks, hasActiveVehicleSession, selectedTruckId]);
-
   const completedReleases = useMemo(() => {
     return allReleases.filter(
       (r) =>
-        (r.assigned_truck_id === activeTruckId || r.assigned_driver_profile_id === profile?.id || r.assigned_truck_id === receiverId) &&
+        ((profile?.id && r.assigned_driver_profile_id === profile.id) ||
+         (!r.assigned_driver_profile_id && profile?.walletAddress && r.wallet_address?.toLowerCase() === profile.walletAddress.toLowerCase())) &&
         ['Delivered', 'Accepted', 'Distributed'].includes(r.delivery_status ?? '')
     );
-  }, [allReleases, activeTruckId, profile?.id, receiverId]);
+  }, [allReleases, profile?.id, profile?.walletAddress]);
 
   const activePackagesRef = useRef<QrPayload[]>(activePackages);
   useEffect(() => {
@@ -1191,9 +1183,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         const isLguReceiver = Boolean(profile?.lguName && profile.lguName.trim());
         if (currentPackages && currentPackages.length > 0 && !isLguReceiver) {
           const activeDr = currentPackages[0]?.drNumber || null;
-          const validTruckId = (activeTruckId && activeTruckId.startsWith('TRUCK-'))
-            ? activeTruckId
-            : (profile?.truckId && profile.truckId.startsWith('TRUCK-') ? profile.truckId : 'TRUCK-01');
+          const validTruckId = (truckPlateNumber && truckPlateNumber.trim())
+            ? truckPlateNumber.trim().toUpperCase()
+            : ((activeTruckId && activeTruckId.trim()) ? activeTruckId.trim().toUpperCase() : (profile?.truckId ? profile.truckId.trim().toUpperCase() : 'TRUCK-RELIEF'));
 
           void backendApi.upsertTruckLiveLocation({
             truck_id: validTruckId,
@@ -1224,7 +1216,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         watchIdRef.current = null;
       }
     };
-  }, [lastKnownPosKey, profile?.walletAddress, receiverId, activeTruckId]);
+  }, [lastKnownPosKey, profile?.walletAddress, receiverId, activeTruckId, truckPlateNumber]);
 
   // Clean up camera on unmount
   useEffect(() => {
@@ -1252,11 +1244,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
         setAllReleases(releases);
         const currentRelease = releases.find((r) => 
-          (activeTruckId && r.assigned_truck_id === activeTruckId) || 
           (profile?.id && r.assigned_driver_profile_id === profile.id) || 
-          (profile?.truckId && r.assigned_truck_id === profile.truckId) ||
-          (receiverId && r.assigned_truck_id === receiverId)
-        ) || releases[0] || null;
+          (!r.assigned_driver_profile_id && profile?.walletAddress && r.wallet_address?.toLowerCase() === profile.walletAddress.toLowerCase())
+        ) || null;
         setRelease(currentRelease);
 
         const currentPackages = activePackagesRef.current || [];
@@ -1272,13 +1262,12 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           const isDone = ['Delivered', 'Accepted', 'Distributed'].includes(matchingReq.delivery_status ?? '');
           if (isDone) return false;
 
-          // If explicitly assigned to a DIFFERENT truck & escort, drop it
-          const isAssignedToOther = matchingReq.assigned_truck_id &&
-            matchingReq.assigned_truck_id !== activeTruckId &&
-            matchingReq.assigned_truck_id !== profile?.truckId &&
-            matchingReq.assigned_truck_id !== receiverId &&
+          // If explicitly assigned to a DIFFERENT escort, drop it
+          const isAssignedToOther = Boolean(
             matchingReq.assigned_driver_profile_id &&
-            matchingReq.assigned_driver_profile_id !== profile?.id;
+            profile?.id &&
+            matchingReq.assigned_driver_profile_id !== profile.id
+          );
           if (isAssignedToOther) return false;
 
           return true;
@@ -1288,9 +1277,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         // automatically restore it from Supabase so the escort never loses their assigned cargo!
         let mergedPackages = [...remainingPackages];
         const assignedToMeInTransit = releases.filter((r) => {
-          const isMine = (profile?.id && r.assigned_driver_profile_id === profile.id) ||
-                         (activeTruckId && r.assigned_truck_id === activeTruckId) ||
-                         (profile?.truckId && r.assigned_truck_id === profile.truckId);
+          const isMine = Boolean(
+            (profile?.id && r.assigned_driver_profile_id === profile.id) ||
+            (!r.assigned_driver_profile_id && profile?.walletAddress && r.wallet_address?.toLowerCase() === profile.walletAddress.toLowerCase())
+          );
           const isPendingTransit = ['In Transit', 'Packed', 'Approved'].includes(r.delivery_status ?? '');
           return isMine && isPendingTransit;
         });
@@ -1300,9 +1290,10 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
           const alreadyInList = mergedPackages.some((p) => p.drNumber === r.dr_number);
           if (!alreadyInList) {
             autoHydratedAny = true;
-            // Also sync activeTruckId if specified
-            if (r.assigned_truck_id && r.assigned_truck_id.startsWith('TRUCK-') && r.assigned_truck_id !== activeTruckId) {
+            // Also sync activeTruckId if specified on this assigned package
+            if (r.assigned_truck_id && r.assigned_truck_id !== activeTruckId) {
               setActiveTruckId(r.assigned_truck_id);
+              if (!truckPlateNumber) setTruckPlateNumber(r.assigned_truck_id);
             }
 
             let destCoords: [number, number] | undefined = undefined;
@@ -1383,7 +1374,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       unsubscribe();
       clearInterval(interval);
     };
-  }, [receiverId, storageKey, profile?.id, profile?.truckId, activeTruckId]);
+  }, [receiverId, storageKey, profile?.id, profile?.walletAddress, activeTruckId, truckPlateNumber]);
 
   const stopCamera = () => {
     cameraOpenRef.current = false;
@@ -1572,7 +1563,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     setIsSigning(true);
     setPendingVerifyPayload(payload);
     setVerifiedQuantity(payload.quantity);
-    setSelectedTruckId(activeTruckId || profile?.truckId || trucksList[0]?.truckId || 'TRUCK-01');
+    setSelectedTruckId(truckPlateNumber || activeTruckId || profile?.truckId || '');
 
     try {
       // 1. Terminal endpoint guard: check if already accepted by destination LGU
@@ -1722,7 +1713,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       setPendingCustody(custodyData);
       setVerifiedQuantity(payload.quantity);
       setPendingVerifyPayload(payload);
-      setSelectedTruckId(activeTruckId || profile?.truckId || trucksList[0]?.truckId || 'TRUCK-01');
+      setSelectedTruckId(truckPlateNumber || activeTruckId || profile?.truckId || '');
     } catch (error) {
       console.error('Scan custody initiate error:', error);
       nav('scan');
@@ -1746,7 +1737,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     }
     isExecutingCustodyRef.current = true;
     const { payload, location: nextLocation } = custody;
-    const effectiveTruckId = custodyOverride?.truckId || selectedTruckId || activeTruckId || 'TRUCK-01';
+    const effectiveTruckId = custodyOverride?.truckId || (truckPlateNumber && truckPlateNumber.trim().toUpperCase()) || selectedTruckId || activeTruckId || 'TRUCK-RELIEF';
     const effectiveQty = (verifiedQuantity && verifiedQuantity > 0) ? verifiedQuantity : payload.quantity;
     setIsSubmittingProof(true);
     setSignStage('wallet');
@@ -1865,6 +1856,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       if (proof.hash) {
         setConfirmedTxHash(proof.hash);
       }
+
+      // Ensure the typed vehicle exists in the convoy fleet table
+      await backendApi.ensureTruckExists(effectiveTruckId, truckModel.trim()).catch(() => {});
 
       await backendApi.assignEscortAndTruckToRelease(payload.drNumber, effectiveTruckId, profile?.id, 'In Transit');
       if (activeProofHash) {
@@ -2161,8 +2155,8 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                 <span>Relief Escort Terminal</span>
                 <span className="text-[8.5px] bg-white/20 px-1 py-0.2 rounded font-mono">Escort</span>
               </p>
-              <p className="text-[10px] text-white/70 truncate max-w-[140px]">
-                {activeTruckId} • {profile?.fullName || 'Relief Escort'}
+              <p className="text-[10px] text-white/70 truncate max-w-[180px]">
+                {profile?.fullName || receiverId} {truckPlateNumber ? `(${truckPlateNumber})` : (activeTruckId ? `(${activeTruckId})` : '')}
               </p>
             </div>
           </div>
@@ -2612,147 +2606,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             />
           )}
 
-          {step === 'select_truck' && pendingCustody && (
-            <Modal
-              title="Assign Convoy Truck"
-              icon={<Truck size={22} className="text-[#2500ba]" />}
-              onClose={() => {
-                setPendingCustody(null);
-                nav('pickup');
-              }}
-            >
-              <div className="space-y-3 text-left mt-1">
-                <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-blue-950 text-xs tracking-tight">
-                      Shipment {pendingCustody.payload.drNumber}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-blue-200/80 text-blue-900 font-bold text-[10px]">
-                      {pendingCustody.payload.quantity} {pendingCustody.payload.category}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[10.5px] text-blue-900">
-                    <MapPin size={12} className="text-red-500 shrink-0" />
-                    <span className="truncate font-semibold">
-                      Destination: {pendingCustody.payload.to || 'Assigned LGU'}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-gray-500 truncate">
-                    Origin: {pendingCustody.payload.from || 'DSWD Logistics Hub'}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-800 mb-1">
-                    Select Transport Vehicle <span className="text-red-500">*</span>
-                  </label>
-                  <p className="text-[9.5px] text-gray-500 mb-2">
-                    Choose the convoy truck or carrier unit you are driving for this delivery.
-                  </p>
-
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-0.5">
-                    {availableTrucks.length === 0 ? (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
-                        <p className="text-xs font-bold text-amber-900">All vehicles currently in transit</p>
-                        <p className="text-[10px] text-amber-700 mt-1">
-                          All convoy vehicles are currently assigned to active shipments. Trucks unbind automatically when their delivery is confirmed at the destination LGU.
-                        </p>
-                      </div>
-                    ) : (
-                      availableTrucks.map((truck) => {
-                        const isSelected = selectedTruckId === truck.truckId;
-                        return (
-                          <div
-                            key={truck.truckId}
-                            onClick={() => setSelectedTruckId(truck.truckId)}
-                            className={`p-2.5 rounded-xl border text-xs cursor-pointer transition flex items-center justify-between ${
-                              isSelected
-                                ? 'border-[#2500ba] bg-blue-50/90 shadow-xs ring-1 ring-[#2500ba]'
-                                : 'border-gray-200 bg-white hover:bg-gray-50'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div
-                                className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${
-                                  isSelected ? 'bg-[#2500ba] text-white' : 'bg-gray-100 text-gray-600'
-                                }`}
-                              >
-                                <Truck size={16} />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="font-bold text-gray-900 text-[11px] truncate">
-                                  {truck.truckId} • {truck.plateNumber}
-                                </p>
-                                <p className="text-[10px] text-gray-500 truncate">
-                                  {truck.model || 'Heavy Cargo'} • {truck.capacityKg.toLocaleString()} kg
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="shrink-0 ml-2">
-                              <span
-                                className={`h-4 w-4 rounded-full border-2 flex items-center justify-center ${
-                                  isSelected ? 'border-[#2500ba] bg-[#2500ba]' : 'border-gray-300'
-                                }`}
-                              >
-                                {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="rememberTruckCheck"
-                    checked={rememberTruckChoice}
-                    onChange={(e) => setRememberTruckChoice(e.target.checked)}
-                    className="rounded border-gray-300 text-[#2500ba] focus:ring-[#2500ba] h-3.5 w-3.5 cursor-pointer"
-                  />
-                  <label htmlFor="rememberTruckCheck" className="text-[10.5px] text-gray-600 cursor-pointer select-none">
-                    Set as my default truck for future runs
-                  </label>
-                </div>
-
-                <div className="pt-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => nav('verify')}
-                    className="flex-1 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 transition cursor-pointer"
-                  >
-                    Back to Cargo Check
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedTruckId}
-                    onClick={async () => {
-                      if (!pendingCustody || !selectedTruckId) return;
-                      setActiveTruckId(selectedTruckId);
-
-                      if (rememberTruckChoice && profile?.id) {
-                        await authApi.updateProfile(profile.id, { truckId: selectedTruckId }).catch(() => {});
-                      }
-
-                      nav('sign_custody');
-                      void handleExecuteCustodySign({
-                        ...pendingCustody,
-                        truckId: selectedTruckId
-                      });
-                    }}
-                    className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
-                  >
-                    <Check size={14} />
-                    <span>Confirm Vehicle & Sign</span>
-                  </button>
-                </div>
-              </div>
-            </Modal>
-          )}
-
           {step === 'sign_custody' && (
             <FiveDotsLoadingModal
               isOpen={step === 'sign_custody'}
@@ -2874,12 +2727,55 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   />
                 </div>
 
-                {hasActiveVehicleSession && (
-                  <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-[10.5px] font-semibold flex items-center gap-2">
-                    <Truck size={15} className="text-[#2500ba] shrink-0" />
-                    <span>Consolidating onto your active vehicle <strong>{activeTruckId}</strong></span>
+                <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-left space-y-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-800">
+                    <Truck size={14} className="text-[#2500ba]" />
+                    <span>Transport Vehicle Details</span>
                   </div>
-                )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-700 mb-0.5">
+                        Plate Number <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={truckPlateNumber}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase();
+                          setTruckPlateNumber(val);
+                          setActiveTruckId(val);
+                          setSelectedTruckId(val);
+                          try {
+                            localStorage.setItem(`escort_truck_plate_${receiverId}`, val);
+                          } catch {}
+                        }}
+                        placeholder="e.g. SAA-1001 or ABC-1234"
+                        className="w-full text-xs font-mono font-bold p-2 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 focus:outline-hidden focus:border-[#2500ba]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-700 mb-0.5">
+                        Vehicle Model / Type
+                      </label>
+                      <input
+                        type="text"
+                        value={truckModel}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTruckModel(val);
+                          try {
+                            localStorage.setItem(`escort_truck_model_${receiverId}`, val);
+                          } catch {}
+                        }}
+                        placeholder="e.g. Isuzu Elf 6-Wheeler"
+                        className="w-full text-xs p-2 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 focus:outline-hidden focus:border-[#2500ba]"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[9.5px] text-gray-500">
+                    Packages in this run are bound to your escort profile ({profile?.fullName || receiverId}) on this vehicle.
+                  </p>
+                </div>
 
                 <div className="pt-2 flex gap-2">
                   <button
@@ -2893,35 +2789,37 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   >
                     Cancel
                   </button>
-                  {hasActiveVehicleSession ? (
-                    <button
-                      type="button"
-                      disabled={!pendingCustody}
-                      onClick={() => {
-                        if (!pendingCustody) return;
-                        setSelectedTruckId(activeTruckId);
-                        nav('sign_custody');
-                        void handleExecuteCustodySign({
-                          ...pendingCustody,
-                          truckId: activeTruckId
-                        });
-                      }}
-                      className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
-                    >
-                      <span>Load onto {activeTruckId} & Sign</span>
-                      <ChevronRight size={14} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={!pendingCustody}
-                      onClick={() => nav('select_truck')}
-                      className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
-                    >
-                      <span>Next: Assign Vehicle</span>
-                      <ChevronRight size={14} />
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    disabled={!pendingCustody || !truckPlateNumber.trim()}
+                    onClick={async () => {
+                      if (!pendingCustody || !truckPlateNumber.trim()) return;
+                      const cleanPlate = truckPlateNumber.trim().toUpperCase();
+                      setActiveTruckId(cleanPlate);
+                      setSelectedTruckId(cleanPlate);
+
+                      try {
+                        localStorage.setItem(`escort_truck_plate_${receiverId}`, cleanPlate);
+                        localStorage.setItem(`escort_truck_model_${receiverId}`, truckModel.trim());
+                      } catch {}
+
+                      if (profile?.id) {
+                        void authApi.updateProfile(profile.id, { truckId: cleanPlate }).catch(() => {});
+                      }
+
+                      void backendApi.ensureTruckExists(cleanPlate, truckModel.trim()).catch(() => {});
+
+                      nav('sign_custody');
+                      void handleExecuteCustodySign({
+                        ...pendingCustody,
+                        truckId: cleanPlate
+                      });
+                    }}
+                    className="flex-1 py-2.5 rounded-xl bg-[#2500ba] text-white text-xs font-bold hover:bg-blue-800 disabled:opacity-50 transition cursor-pointer shadow-md flex items-center justify-center gap-1.5"
+                  >
+                    <Check size={14} />
+                    <span>Confirm Vehicle & Sign</span>
+                  </button>
                 </div>
               </div>
             </Modal>
@@ -2957,7 +2855,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   <div className="flex justify-between">
                     <span className="text-gray-500 font-medium">Assigned Vehicle:</span>
                     <span className="font-bold text-gray-800">
-                      {selectedTruckId || activeTruckId}
+                      {truckPlateNumber || selectedTruckId || activeTruckId} {truckModel ? `(${truckModel})` : ''}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -3058,7 +2956,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                     Origin: {dropOffTarget.matchingRelease?.warehouse_source || dropOffTarget.payload.from || 'DSWD Logistics Hub'}
                   </p>
                   <p className="text-[10px] text-gray-500 truncate">
-                    Carrier Convoy: {activeTruckId} • Escort: {profile?.fullName || receiverId}
+                    Carrier Vehicle: {truckPlateNumber || activeTruckId || 'Relief Vehicle'} • Escort: {profile?.fullName || receiverId}
                   </p>
                   {dropOffTarget.payload.batchTokenIds && dropOffTarget.payload.batchTokenIds.length > 0 && (
                     <div className="pt-1 flex flex-wrap gap-1">
@@ -3220,7 +3118,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   <div className="flex justify-between">
                     <span className="text-gray-500 font-medium">Escort / Carrier:</span>
                     <span className="font-semibold text-gray-700">
-                      {profile?.fullName || receiverId} ({activeTruckId})
+                      {profile?.fullName || receiverId} ({truckPlateNumber || activeTruckId || 'Relief Vehicle'})
                     </span>
                   </div>
                 </div>
@@ -3321,7 +3219,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                         {profile?.fullName || 'Relief Escort Officer'}
                       </h3>
                       <p className="text-[10px] text-gray-500 font-mono">
-                        Convoy: {activeTruckId}
+                        Vehicle: {truckPlateNumber || activeTruckId || 'Pending'}
                       </p>
                     </div>
                   </div>
@@ -3334,22 +3232,55 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   </button>
                 </div>
 
-                {/* Assigned Convoy Truck Switcher */}
-                <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-left space-y-1">
-                  <label className="block text-[9.5px] font-bold text-gray-500 uppercase tracking-wide">
-                    Assigned Convoy Truck
-                  </label>
-                  <select
-                    value={activeTruckId}
-                    onChange={(e) => setActiveTruckId(e.target.value)}
-                    className="w-full text-xs font-bold py-1.5 px-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#2500ba]"
-                  >
-                    {trucksList.map((t) => (
-                      <option key={t.truckId} value={t.truckId}>
-                        {t.truckId} • {t.plateNumber} ({t.model || 'Heavy Cargo'})
-                      </option>
-                    ))}
-                  </select>
+                {/* Transport Vehicle Details */}
+                <div className="p-2.5 rounded-xl bg-gray-50 border border-gray-200 text-left space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Truck size={14} className="text-[#2500ba]" />
+                    <span className="text-[10px] font-bold text-gray-700 uppercase tracking-wide">
+                      Transport Vehicle Details
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block text-[9.5px] font-semibold text-gray-500 mb-0.5">
+                      Plate Number
+                    </label>
+                    <input
+                      type="text"
+                      value={truckPlateNumber}
+                      onChange={(e) => {
+                        const val = e.target.value.toUpperCase();
+                        setTruckPlateNumber(val);
+                        setActiveTruckId(val);
+                        setSelectedTruckId(val);
+                        try {
+                          localStorage.setItem(`escort_truck_plate_${receiverId}`, val);
+                        } catch {}
+                        if (profile?.id) {
+                          void authApi.updateProfile(profile.id, { truckId: val }).catch(() => {});
+                        }
+                      }}
+                      placeholder="e.g. SAA-1001 or ABC-1234"
+                      className="w-full text-xs font-mono font-bold py-1.5 px-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[9.5px] font-semibold text-gray-500 mb-0.5">
+                      Vehicle Model / Type
+                    </label>
+                    <input
+                      type="text"
+                      value={truckModel}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setTruckModel(val);
+                        try {
+                          localStorage.setItem(`escort_truck_model_${receiverId}`, val);
+                        } catch {}
+                      }}
+                      placeholder="e.g. Isuzu Elf 6-Wheeler"
+                      className="w-full text-xs py-1.5 px-2 bg-white border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-[#2500ba]"
+                    />
+                  </div>
                 </div>
 
                 {/* Smart Account Card */}
@@ -3423,7 +3354,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
                   </div>
                   <div>
                     <h3 className="text-sm font-extrabold text-gray-900">Delivery History</h3>
-                    <p className="text-[10px] text-gray-500">Completed shipments for convoy vehicle {activeTruckId}</p>
+                    <p className="text-[10px] text-gray-500">Completed shipments for {profile?.fullName || receiverId}</p>
                   </div>
                 </div>
                 <button

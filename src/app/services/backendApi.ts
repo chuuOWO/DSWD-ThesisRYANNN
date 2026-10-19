@@ -2520,7 +2520,7 @@ export const backendApi = {
     let query = supabase
       .from('outgoing_requests')
       .select('id,dr_number,date_allocated,created_at,lgu_id,destination_lgu_id,lgu_name,province,municipality,category,amount_requested,amount_approved,warehouse_source,delivery_mode,delivery_status,incident_code,allocated_batches,handover_contract_id,assigned_truck_id,assigned_driver_profile_id,tx_hash,wallet_address,sender_gps,receiver_gps,destination_address,delivery_priority,is_held')
-      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'])
+      .in('delivery_status', ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed'])
       .order('created_at', { ascending: false });
 
     if (receiverId) {
@@ -2592,12 +2592,34 @@ export const backendApi = {
   async upsertTruckLiveLocation(payload: TruckLiveLocation) {
     try {
       let cleanTruck = String(payload.truck_id || '').trim().toUpperCase();
-      if (!cleanTruck || cleanTruck.startsWith('RCVR-') || cleanTruck.includes('HANDLER')) return { ok: false };
+      if (!cleanTruck || cleanTruck.startsWith('RCVR-') || cleanTruck.includes('HANDLER') || cleanTruck.startsWith('0X') || cleanTruck.length < 2) {
+        return { ok: false };
+      }
       const trkMatch = cleanTruck.match(/^TRK-?0*(\d+)$/i);
       if (trkMatch) {
         cleanTruck = `TRUCK-${trkMatch[1].padStart(2, '0')}`;
       }
-      if (!cleanTruck.startsWith('TRUCK-')) return { ok: false };
+
+      // Ensure truck exists in trucks table so foreign key constraint is satisfied
+      try {
+        const { data: existingTruck } = await supabase
+          .from('trucks')
+          .select('truck_id')
+          .or(`truck_id.eq.${cleanTruck},plate_number.eq.${cleanTruck}`)
+          .maybeSingle();
+
+        if (existingTruck?.truck_id) {
+          cleanTruck = existingTruck.truck_id;
+        } else {
+          await supabase.from('trucks').upsert({
+            truck_id: cleanTruck,
+            plate_number: cleanTruck,
+            model: 'DSWD Relief Cargo Truck',
+            capacity_kg: 5000,
+            is_active: true
+          }, { onConflict: 'truck_id' }).catch(() => {});
+        }
+      } catch {}
 
       let cleanDr = payload.current_dr_number?.trim() || null;
       if (cleanDr) {
@@ -2903,6 +2925,74 @@ export const backendApi = {
       }));
     } catch {
       return DEFAULT_TRUCKS.filter(t => includeInactive || t.isActive);
+    }
+  },
+
+  async ensureTruckExists(truckIdOrPlate: string, model?: string): Promise<TruckRecord> {
+    const cleanPlate = (truckIdOrPlate || '').trim().toUpperCase();
+    if (!cleanPlate) {
+      throw new Error('Valid truck ID or plate number is required');
+    }
+    const cleanModel = model?.trim() || 'DSWD Relief Cargo Vehicle';
+    const now = new Date().toISOString();
+
+    try {
+      const { data: existing } = await supabase
+        .from('trucks')
+        .select('*')
+        .or(`truck_id.eq.${cleanPlate},plate_number.eq.${cleanPlate}`)
+        .maybeSingle();
+
+      if (existing) {
+        return {
+          truckId: existing.truck_id,
+          plateNumber: existing.plate_number,
+          model: existing.model,
+          capacityKg: Number(existing.capacity_kg || 5000),
+          isActive: Boolean(existing.is_active ?? true),
+          createdAt: existing.created_at || now,
+          updatedAt: existing.updated_at || now
+        };
+      }
+
+      const { data: inserted, error } = await supabase
+        .from('trucks')
+        .upsert({
+          truck_id: cleanPlate,
+          plate_number: cleanPlate,
+          model: cleanModel,
+          capacity_kg: 5000,
+          is_active: true,
+          created_at: now,
+          updated_at: now
+        }, { onConflict: 'truck_id' })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.warn('ensureTruckExists upsert warning:', error.message);
+      }
+
+      return {
+        truckId: inserted?.truck_id || cleanPlate,
+        plateNumber: inserted?.plate_number || cleanPlate,
+        model: inserted?.model || cleanModel,
+        capacityKg: 5000,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      };
+    } catch (err) {
+      console.warn('ensureTruckExists error:', err);
+      return {
+        truckId: cleanPlate,
+        plateNumber: cleanPlate,
+        model: cleanModel,
+        capacityKg: 5000,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      };
     }
   },
 
