@@ -188,6 +188,7 @@ export interface ExpiryDateBatch {
   warehouseName?: string;
   lguId?: string;
   lguName?: string;
+  sourceType?: 'Warehouse' | 'LGU';
 }
 
 export interface OutgoingBatchAllocationRecord {

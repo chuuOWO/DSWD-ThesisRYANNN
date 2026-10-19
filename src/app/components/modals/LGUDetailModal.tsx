@@ -25,7 +25,8 @@ import {
   Maximize2,
   Minimize2,
   Printer,
-  FileText
+  FileText,
+  RotateCcw
 } from 'lucide-react';
 import type { OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
@@ -660,7 +661,7 @@ export function LGUDetailModal({
           const dest = (inc.destination || '').trim().toLowerCase();
           const matchesLgu = dest === muniLower || inc.destinationLguId === lguId || (muniLower.length > 2 && dest.includes(muniLower));
           const matchesKit = normalizeCategoryName(inc.fnfiCategory) === canonicalCat;
-          const isValidStatus = inc.status === 'Verified' || inc.status === 'Delivered';
+          const isValidStatus = inc.status === 'Verified' || (inc.status as string) === 'Delivered';
           const incQty = Number(inc.quantity) || 0;
           if (matchesLgu && matchesKit && isValidStatus && incQty > 0) {
             const exp = inc.expirationDate || '';
@@ -765,9 +766,15 @@ export function LGUDetailModal({
         if (needed <= 0) break;
         const lotQty = Math.min(needed, cand.quantity);
         if (lotQty > 0) {
+          const exp = cand.expirationDate || '';
+          const days = cand.daysRemaining ?? (exp ? getDaysRemaining(exp) : 365);
+          const tier = cand.expiryTier ?? (exp ? getExpiryTier(exp) : 'safe');
           lots.push({
             id: `LOT-${lgu.id}-${cand.batchTokenId}-${lots.length}`,
             ...cand,
+            expirationDate: exp,
+            daysRemaining: days,
+            expiryTier: tier,
             quantity: lotQty,
             status: 'In Stock'
           });
