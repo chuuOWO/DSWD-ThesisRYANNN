@@ -155,6 +155,7 @@ const createReceiverVehicleIcon = (accuracy?: number | null) => L.divIcon({
 });
 
 const destinationPinIcon = createDestinationPinIcon(true);
+const receiverVehicleIcon = createReceiverVehicleIcon();
 
 const formatGps = (location: PhoneLocation) => `${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`;
 const formatCoordinate = (value: number) => value.toFixed(6);
@@ -375,57 +376,65 @@ function MapController({
   fitRouteTrigger?: number;
 }) {
   const map = useMap();
-  const isInitialMount = useRef(true);
+  const hasFittedInitial = useRef(false);
+  const lastDestinationKey = useRef<string | null>(null);
 
-  // 1. Auto-fit bounds whenever center & destination are valid, or center on whichever is available
+  // 1. Initial overview fit, destination change, or manual "Fit Route" trigger (does NOT run on every GPS coordinate tick)
   useEffect(() => {
     if (!map) return;
+    const destKey = destination && isValidCoordinate(destination)
+      ? `${destination[0].toFixed(5)},${destination[1].toFixed(5)}`
+      : null;
+    const isNewDestination = destKey !== null && destKey !== lastDestinationKey.current;
+    const isExplicitTrigger = typeof fitRouteTrigger === 'number' && fitRouteTrigger > 0;
+
+    const shouldFit = !hasFittedInitial.current || isNewDestination || isExplicitTrigger;
+    if (!shouldFit) return;
+
     if (center && isValidCoordinate(center) && destination && isValidCoordinate(destination)) {
       try {
         const bounds = L.latLngBounds([center, destination]);
         map.fitBounds(bounds, {
           padding: [60, 60],
-          maxZoom: 14,
+          maxZoom: 15,
           animate: true,
-          duration: 1.2
+          duration: 0.8
         });
+        hasFittedInitial.current = true;
+        if (destKey) lastDestinationKey.current = destKey;
       } catch {}
     } else if (center && isValidCoordinate(center)) {
       try {
-        map.setView(center, 15, { animate: true, duration: 1.0 });
+        map.setView(center, 16, { animate: true, duration: 0.8 });
+        hasFittedInitial.current = true;
       } catch {}
     } else if (destination && isValidCoordinate(destination)) {
       try {
-        map.setView(destination, 14, { animate: true, duration: 1.0 });
+        map.setView(destination, 15, { animate: true, duration: 0.8 });
+        hasFittedInitial.current = true;
+        if (destKey) lastDestinationKey.current = destKey;
       } catch {}
     }
-  }, [map, destination?.[0], destination?.[1], center?.[0], center?.[1], fitRouteTrigger]);
+  }, [map, destination?.[0], destination?.[1], fitRouteTrigger]);
 
   // 2. Recenter on receiver when recenter button is clicked
   useEffect(() => {
     if (!map || recenterKey === 0 || !center || !isValidCoordinate(center)) return;
     try {
-      map.setView(center, 15, { animate: true, duration: 0.8 });
+      map.setView(center, 16, { animate: true, duration: 0.6 });
     } catch {}
-  }, [recenterKey, center, map]);
+  }, [recenterKey]);
 
-  // 3. Smooth follow when receiver moves > 35m
+  // 3. Gentle camera follow without jerking zoom: only pan if receiver leaves the visible padded viewport
   useEffect(() => {
     if (!map || !center || !isValidCoordinate(center)) return;
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
     try {
-      const currentCenter = map.getCenter();
-      if (currentCenter) {
-        const dist = getDistanceMeters(currentCenter.lat, currentCenter.lng, center[0], center[1]);
-        if (dist > 35) {
-          map.panTo(center, { animate: true, duration: 1.0 });
-        }
+      const bounds = map.getBounds();
+      if (bounds && !bounds.pad(-0.15).contains(L.latLng(center[0], center[1]))) {
+        map.panTo(center, { animate: true, duration: 0.6 });
       }
     } catch {}
-  }, [center, map]);
+  }, [center?.[0], center?.[1], map]);
 
   return null;
 }
@@ -441,12 +450,47 @@ function RoadLockedDeliveryRoute({
   const [roadCoordinates, setRoadCoordinates] = useState<[number, number][] | null>(null);
   const [connectorPoint, setConnectorPoint] = useState<[number, number] | null>(null);
 
+  const lastRoutedOriginRef = useRef<[number, number] | null>(null);
+  const lastRoutedDestRef = useRef<[number, number] | null>(null);
+  const lastRouteTimestampRef = useRef<number>(0);
+  const cachedRoadRef = useRef<[number, number][] | null>(null);
+
   useEffect(() => {
     if (!map || !isValidCoordinate(currentPosition) || !isValidCoordinate(destinationPosition)) {
       setRoadCoordinates(null);
       setConnectorPoint(null);
       return;
     }
+
+    const now = Date.now();
+    const lastOrigin = lastRoutedOriginRef.current;
+    const lastDest = lastRoutedDestRef.current;
+
+    const originMovedMeters = lastOrigin
+      ? getDistanceMeters(lastOrigin[0], lastOrigin[1], currentPosition[0], currentPosition[1])
+      : Infinity;
+
+    const destMovedMeters = lastDest
+      ? getDistanceMeters(lastDest[0], lastDest[1], destinationPosition[0], destinationPosition[1])
+      : Infinity;
+
+    // Only query OSRM if route not loaded yet, destination changed, or moved > 60m with 5s cooldown
+    const isFirstTime = !lastOrigin || !cachedRoadRef.current;
+    const isDestChanged = destMovedMeters > 15;
+    const isOriginFar = originMovedMeters > 60 && (now - lastRouteTimestampRef.current > 5000);
+
+    if (!isFirstTime && !isDestChanged && !isOriginFar) {
+      if (cachedRoadRef.current && cachedRoadRef.current.length > 0) {
+        const firstPoint = cachedRoadRef.current[0];
+        const dist = getDistanceMeters(currentPosition[0], currentPosition[1], firstPoint[0], firstPoint[1]);
+        setConnectorPoint(dist > 15 ? firstPoint : null);
+      }
+      return;
+    }
+
+    lastRoutedOriginRef.current = [currentPosition[0], currentPosition[1]];
+    lastRoutedDestRef.current = [destinationPosition[0], destinationPosition[1]];
+    lastRouteTimestampRef.current = now;
 
     let isMounted = true;
     let control: any = null;
@@ -480,9 +524,9 @@ function RoadLockedDeliveryRoute({
         const rawCoords: L.LatLng[] = osrmRoute?.coordinates ?? [];
         if (rawCoords.length > 0) {
           const coords: [number, number][] = rawCoords.map((c) => [c.lat, c.lng]);
+          cachedRoadRef.current = coords;
           setRoadCoordinates(coords);
 
-          // Check first road point distance from currentPosition
           const firstRoadPoint = coords[0];
           const distMeters = getDistanceMeters(
             currentPosition[0],
@@ -490,24 +534,27 @@ function RoadLockedDeliveryRoute({
             firstRoadPoint[0],
             firstRoadPoint[1]
           );
-
-          // If off-road (> 15 meters), draw dashed connector line to the nearest road entry
-          if (distMeters > 15) {
-            setConnectorPoint(firstRoadPoint);
-          } else {
-            setConnectorPoint(null);
-          }
+          setConnectorPoint(distMeters > 15 ? firstRoadPoint : null);
         }
       });
 
       control.on('routingerror', () => {
         if (!isMounted) return;
-        setRoadCoordinates([currentPosition, destinationPosition]);
+        // Retain cached road if available to avoid straight-line flicker during rate limits/offline
+        if (cachedRoadRef.current && cachedRoadRef.current.length > 0) {
+          setRoadCoordinates(cachedRoadRef.current);
+        } else {
+          setRoadCoordinates([currentPosition, destinationPosition]);
+        }
         setConnectorPoint(null);
       });
     } catch {
       if (isMounted) {
-        setRoadCoordinates([currentPosition, destinationPosition]);
+        if (cachedRoadRef.current && cachedRoadRef.current.length > 0) {
+          setRoadCoordinates(cachedRoadRef.current);
+        } else {
+          setRoadCoordinates([currentPosition, destinationPosition]);
+        }
         setConnectorPoint(null);
       }
     }
@@ -1121,14 +1168,14 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         const prev = lastProcessedLocRef.current;
         const distance = prev ? getDistanceMeters(prev.latitude, prev.longitude, rawLat, rawLng) : 0;
 
-        // Ignore micro sensor jitter under 1.5 meters when stationary
-        if (prev && distance < 1.5) return;
+        // Ignore micro sensor jitter under 2.5 meters when stationary (stops scanning twitching)
+        if (prev && distance < 2.5) return;
 
-        // If distance is large (> 40 meters, e.g. mock location jump, teleport, or switching from fake to real GPS),
-        // or if there is no previous point, SNAP IMMEDIATELY to coordinates without smoothing damping!
-        const shouldSnap = !prev || distance > 40;
-        const smoothedLat = shouldSnap ? rawLat : smoothCoordinate(prev.latitude, rawLat, 0.5);
-        const smoothedLng = shouldSnap ? rawLng : smoothCoordinate(prev.longitude, rawLng, 0.5);
+        // If distance is large (> 100 meters, e.g. mock location jump, teleport, or switching from fake to real GPS),
+        // or if there is no previous point, SNAP IMMEDIATELY to coordinates without damping!
+        const shouldSnap = !prev || distance > 100;
+        const smoothedLat = shouldSnap ? rawLat : smoothCoordinate(prev.latitude, rawLat, 0.75);
+        const smoothedLng = shouldSnap ? rawLng : smoothCoordinate(prev.longitude, rawLng, 0.75);
 
         const updatedLoc: PhoneLocation = {
           latitude: smoothedLat,
@@ -2288,7 +2335,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               {currentPosition && isValidCoordinate(currentPosition) && (
                 <Marker
                   position={currentPosition}
-                  icon={createReceiverVehicleIcon(location?.accuracy)}
+                  icon={receiverVehicleIcon}
                 >
                   <Popup>
                     <div className="text-center font-sans p-1">
