@@ -6,7 +6,6 @@ import {
   Download, 
   Printer, 
   QrCode as QrCodeIcon, 
-  ShieldCheck, 
   X 
 } from 'lucide-react';
 import type { OutgoingRelease } from '../../hooks/useInventoryState';
@@ -54,7 +53,6 @@ export function QrCodeGeneratorModal({
   // QR state
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Stable snapshot of releases to prevent real-time mobile scans from redrawing or flickering the QR canvas
   const releaseSnapshotRef = useRef<Record<string, OutgoingRelease>>({});
@@ -202,13 +200,14 @@ export function QrCodeGeneratorModal({
     if (!qrDataUrl) return;
     const link = document.createElement('a');
     link.href = qrDataUrl;
-    link.download = `QR-${payload.drNumber}.png`;
+    link.download = `QR-${payload?.drNumber || 'manifest'}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
   const handlePrint = () => {
+    if (!payload || !qrDataUrl) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
     printWindow.document.write(`
@@ -217,20 +216,30 @@ export function QrCodeGeneratorModal({
         <head>
           <title>DSWD Manifest QR - ${payload.drNumber}</title>
           <style>
-            body { font-family: sans-serif; text-align: center; padding: 40px; color: #111; }
-            .card { max-width: 450px; margin: 0 auto; border: 2px solid #2500ba; border-radius: 16px; padding: 24px; }
-            h1 { font-size: 20px; color: #2500ba; margin: 0 0 4px 0; }
-            h2 { font-size: 14px; color: #666; margin: 0 0 16px 0; }
-            img { width: 260px; height: 260px; }
-            .details { text-align: left; margin-top: 16px; font-size: 12px; line-height: 1.6; background: #f4f4ff; padding: 12px; border-radius: 8px; }
-            .blockchain { margin-top: 12px; font-size: 10px; color: #555; border-top: 1px dashed #ccc; padding-top: 8px; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; padding: 24px; color: #111; background: #fff; }
+            .card { max-width: 440px; margin: 0 auto; border: 2px solid #1e40af; border-radius: 16px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+            .affix-banner { background: #fef3c7; border: 2px dashed #d97706; color: #92400e; font-weight: 800; font-size: 13px; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; letter-spacing: 0.5px; text-transform: uppercase; }
+            .affix-sub { font-size: 11px; font-weight: 500; color: #78350f; margin-top: 4px; text-transform: none; }
+            h1 { font-size: 18px; color: #1e40af; margin: 0 0 4px 0; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
+            h2 { font-size: 14px; color: #4b5563; margin: 0 0 16px 0; font-weight: 600; }
+            .qr-wrapper { display: inline-block; padding: 10px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; }
+            img { width: 240px; height: 240px; display: block; }
+            .details { text-align: left; font-size: 12px; line-height: 1.6; background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; }
+            .details strong { color: #1e293b; }
+            .blockchain { margin-top: 12px; font-size: 10px; color: #64748b; border-top: 1px dashed #cbd5e1; padding-top: 8px; text-align: left; }
           </style>
         </head>
         <body>
           <div class="card">
+            <div class="affix-banner">
+              AFFIX / PLACE ON GOODS
+              <div class="affix-sub">Attach this official manifest voucher directly to relief goods cargo or pallet for field handover verification</div>
+            </div>
             <h1>DSWD Relief Goods Manifest</h1>
             <h2>Delivery Receipt: ${payload.drNumber}</h2>
-            <img src="${qrDataUrl}" alt="QR Code" />
+            <div class="qr-wrapper">
+              <img src="${qrDataUrl}" alt="QR Code" />
+            </div>
             <div class="details">
               <div><strong>Destination LGU:</strong> ${payload.to}</div>
               <div><strong>Category:</strong> ${payload.category}</div>
@@ -239,9 +248,9 @@ export function QrCodeGeneratorModal({
               <div><strong>Handover ID:</strong> ${payload.handoverContractId}</div>
             </div>
             <div class="blockchain">
-              <div><strong>Blockchain Slot:</strong> Sepolia Testnet</div>
+              <div><strong>Blockchain Network:</strong> ${payload.blockchain.network}</div>
               <div><strong>Contract:</strong> ${payload.blockchain.contractAddress}</div>
-              <div><strong>Hash:</strong> ${payload.blockchain.merkleRootHash.slice(0, 24)}...</div>
+              <div><strong>Merkle Hash:</strong> ${payload.blockchain.merkleRootHash.slice(0, 24)}...</div>
             </div>
           </div>
           <script>
@@ -259,191 +268,168 @@ export function QrCodeGeneratorModal({
   );
 
   const content = (
-    <div className="flex flex-col lg:flex-row gap-6 p-6">
-      {/* Left Column: Form & Configuration */}
-      <div className="flex-1 space-y-5">
-        <div>
-          <div className="flex items-center gap-2 text-blue-700 font-bold text-lg">
-            <QrCodeIcon className="w-6 h-6" />
-            <h2>Delivery Receipt QR Code Generator</h2>
-          </div>
-          <p className="text-xs text-gray-500 mt-1">
-            Generates a scannable manifest QR code directly compatible with the <strong>Receiver App</strong>. It provides immediate manifest details on scan, with a dedicated slot reserved for blockchain smart contracts.
+    <div className="flex flex-col items-center p-5 sm:p-6 space-y-4">
+      {/* Top Header */}
+      <div className="w-full flex items-center justify-between pb-3 border-b border-gray-100">
+        <div className="flex items-center gap-2 text-blue-700 font-bold text-base">
+          <QrCodeIcon className="w-5 h-5 text-blue-600" />
+          <h2>Official Manifest QR Voucher</h2>
+        </div>
+        <span className={`inline-block rounded-full text-[10px] font-bold px-2.5 py-0.5 uppercase tracking-wider ${
+          isCompleted
+            ? 'bg-emerald-100 text-emerald-800'
+            : isDroppedOff
+            ? 'bg-purple-100 text-purple-900 border border-purple-200'
+            : 'bg-blue-100 text-blue-800'
+        }`}>
+          {isCompleted ? 'Completed' : isDroppedOff ? 'Dropped Off' : 'Active Dispatch'}
+        </span>
+      </div>
+
+      {/* Release Selector if multiple releases and no initial release */}
+      {!initialRelease && releases.length > 1 && (
+        <div className="w-full">
+          <label className="block text-[11px] font-bold text-gray-600 mb-1">Select Outgoing Release</label>
+          <select
+            value={selectedDr}
+            onChange={(e) => setSelectedDr(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-800 focus:border-blue-500 focus:outline-none"
+          >
+            {releases.map((r) => (
+              <option key={r.drNumber} value={r.drNumber}>
+                {r.drNumber} — {r.lguName} ({r.amountApproved || r.amountRequested} {r.fnfiCategory})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Release Identifier & Key Details */}
+      <div className="w-full text-center">
+        <h3 className="text-lg font-black text-gray-900 tracking-tight">
+          {payload?.drNumber || currentRelease?.drNumber || 'No Release Selected'}
+        </h3>
+        {payload ? (
+          <p className="text-xs text-gray-600 mt-0.5">
+            <span className="font-semibold text-gray-800">{payload.category}</span> &bull;{' '}
+            <span className="font-semibold text-blue-700">{payload.quantity.toLocaleString()} kits</span> &rarr;{' '}
+            <span className="font-semibold text-gray-900">{payload.to}</span>
           </p>
-        </div>
-
-        {/* Outgoing Release Selection */}
-        <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
-          <label className="block text-xs font-bold text-gray-700">
-            Select Outgoing Release (INC Code)
-          </label>
-          {releases.length === 0 ? (
-            <p className="text-xs text-amber-600">No outgoing releases found. Please create and approve an outgoing release first.</p>
-          ) : (
-            <select
-              value={selectedDr}
-              onChange={(e) => setSelectedDr(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-800 focus:border-blue-500 focus:outline-none"
-            >
-              {releases.map((r) => (
-                <option key={r.drNumber} value={r.drNumber}>
-                  {r.drNumber} — {r.lguName} ({r.amountApproved || r.amountRequested} {r.fnfiCategory}) [{r.deliveryStatus}]
-                </option>
-              ))}
-            </select>
-          )}
-
-          {currentRelease && (
-            <div className="grid grid-cols-2 gap-2 text-[11px] text-gray-600 pt-2 border-t border-gray-200">
-              <div><span className="font-semibold text-gray-800">Destination:</span> {currentRelease.lguName}</div>
-              <div><span className="font-semibold text-gray-800">Status:</span> {currentRelease.deliveryStatus}</div>
-              <div><span className="font-semibold text-gray-800">Quantity:</span> {currentRelease.amountApproved || currentRelease.amountRequested} kits</div>
-              <div><span className="font-semibold text-gray-800">Origin:</span> {currentRelease.warehouseSource}</div>
-            </div>
-          )}
-        </div>
-
-        {/* Dedicated Blockchain Manifest Slot */}
-        {payload && (
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-indigo-900 font-bold text-xs">
-                <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                <span>Blockchain Verification Layer</span>
-              </div>
-              <span className="rounded-full bg-indigo-100 text-indigo-700 px-2 py-0.5 text-[10px] font-bold">
-                Smart Contract Ready
-              </span>
-            </div>
-            <p className="text-[11px] text-indigo-800 leading-relaxed">
-              This QR code contains the full manifest payload ready for <strong>Receiver View scan</strong> and gasless cryptographic signing on Sepolia:
-            </p>
-            <div className="grid grid-cols-2 gap-2 text-[10px] bg-white/80 rounded-lg p-2.5 border border-indigo-100 font-mono text-gray-700">
-              <div>
-                <span className="text-gray-400 block">Target Network:</span>
-                <span className="font-bold text-indigo-900">{payload.blockchain.network}</span>
-              </div>
-              <div>
-                <span className="text-gray-400 block">Token Standard:</span>
-                <span className="font-bold text-indigo-900">{payload.blockchain.tokenStandard}</span>
-              </div>
-              <div className="col-span-2 truncate">
-                <span className="text-gray-400 block">Contract Address:</span>
-                <span className="text-gray-900">{payload.blockchain.contractAddress}</span>
-              </div>
-              <div className="col-span-2 truncate">
-                <span className="text-gray-400 block">Merkle Manifest Hash:</span>
-                <span className="text-gray-900">{payload.blockchain.merkleRootHash}</span>
-              </div>
-            </div>
-          </div>
+        ) : currentRelease ? (
+          <p className="text-xs text-red-600 font-semibold mt-0.5">
+            Missing valid quantity ({currentRelease.amountApproved || currentRelease.amountRequested || 0})
+          </p>
+        ) : (
+          <p className="text-xs text-gray-400 mt-0.5">No release selected</p>
         )}
       </div>
 
-      {/* Right Column: Scannable QR Display & Actions */}
-      <div className="w-full lg:w-96 flex flex-col items-center justify-center bg-gray-50 rounded-2xl p-6 border border-gray-200">
-        <div className="text-center mb-3">
-          <span className={`inline-block rounded-full text-[10px] font-bold px-3 py-1 uppercase tracking-wider mb-1 ${
-            isCompleted
-              ? 'bg-emerald-100 text-emerald-800'
-              : isDroppedOff
-              ? 'bg-purple-100 text-purple-900 border border-purple-200'
-              : 'bg-blue-100 text-blue-800'
-          }`}>
-            {isCompleted ? 'Completed Shipment' : isDroppedOff ? 'Dropped Off at Site' : 'Official Manifest QR'}
-          </span>
-          <h3 className="text-base font-extrabold text-gray-900">{payload?.drNumber || currentRelease?.drNumber || 'No Release'}</h3>
-          {payload ? (
-            <p className="text-xs text-gray-500">{payload.category} &bull; {payload.quantity.toLocaleString()} kits &rarr; {payload.to}</p>
-          ) : currentRelease ? (
-            <p className="text-xs text-red-600 font-semibold">Missing valid quantity ({currentRelease.amountApproved || currentRelease.amountRequested || 0})</p>
-          ) : (
-            <p className="text-xs text-gray-400">Select a release above</p>
-          )}
-        </div>
+      {/* PLACE ON GOODS INSTRUCTION CALLOUT */}
+      <div className="w-full rounded-xl border-2 border-dashed border-amber-400 bg-amber-50/90 px-3 py-2.5 text-center">
+        <span className="block text-xs font-black tracking-wider text-amber-900 uppercase">
+          PLACE / AFFIX ON GOODS
+        </span>
+        <p className="text-[11px] font-medium text-amber-800 mt-0.5 leading-snug">
+          Print and attach this official QR voucher directly onto relief goods cargo or packaging prior to dispatch for field handover verification.
+        </p>
+      </div>
 
-        {/* QR Code Canvas / Image */}
-        <div className={`relative p-4 bg-white rounded-2xl shadow-md border-2 ${
-          isCompleted ? 'border-emerald-500/30 opacity-90' : isDroppedOff ? 'border-purple-600/40' : 'border-blue-600/30'
+      {/* QR Code Canvas / Image Card */}
+      <div className={`relative p-4 bg-white rounded-2xl shadow-sm border-2 ${
+        isCompleted ? 'border-emerald-500/30 opacity-90' : isDroppedOff ? 'border-purple-600/40' : 'border-blue-600/30'
+      }`}>
+        {qrDataUrl ? (
+          <img
+            src={qrDataUrl}
+            alt={`QR Code for ${payload?.drNumber}`}
+            className="w-56 h-56 object-contain rounded-lg"
+          />
+        ) : (
+          <div className="w-56 h-56 flex flex-col items-center justify-center p-4 text-center text-gray-400 text-xs">
+            {currentRelease && !payload ? (
+              <span className="text-red-600 font-medium">QR disabled: Please allocate a positive quantity for this release.</span>
+            ) : releases.length === 0 ? (
+              'No Release Available'
+            ) : (
+              'Generating QR Code...'
+            )}
+          </div>
+        )}
+        <div className={`absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-white text-[9px] font-bold px-3 py-0.5 rounded-full shadow ${
+          isCompleted ? 'bg-emerald-700' : isDroppedOff ? 'bg-purple-700' : 'bg-blue-700'
         }`}>
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt={`QR Code for ${payload?.drNumber}`}
-              className="w-56 h-56 object-contain rounded-lg"
-            />
-          ) : (
-            <div className="w-56 h-56 flex flex-col items-center justify-center p-4 text-center text-gray-400 text-xs">
-              {currentRelease && !payload ? (
-                <span className="text-red-600 font-medium">QR disabled: Please allocate a positive quantity for this release.</span>
-              ) : releases.length === 0 ? (
-                'No Release Available'
-              ) : (
-                'Generating QR Code...'
-              )}
-            </div>
-          )}
-          <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 text-white text-[9px] font-bold px-2.5 py-0.5 rounded-full shadow ${
-            isCompleted ? 'bg-emerald-700' : isDroppedOff ? 'bg-purple-700' : 'bg-blue-700'
-          }`}>
-            {isCompleted
-              ? 'Completed — QR Closed'
-              : isDroppedOff
-              ? 'Dropped Off — Ready for LGU Scan'
-              : 'Ready for Receiver Scan'}
+          {isCompleted
+            ? 'Completed — QR Closed'
+            : isDroppedOff
+            ? 'Dropped Off — Ready for LGU Scan'
+            : 'Ready for Receiver Scan'}
+        </div>
+      </div>
+
+      {/* Scan Instructions */}
+      <p className="text-[11px] text-gray-500 text-center px-2">
+        {isCompleted ? (
+          <span className="text-emerald-700 font-semibold">
+            This shipment has been accepted into inventory. The delivery cycle is complete and this QR code is closed.
+          </span>
+        ) : isDroppedOff ? (
+          <span className="text-purple-900 font-semibold">
+            Shipment dropped off on location by escort officer. Scan with the <strong>LGU Receiver Scanner</strong> to confirm physical receipt and intake into inventory.
+          </span>
+        ) : (
+          <>
+            Scan with the <strong>Receiver View Scanner</strong> to accept custody and record cryptographic proof on-chain.
+          </>
+        )}
+      </p>
+
+      {/* Quick Metadata Chips */}
+      {currentRelease && (
+        <div className="w-full grid grid-cols-2 gap-2 text-[11px] bg-gray-50 rounded-xl p-2.5 border border-gray-200">
+          <div>
+            <span className="text-gray-500 block text-[10px]">Origin Warehouse:</span>
+            <span className="font-semibold text-gray-800 truncate block">{currentRelease.warehouseSource || 'DSWD Oton Main Warehouse'}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 block text-[10px]">Destination LGU:</span>
+            <span className="font-semibold text-gray-800 truncate block">{currentRelease.lguName || 'Assigned LGU'}</span>
           </div>
         </div>
+      )}
 
-        <p className="text-[11px] text-gray-500 text-center mt-4 px-2">
-          {isCompleted ? (
-            <span className="text-emerald-700 font-semibold">
-              This shipment has been accepted into inventory. The delivery cycle is complete and this QR code is closed.
-            </span>
-          ) : isDroppedOff ? (
-            <span className="text-purple-900 font-semibold">
-              Shipment dropped off on location by escort officer. Scan with the <strong>LGU Receiver Scanner</strong> to confirm physical receipt and intake into inventory.
-            </span>
-          ) : (
-            <>
-              Scan with the <strong>Receiver View Scanner</strong> to accept custody and record cryptographic proof on-chain.
-            </>
-          )}
-        </p>
-
-        {/* Action Buttons */}
-        <div className="w-full grid grid-cols-2 gap-2 mt-4">
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow hover:bg-blue-700 transition"
-          >
-            <Download size={13} />
-            Download PNG
-          </button>
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-gray-800 px-3 py-2 text-xs font-bold text-white shadow hover:bg-gray-900 transition"
-          >
-            <Printer size={13} />
-            Print Manifest
-          </button>
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
-          >
-            {copied ? <Check size={13} className="text-green-600" /> : <Copy size={13} />}
-            {copied ? 'JSON Copied to Clipboard!' : 'Copy Raw QR JSON Payload'}
-          </button>
-        </div>
+      {/* Action Buttons */}
+      <div className="w-full grid grid-cols-2 gap-2 pt-1">
+        <button
+          type="button"
+          onClick={handlePrint}
+          className="flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2.5 text-xs font-bold text-white shadow hover:bg-blue-700 transition"
+        >
+          <Printer size={14} />
+          Print Manifest
+        </button>
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="flex items-center justify-center gap-1.5 rounded-xl bg-gray-800 px-3 py-2.5 text-xs font-bold text-white shadow hover:bg-gray-900 transition"
+        >
+          <Download size={14} />
+          Download PNG
+        </button>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"
+        >
+          {copied ? <Check size={13} className="text-green-600" /> : <Copy size={13} />}
+          {copied ? 'JSON Copied to Clipboard!' : 'Copy Raw QR JSON Payload'}
+        </button>
       </div>
     </div>
   );
 
   if (isFullPage) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto">
         {content}
       </div>
     );
@@ -451,11 +437,11 @@ export function QrCodeGeneratorModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-      <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-gray-100 overflow-hidden max-h-[94vh] overflow-y-auto">
         {onClose && (
           <button
             onClick={onClose}
-            className="absolute right-4 top-4 z-10 rounded-full bg-gray-100 p-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition"
+            className="absolute right-3.5 top-3.5 z-10 rounded-full bg-gray-100 p-1.5 text-gray-500 hover:bg-gray-200 hover:text-gray-800 transition"
           >
             <X size={18} />
           </button>

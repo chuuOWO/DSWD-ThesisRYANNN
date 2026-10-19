@@ -14,7 +14,6 @@ import {
 import { authApi, UserRole } from '../../services/authApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { blockchain } from '../../services/blockchain';
-import { provisionSmartAccountAddress } from '../../services/embeddedWallet';
 import { supabase } from '../../lib/supabase';
 import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { sanitizeTextOnly } from '../../lib/inputValidation';
@@ -134,18 +133,8 @@ export function AuthPage() {
 
     console.log('[DSWD Auth] Starting login for:', email.trim());
     try {
-      const res = await authApi.signIn(email.trim(), password);
-      console.log('[DSWD Auth] Sign-in successful for user ID:', res.user?.id, 'email:', res.user?.email);
-      if (res.user?.id && res.user.email) {
-        try {
-          const smartWallet = await provisionSmartAccountAddress(res.user.id, res.user.email);
-          await authApi.updateWalletAddress(res.user.id, smartWallet);
-        } catch (walletSyncErr) {
-          console.warn('Smart account sync on login:', walletSyncErr);
-        }
-      }
+      await authApi.signIn(email.trim(), password);
       await refreshProfile();
-      console.log('[DSWD Auth] Profile refreshed successfully');
     } catch (authErr: any) {
       console.error('[DSWD Auth] Login failed with error:', authErr);
       if (authErr?.message === 'ACCOUNT_PENDING') {
@@ -197,12 +186,8 @@ export function AuthPage() {
 
     try {
       const computedFullName = `${firstName.trim()} ${lastName.trim()}`;
-      let autoSmartWallet = walletAddress.trim();
-      if (!autoSmartWallet) {
-        autoSmartWallet = await provisionSmartAccountAddress('initial', email.trim());
-      }
 
-      const signUpRes = await authApi.signUp({
+      await authApi.signUp({
         email: email.trim(),
         password,
         fullName: computedFullName,
@@ -213,17 +198,8 @@ export function AuthPage() {
         workIdUrl: workIdUrl || undefined,
         role,
         truckId: (role === 'receiver' && truckId) ? truckId.trim() : undefined,
-        walletAddress: autoSmartWallet
+        walletAddress: walletAddress.trim() || undefined
       });
-
-      if (signUpRes?.user?.id) {
-        try {
-          const canonicalWallet = await provisionSmartAccountAddress(signUpRes.user.id, email.trim());
-          await authApi.updateWalletAddress(signUpRes.user.id, canonicalWallet);
-        } catch (updateErr) {
-          console.warn('Smart wallet update on signup:', updateErr);
-        }
-      }
 
       setPassword('');
       setConfirmPassword('');

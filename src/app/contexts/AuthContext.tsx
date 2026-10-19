@@ -99,14 +99,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const handleSignOut = async () => {
     setIsLoggingOut(true);
+    setSession(null);
+    setProfile(null);
     try {
       await authApi.signOut();
     } catch (err) {
       console.error('Failed to sign out', err);
     } finally {
-      setTimeout(() => {
-        setIsLoggingOut(false);
-      }, 500);
+      setIsLoggingOut(false);
     }
   };
 

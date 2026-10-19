@@ -130,17 +130,15 @@ export const authApi = {
                 }
               });
           } else if (!data.wallet_address && (data.id || userId)) {
-            try {
-              const targetId = String(data.id || userId);
-              const targetEmail = String(data.email || cleanEmail || '');
-              const autoWallet = await provisionSmartAccountAddress(targetId, targetEmail);
-              if (autoWallet) {
-                await supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', targetId);
-                data.wallet_address = autoWallet;
-              }
-            } catch (autoErr) {
-              console.warn('Auto provision Sepolia wallet warning:', autoErr);
-            }
+            const targetId = String(data.id || userId);
+            const targetEmail = String(data.email || cleanEmail || '');
+            provisionSmartAccountAddress(targetId, targetEmail)
+              .then((autoWallet) => {
+                if (autoWallet) {
+                  supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', targetId).catch(() => {});
+                }
+              })
+              .catch((autoErr) => console.warn('Auto provision Sepolia wallet warning:', autoErr));
           }
           return mapProfile(data);
         }
@@ -170,15 +168,15 @@ export const authApi = {
                 }
               });
           } else if (!data.wallet_address && data.id) {
-            try {
-              const autoWallet = await provisionSmartAccountAddress(String(data.id), String(data.email || cleanEmail));
-              if (autoWallet) {
-                await supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', data.id);
-                data.wallet_address = autoWallet;
-              }
-            } catch (autoErr) {
-              console.warn('Auto provision Sepolia wallet warning:', autoErr);
-            }
+            const targetId = String(data.id);
+            const targetEmail = String(data.email || cleanEmail || '');
+            provisionSmartAccountAddress(targetId, targetEmail)
+              .then((autoWallet) => {
+                if (autoWallet) {
+                  supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', targetId).catch(() => {});
+                }
+              })
+              .catch((autoErr) => console.warn('Auto provision Sepolia wallet warning:', autoErr));
           }
           return mapProfile(data);
         }
@@ -327,29 +325,22 @@ export const authApi = {
     const normalizedEmail = payload.email.trim().toLowerCase();
     const computedFullName = payload.fullName || `${payload.firstName || ''} ${payload.lastName || ''}`.trim() || 'DSWD Officer';
 
-    // 1. Prevent duplicate accounts with the same email
-    const { data: existingEmail } = await supabase
-      .from('profiles')
-      .select('id')
-      .ilike('email', normalizedEmail)
-      .maybeSingle();
+    // 1. Prevent duplicate accounts with the same email or wallet in parallel
+    const checks: Promise<any>[] = [
+      supabase.from('profiles').select('id').ilike('email', normalizedEmail).maybeSingle()
+    ];
+    if (payload.walletAddress && payload.walletAddress.trim()) {
+      checks.push(
+        supabase.from('profiles').select('id').ilike('wallet_address', payload.walletAddress.trim().toLowerCase()).maybeSingle()
+      );
+    }
+    const [existingEmailRes, existingWalletRes] = await Promise.all(checks);
 
-    if (existingEmail) {
+    if (existingEmailRes?.data) {
       throw new Error('An account with this email address already exists. Please sign in or use a different email.');
     }
-
-    // 2. Prevent linking the same Smart Account address to multiple accounts
-    if (payload.walletAddress && payload.walletAddress.trim()) {
-      const normalizedWallet = payload.walletAddress.trim().toLowerCase();
-      const { data: existing } = await supabase
-        .from('profiles')
-        .select('id')
-        .ilike('wallet_address', normalizedWallet)
-        .maybeSingle();
-
-      if (existing) {
-        throw new Error('This Smart Account address has already been bound to another user.');
-      }
+    if (existingWalletRes?.data) {
+      throw new Error('This Smart Account address has already been bound to another user.');
     }
 
     const sanitizedTruckId = (payload.role === 'receiver' && payload.truckId && /^TRUCK-\d+/i.test(payload.truckId.trim()))
@@ -516,29 +507,25 @@ export const authApi = {
 
   async signOut() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('first_name, last_name, role, wallet_address')
-          .eq('id', user.id)
-          .maybeSingle();
+        const meta = user.user_metadata || {};
+        const resolvedName = meta.first_name
+          ? `${meta.first_name} ${meta.last_name || ''}`.trim()
+          : (meta.full_name || user.email || 'User');
 
-        const resolvedName = profile
-          ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim()
-          : (user.user_metadata?.first_name ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim() : (user.user_metadata?.full_name || user.email || 'User'));
-
-        await backendApi.logActivity({
+        backendApi.logActivity({
           actorId: user.id,
           actorName: resolvedName,
           actorEmail: user.email || 'user@dswd.gov.ph',
-          actorRole: profile?.role || user.user_metadata?.role || 'user',
-          actorWallet: profile?.wallet_address || user.user_metadata?.wallet_address || undefined,
+          actorRole: meta.role || 'user',
+          actorWallet: meta.wallet_address || undefined,
           action: 'USER_LOGOUT',
           entityType: 'User',
           entityId: user.id,
           details: `User ${resolvedName} signed out of the system.`
-        });
+        }).catch(() => {});
       }
     } catch (logErr) {
       console.warn('Could not log logout activity:', logErr);

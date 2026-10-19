@@ -38,7 +38,13 @@ export const publicClient = createPublicClient({
   transport: http(RPC_URL),
 });
 
+const keyCache = new Map<string, Hex>();
+
 export async function getSessionSignerKey(userId: string, email: string): Promise<Hex> {
+  const cacheKey = `${userId}:${email.toLowerCase().trim()}`;
+  if (keyCache.has(cacheKey)) {
+    return keyCache.get(cacheKey)!;
+  }
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -59,7 +65,9 @@ export async function getSessionSignerKey(userId: string, email: string): Promis
   );
   const hashArray = Array.from(new Uint8Array(derivedBits));
   const hex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `0x${hex}` as Hex;
+  const result = `0x${hex}` as Hex;
+  keyCache.set(cacheKey, result);
+  return result;
 }
 
 export async function provisionSmartAccountAddress(userId: string, email: string): Promise<string> {
