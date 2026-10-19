@@ -14,6 +14,8 @@ import {
   getLguCapacities,
   getLguCommodityStock
 } from '../../lib/commodityClassification';
+import { supabase } from '../../lib/supabase';
+import { getDaysRemaining } from '../../lib/expiryConstants';
 
 export type LGUDelivery = SynchronizedLgu;
 
@@ -58,7 +60,7 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 12;
+  const pageSize = viewMode === 'table' ? 18 : 12;
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedLGU, setSelectedLGU] = useState<LGUDelivery | null>(null);
@@ -84,6 +86,34 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
   });
 
   const [capacityVersion, setCapacityVersion] = useState(0);
+  const [dbBatches, setDbBatches] = useState<any[]>([]);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    const fetchBatches = async () => {
+      try {
+        const { data } = await supabase.from('inventory_batches').select('*');
+        if (isSubscribed && data) {
+          setDbBatches(data);
+        }
+      } catch (err) {
+        console.warn('Failed to load inventory_batches in LGUMonitoring:', err);
+      }
+    };
+    fetchBatches();
+
+    const channel = supabase
+      .channel('lgu-monitoring-batches-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, () => {
+        fetchBatches();
+      })
+      .subscribe();
+
+    return () => {
+      isSubscribed = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     const handleUpdate = () => setCapacityVersion(v => v + 1);
@@ -294,6 +324,208 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
       .sort((a, b) => b.urgencyScore - a.urgencyScore)
       .slice(0, 5);
   }, [baseLguList]);
+
+  // Master calculation of expiring batches by LGU (Rolling Relative Time Windows: <= 90 Days and 91-120 Days)
+  const lguExpiryBreakdown = useMemo(() => {
+    const map = new Map<string, { expiring90: number; expiring120: number }>();
+
+    const getEntry = (lguId: string) => {
+      if (!map.has(lguId)) {
+        map.set(lguId, { expiring90: 0, expiring120: 0 });
+      }
+      return map.get(lguId)!;
+    };
+
+    const findLguId = (lguId?: string | null, muni?: string | null, prov?: string | null) => {
+      if (lguId) {
+        const match = baseLguList.find(l => l.id && String(l.id).toLowerCase() === String(lguId).toLowerCase());
+        if (match) return match.id;
+      }
+      if (muni) {
+        const muniLower = muni.trim().toLowerCase();
+        const provLower = (prov || '').trim().toLowerCase();
+        const match = baseLguList.find(l => {
+          const lMuni = (l.municipality || '').trim().toLowerCase();
+          const lProv = (l.province || '').trim().toLowerCase();
+          if (provLower && lProv && provLower !== lProv) return false;
+          return lMuni === muniLower || (muniLower.length > 2 && (l.lguName || '').trim().toLowerCase().includes(muniLower));
+        });
+        if (match) return match.id;
+      }
+      return null;
+    };
+
+    const seenTokens = new Set<string>();
+
+    // 1. Live database inventory_batches assigned to this LGU
+    dbBatches.forEach((b: any) => {
+      if (!b) return;
+      const exp = b.expiration_date || b.expirationDate;
+      if (!exp) return;
+      const cat = b.kit_name || b.kit_type_id || b.kitTypeId;
+      if (!matchesCommodityFilter(cat, commodityTypeFilter)) return;
+
+      const token = b.batch_token_id || b.batchTokenId;
+      if (token && seenTokens.has(token)) return;
+      if (token) seenTokens.add(token);
+
+      const targetLguId = findLguId(b.lgu_id || b.lguId, b.municipality, b.province);
+      if (!targetLguId) return;
+
+      const days = getDaysRemaining(exp);
+      const qty = Number(b.remaining_quantity ?? b.remainingQuantity ?? b.initial_quantity ?? b.initialQuantity ?? 0);
+      if (qty <= 0) return;
+
+      const entry = getEntry(targetLguId);
+      if (days <= 90) entry.expiring90 += qty;
+      else if (days > 90 && days <= 120) entry.expiring120 += qty;
+    });
+
+    // 2. Batches delivered or allocated via outgoing releases
+    const releases = inventoryState?.outgoingReleasesList || [];
+    releases.forEach((r) => {
+      if (!r) return;
+      if (!matchesCommodityFilter(r.fnfiCategory, commodityTypeFilter)) return;
+
+      const targetLguId = findLguId(r.lguId, r.municipality || r.destination, r.province);
+      if (!targetLguId) return;
+
+      let allocs: any = r.allocatedBatches;
+      if (typeof allocs === 'string') {
+        try {
+          allocs = JSON.parse(allocs);
+        } catch {}
+      }
+      if (!Array.isArray(allocs)) allocs = [];
+
+      if (allocs.length > 0) {
+        allocs.forEach((a: any) => {
+          const token = a.batchTokenId || a.batchNumber;
+          if (token && seenTokens.has(token)) return;
+          if (token) seenTokens.add(token);
+
+          const exp = a.expirationDate;
+          if (!exp) return;
+          const days = getDaysRemaining(exp);
+          const qty = Number(a.quantity || 0);
+          if (qty <= 0) return;
+
+          const entry = getEntry(targetLguId);
+          if (days <= 90) entry.expiring90 += qty;
+          else if (days > 90 && days <= 120) entry.expiring120 += qty;
+        });
+      } else {
+        const token = r.drNumber || r.id;
+        if (token && seenTokens.has(token)) return;
+        if (token) seenTokens.add(token);
+
+        const exp = (r as any).expirationDate;
+        if (!exp) return;
+        const days = getDaysRemaining(exp);
+        const qty = Number(r.amountApproved || r.amountRequested || 0);
+        if (qty <= 0) return;
+
+        const entry = getEntry(targetLguId);
+        if (days <= 90) entry.expiring90 += qty;
+        else if (days > 90 && days <= 120) entry.expiring120 += qty;
+      }
+    });
+
+    // 3. Batches delivered via verified direct incoming logistics
+    const incoming = inventoryState?.incomingGoodsList || [];
+    incoming.forEach((inc) => {
+      if (!inc || inc.destinationType !== 'LGU') return;
+      if (!matchesCommodityFilter(inc.fnfiCategory, commodityTypeFilter)) return;
+
+      const targetLguId = findLguId(null, inc.destination, null);
+      if (!targetLguId) return;
+
+      const token = inc.batchTokenId || inc.manifestNumber || inc.id;
+      if (token && seenTokens.has(token)) return;
+      if (token) seenTokens.add(token);
+
+      const exp = inc.expirationDate;
+      if (!exp) return;
+      const days = getDaysRemaining(exp);
+      const qty = Number(inc.quantity || 0);
+      if (qty <= 0) return;
+
+      const entry = getEntry(targetLguId);
+      if (days <= 90) entry.expiring90 += qty;
+      else if (days > 90 && days <= 120) entry.expiring120 += qty;
+    });
+
+    return map;
+  }, [baseLguList, dbBatches, inventoryState?.outgoingReleasesList, inventoryState?.incomingGoodsList, commodityTypeFilter]);
+
+  // Table summary totals (sum of all filtered records)
+  const tableTotals = useMemo(() => {
+    let currentStockSum = 0;
+    let capacitySum = 0;
+    let expiring90Sum = 0;
+    let expiring120Sum = 0;
+
+    filteredLGUs.forEach((lgu) => {
+      const caps = getLguCapacities(lgu);
+      const stock = getLguCommodityStock(lgu);
+      const effectiveCap = caps.forFilter(commodityTypeFilter);
+      const effectiveStock = stock.forFilter(commodityTypeFilter);
+      currentStockSum += effectiveStock;
+      capacitySum += effectiveCap;
+
+      const expiry = lguExpiryBreakdown.get(lgu.id) || { expiring90: 0, expiring120: 0 };
+      expiring90Sum += expiry.expiring90;
+      expiring120Sum += expiry.expiring120;
+    });
+
+    const varianceSum = Math.max(0, capacitySum - currentStockSum);
+    const percentage = capacitySum > 0 ? (currentStockSum / capacitySum) * 100 : 0;
+
+    return {
+      currentStockSum,
+      capacitySum,
+      varianceSum,
+      percentage,
+      expiring90Sum,
+      expiring120Sum
+    };
+  }, [filteredLGUs, commodityTypeFilter, lguExpiryBreakdown]);
+
+  const commodityHeaderLabel = useMemo(() => {
+    if (commodityTypeFilter === 'Food Items') {
+      return 'FAMILY FOOD PACKS';
+    }
+    if (commodityTypeFilter === 'Non-Food Items') {
+      return 'NON-FOOD ITEMS (NFIs)';
+    }
+    return 'FAMILY FOOD PACKS & RELIEF GOODS';
+  }, [commodityTypeFilter]);
+
+  const getLguStatusConfig = (effectiveStock: number, effectiveCap: number) => {
+    if (effectiveStock <= 0) {
+      return {
+        label: 'DEPLETED',
+        bgClass: 'bg-gray-100 text-gray-700'
+      };
+    }
+    const pct = effectiveCap > 0 ? (effectiveStock / effectiveCap) * 100 : 100;
+    if (pct >= 80) {
+      return {
+        label: 'ADEQUATE',
+        bgClass: 'bg-[#D9EAD3] text-[#274E13]'
+      };
+    }
+    if (pct >= 50) {
+      return {
+        label: 'MODERATE',
+        bgClass: 'bg-[#FFF2CC] text-[#7F6000]'
+      };
+    }
+    return {
+      label: 'CRITICAL',
+      bgClass: 'bg-[#F4CCCC] text-[#783F04]'
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -720,129 +952,197 @@ export function LGUMonitoring({ inventoryState, currentRole: _currentRole }: LGU
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-xl border border-gray-300 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+            <table className="w-full border-collapse border border-gray-300 text-xs">
+              <thead>
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Municipality</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Province</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Facility</th>
-                  <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase">Released</th>
-                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Deliveries</th>
-                  <th className="px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase">Current Stock</th>
-                  <th className="px-6 py-4 text-center text-xs font-bold text-gray-700 uppercase">Actions</th>
+                  <th
+                    rowSpan={2}
+                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-2.5 uppercase tracking-wider text-xs align-middle"
+                  >
+                    STATUS
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-4 py-2.5 uppercase tracking-wider text-xs align-middle"
+                  >
+                    <span className="block leading-tight">WAREHOUSE</span>
+                    <span className="block leading-tight">NAME</span>
+                  </th>
+                  <th
+                    colSpan={4}
+                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-4 py-1.5 uppercase tracking-wider text-xs"
+                  >
+                    {commodityHeaderLabel}
+                  </th>
+                  <th
+                    className="bg-[#F4CCCC] text-[#783F04] font-extrabold text-center border border-gray-300 px-3 py-1.5 uppercase tracking-wider text-xs whitespace-nowrap min-w-[130px]"
+                  >
+                    <span className="block text-[10px] opacity-80 font-bold">EXPIRING</span>
+                    <span className="block text-xs font-black">≤ 90 DAYS</span>
+                    <span className="block text-[9px] font-medium normal-case opacity-75">(≤ 3 Months)</span>
+                  </th>
+                  <th
+                    className="bg-[#FFE599] text-[#7F6000] font-extrabold text-center border border-gray-300 px-3 py-1.5 uppercase tracking-wider text-xs whitespace-nowrap min-w-[130px]"
+                  >
+                    <span className="block text-[10px] opacity-80 font-bold">EXPIRING</span>
+                    <span className="block text-xs font-black">91–120 DAYS</span>
+                    <span className="block text-[9px] font-medium normal-case opacity-75">(4–6 Months)</span>
+                  </th>
+                  <th
+                    rowSpan={2}
+                    className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-2.5 uppercase tracking-wider text-xs align-middle"
+                  >
+                    ACTIONS
+                  </th>
+                </tr>
+                <tr>
+                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                    PERCENTAGE
+                  </th>
+                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                    CURRENT
+                  </th>
+                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                    CAPACITY
+                  </th>
+                  <th className="bg-[#DCE6F1] text-[#1E3A8A] font-extrabold text-center border border-gray-300 px-3 py-1.5 text-[11px] uppercase tracking-wider">
+                    VARIANCE
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {paginatedLGUs.map((lgu) => (
-                  <tr key={lgu.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div>
-                        <span className="block text-[10px] font-mono text-purple-700 font-semibold leading-tight">{lgu.id}</span>
+              <tbody>
+                {/* TOTAL Row (Summary at the top of the table as per reference report) */}
+                <tr className="bg-[#FFF2CC] border-y-2 border-amber-300 font-bold text-gray-900 select-none">
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-center py-2 px-3 text-xs">
+                    {/* Empty cell */}
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-center py-2 px-4 text-xs font-black uppercase tracking-wider">
+                    TOTAL
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                    {tableTotals.percentage.toFixed(2)}%
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                    {tableTotals.currentStockSum.toLocaleString()}
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                    {tableTotals.capacitySum.toLocaleString()}
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                    {tableTotals.varianceSum > 0 ? tableTotals.varianceSum.toLocaleString() : '-'}
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                    {tableTotals.expiring90Sum > 0 ? tableTotals.expiring90Sum.toLocaleString() : '-'}
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-right py-2 px-3 text-xs font-bold pr-4">
+                    {tableTotals.expiring120Sum > 0 ? tableTotals.expiring120Sum.toLocaleString() : '-'}
+                  </td>
+                  <td className="bg-[#FFF2CC] border border-gray-300 text-center py-2 px-2 text-xs">
+                    {/* Empty cell */}
+                  </td>
+                </tr>
+
+                {/* Data Rows */}
+                {paginatedLGUs.map((lgu) => {
+                  const caps = getLguCapacities(lgu);
+                  const stock = getLguCommodityStock(lgu);
+                  const effectiveCap = caps.forFilter(commodityTypeFilter);
+                  const effectiveStock = stock.forFilter(commodityTypeFilter);
+                  const occupancyPct = effectiveCap > 0 ? (effectiveStock / effectiveCap) * 100 : 0;
+                  const variance = Math.max(0, effectiveCap - effectiveStock);
+                  const statusCfg = getLguStatusConfig(effectiveStock, effectiveCap);
+                  const expiry = lguExpiryBreakdown.get(lgu.id) || { expiring90: 0, expiring120: 0 };
+
+                  return (
+                    <tr key={lgu.id} className="hover:bg-blue-50/30 transition-colors">
+                      <td className={`border border-gray-300 px-3 py-2 text-center text-xs font-bold tracking-wider ${statusCfg.bgClass}`}>
+                        {statusCfg.label}
+                      </td>
+                      <td className="bg-white border border-gray-300 px-4 py-2 text-xs whitespace-nowrap">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             type="button"
                             onClick={() => openDetailModal(lgu)}
-                            className="font-bold text-sm text-gray-900 hover:text-blue-600 hover:underline cursor-pointer text-left"
-                            title="View Transactions & Ledger"
+                            className="font-semibold text-gray-900 hover:text-blue-700 hover:underline cursor-pointer text-left"
+                            title="Click to view detailed stock and FEFO expiry breakdown"
                           >
-                            {lgu.municipality}
+                            {(lgu.province || '').toUpperCase()}, {lgu.municipality}01
                           </button>
                           {lgu.isActive === false && (
-                            <span className="px-1.5 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
+                            <span className="px-1.5 py-0.2 text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 rounded">
                               Archived
                             </span>
                           )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-gray-100 text-gray-700">
-                        {lgu.province}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-600 truncate max-w-xs" title={lgu.lguName}>
-                      {lgu.lguName}
-                    </td>
-                    <td className="px-6 py-4 text-right font-bold text-sm text-blue-600">
-                      {lgu.totalItemsReleased.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 text-center text-xs">
-                      <span className="text-green-700 font-bold">{lgu.completedDeliveries}</span>
-                      <span className="text-gray-400 mx-1">/</span>
-                      <span className="text-gray-700">{lgu.deliveryCount}</span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {(() => {
-                        const caps = getLguCapacities(lgu);
-                        const stock = getLguCommodityStock(lgu);
-                        const effectiveCap = caps.forFilter(commodityTypeFilter);
-                        const effectiveStock = stock.forFilter(commodityTypeFilter);
-                        const occupancyPct = Math.round((effectiveStock / (effectiveCap || 1)) * 100);
-
-                        return (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-sm text-purple-700">
-                                {effectiveStock.toLocaleString()}
-                              </span>
-                              <span className="text-[10px] text-gray-400 font-medium">/ {effectiveCap.toLocaleString()} cap ({occupancyPct}%)</span>
-                            </div>
-                            <div className="text-[10px] text-gray-500 flex items-center gap-2">
-                              <span>Food: <strong>{stock.food.toLocaleString()}</strong>/{caps.food.toLocaleString()}</span>
-                              <span>&bull;</span>
-                              <span>NFI: <strong>{stock.nonFood.toLocaleString()}</strong>/{caps.nonFood.toLocaleString()}</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1 max-w-sm">
-                              {Object.entries(lgu.currentStock || {})
-                                .filter(([cat, qty]) => Number(qty) > 0 && matchesCommodityFilter(cat, commodityTypeFilter))
-                                .map(([cat, qty]) => (
-                                  <span key={cat} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-100 font-medium">
-                                    {cat}: {(Number(qty) || 0).toLocaleString()}
-                                  </span>
-                                ))}
-                              {Object.values(lgu.currentStock || {}).every(v => (Number(v) || 0) <= 0) && (
-                                <span className="text-[10px] text-gray-400 italic">0 in stock</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => openDetailModal(lgu)}
-                          className="p-1.5 hover:bg-blue-50 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
-                          title="View Transactions & Inventory Ledger"
-                        >
-                          <List className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => openEditModal(lgu)}
-                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
-                          title="Edit LGU Info"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        {adminActionsEnabled && (
-                          <button
-                            onClick={() => {
-                              setEmergencyLguId(lgu.id);
-                              setShowEmergencyModal(true);
-                            }}
-                            className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-600 transition cursor-pointer"
-                            title="Emergency Stock Correction"
-                          >
-                            <ShieldAlert className="w-4 h-4" />
-                          </button>
+                      </td>
+                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-800 pr-4">
+                        {occupancyPct.toFixed(2)}%
+                      </td>
+                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-900 pr-4">
+                        {effectiveStock.toLocaleString()}
+                      </td>
+                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-700 pr-4">
+                        {effectiveCap.toLocaleString()}
+                      </td>
+                      <td className="bg-white border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-700">
+                        {variance > 0 ? variance.toLocaleString() : '-'}
+                      </td>
+                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium pr-4">
+                        {expiry.expiring90 > 0 ? (
+                          <span className="font-bold text-rose-800">
+                            {expiry.expiring90.toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="bg-white border border-gray-300 px-3 py-2 text-right text-xs font-medium pr-4">
+                        {expiry.expiring120 > 0 ? (
+                          <span className="font-bold text-amber-800">
+                            {expiry.expiring120.toLocaleString()}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="bg-white border border-gray-300 px-2 py-2 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openDetailModal(lgu)}
+                            className="p-1.5 hover:bg-blue-50 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
+                            title="View Transactions & FEFO Expiry Ledger"
+                          >
+                            <List className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(lgu)}
+                            className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-blue-600 transition cursor-pointer"
+                            title="Edit LGU Info"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          {adminActionsEnabled && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEmergencyLguId(lgu.id);
+                                setShowEmergencyModal(true);
+                              }}
+                              className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-600 transition cursor-pointer"
+                              title="Emergency Stock Correction"
+                            >
+                              <ShieldAlert className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
