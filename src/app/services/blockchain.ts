@@ -800,7 +800,7 @@ export const blockchain = {
       return existing;
     }
 
-    const task = (async () => {
+    const task = (async (): Promise<BlockchainProof> => {
       onStage?.('wallet');
       const signer = await getSigner();
       const contract = new Contract(handoverContractAddress, handoverAbi, signer);
@@ -833,7 +833,7 @@ export const blockchain = {
       return {
         hash: receipt?.hash || tx.hash,
         walletAddress: input.newDriverWallet,
-        mode: 'contract'
+        mode: 'contract' as const
       };
     })();
 
