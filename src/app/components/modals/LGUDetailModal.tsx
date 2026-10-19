@@ -21,7 +21,11 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Layers
+  Layers,
+  Maximize2,
+  Minimize2,
+  Printer,
+  FileText
 } from 'lucide-react';
 import type { OutgoingRelease, IncomingGoods } from '../../hooks/useInventoryState';
 import { normalizeCategoryName, type SynchronizedLgu } from '../../lib/lguSync';
@@ -34,6 +38,7 @@ import {
   getExpiryBadgeConfig,
   type ExpiryTier
 } from '../../lib/expiryConstants';
+import { LGUReportPdfModal } from './LGUReportPdfModal';
 
 export interface LGUTransaction {
   id: string;
@@ -98,6 +103,10 @@ export function LGUDetailModal({
   // Tab switcher: 'transactions' = Flow & Delivery ledger; 'fefo_expiry' = Batches by Expiry Date
   const [activeTab, setActiveTab] = useState<'transactions' | 'fefo_expiry'>('transactions');
 
+  // Window size and export states
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [isExportPdfOpen, setIsExportPdfOpen] = useState(false);
+
   // Filters & Search
   const [timeFilter, setTimeFilter] = useState<'all' | '10days' | '30days' | '90days'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'Incoming' | 'Outgoing'>('all');
@@ -106,7 +115,7 @@ export function LGUDetailModal({
   const [sortBy, setSortBy] = useState<'date_desc' | 'date_asc' | 'expiry_asc' | 'expiry_desc' | 'qty_desc' | 'qty_asc'>('date_desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 6;
+  const pageSize = isMaximized ? 10 : 6;
 
   const [dbLedgerEntries, setDbLedgerEntries] = useState<any[]>([]);
   const [dbBatches, setDbBatches] = useState<any[]>([]);
@@ -913,8 +922,12 @@ export function LGUDetailModal({
   if (!isOpen || !lgu) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-3 sm:p-5 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className={`fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 overflow-y-auto ${isMaximized ? 'p-0' : 'p-3 sm:p-5'}`}>
+      <div className={`bg-white shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
+        isMaximized
+          ? 'w-full h-full max-w-none max-h-none rounded-none'
+          : 'rounded-2xl max-w-5xl w-full max-h-[92vh]'
+      }`}>
         {/* Header */}
         <div className="px-6 py-5 bg-gradient-to-r from-blue-900 via-blue-800 to-indigo-900 text-white flex items-start justify-between gap-4 flex-shrink-0">
           <div className="flex items-start gap-3.5">
@@ -942,15 +955,42 @@ export function LGUDetailModal({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
-            title="Close ledger"
-            aria-label="Close"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExportPdfOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+              title="Export official printable PDF report for this LGU"
+            >
+              <Printer className="w-4 h-4 text-blue-200" />
+              <span className="hidden sm:inline">Export PDF Report</span>
+              <span className="sm:hidden">PDF</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsMaximized((prev) => !prev)}
+              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              title={isMaximized ? 'Restore window size' : 'Maximize to full screen'}
+              aria-label={isMaximized ? 'Restore window size' : 'Maximize window'}
+            >
+              {isMaximized ? (
+                <Minimize2 className="w-5 h-5" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              title="Close ledger"
+              aria-label="Close"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Scrollable Body */}
@@ -1741,15 +1781,44 @@ export function LGUDetailModal({
           <p className="text-xs text-gray-500">
             DSWD Disaster Relief Supply Chain Ledger &bull; {lgu.municipality}, {lgu.province}
           </p>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-gray-800 hover:bg-gray-900 text-white font-bold text-xs transition cursor-pointer"
-          >
-            Close
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExportPdfOpen(true)}
+              className="px-4 py-2 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+              title="Export official printable PDF report for this LGU"
+            >
+              <Printer className="w-4 h-4 text-blue-600" />
+              <span>Export PDF Report</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2 rounded-xl bg-gray-800 hover:bg-gray-900 text-white font-bold text-xs transition cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Official LGU Disaster Relief & Inventory PDF Report Modal */}
+      {isExportPdfOpen && (
+        <LGUReportPdfModal
+          isOpen={isExportPdfOpen}
+          onClose={() => setIsExportPdfOpen(false)}
+          lgu={lgu}
+          allTransactions={allTransactions}
+          allLots={allLots}
+          inventoryDates={inventoryDates}
+          fefoMetrics={fefoMetrics}
+          totalOnHand={totalOnHand}
+          totalInflow={totalInflow}
+          totalOutflow={totalOutflow}
+          capacityPercent={capacityPercent}
+          maxStockCapacity={maxStockCapacity}
+        />
+      )}
     </div>
   );
 }
