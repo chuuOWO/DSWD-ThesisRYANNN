@@ -135,7 +135,15 @@ export const authApi = {
             provisionSmartAccountAddress(targetId, targetEmail)
               .then((autoWallet) => {
                 if (autoWallet) {
-                  supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', targetId).catch(() => {});
+                  supabase
+                    .from('profiles')
+                    .update({ wallet_address: autoWallet })
+                    .eq('id', targetId)
+                    .then(({ error: autoUpdateErr }) => {
+                      if (autoUpdateErr) {
+                        console.warn('Auto update wallet address warning:', autoUpdateErr.message);
+                      }
+                    });
                 }
               })
               .catch((autoErr) => console.warn('Auto provision Sepolia wallet warning:', autoErr));
@@ -173,7 +181,15 @@ export const authApi = {
             provisionSmartAccountAddress(targetId, targetEmail)
               .then((autoWallet) => {
                 if (autoWallet) {
-                  supabase.from('profiles').update({ wallet_address: autoWallet }).eq('id', targetId).catch(() => {});
+                  supabase
+                    .from('profiles')
+                    .update({ wallet_address: autoWallet })
+                    .eq('id', targetId)
+                    .then(({ error: autoUpdateErr }) => {
+                      if (autoUpdateErr) {
+                        console.warn('Auto update wallet address warning:', autoUpdateErr.message);
+                      }
+                    });
                 }
               })
               .catch((autoErr) => console.warn('Auto provision Sepolia wallet warning:', autoErr));
@@ -326,15 +342,16 @@ export const authApi = {
     const computedFullName = payload.fullName || `${payload.firstName || ''} ${payload.lastName || ''}`.trim() || 'DSWD Officer';
 
     // 1. Prevent duplicate accounts with the same email or wallet in parallel
-    const checks: Promise<any>[] = [
+    const emailCheck = Promise.resolve(
       supabase.from('profiles').select('id').ilike('email', normalizedEmail).maybeSingle()
-    ];
-    if (payload.walletAddress && payload.walletAddress.trim()) {
-      checks.push(
-        supabase.from('profiles').select('id').ilike('wallet_address', payload.walletAddress.trim().toLowerCase()).maybeSingle()
-      );
-    }
-    const [existingEmailRes, existingWalletRes] = await Promise.all(checks);
+    );
+    const walletCheck = (payload.walletAddress && payload.walletAddress.trim())
+      ? Promise.resolve(
+          supabase.from('profiles').select('id').ilike('wallet_address', payload.walletAddress.trim().toLowerCase()).maybeSingle()
+        )
+      : Promise.resolve({ data: null, error: null });
+
+    const [existingEmailRes, existingWalletRes] = await Promise.all([emailCheck, walletCheck]);
 
     if (existingEmailRes?.data) {
       throw new Error('An account with this email address already exists. Please sign in or use a different email.');
