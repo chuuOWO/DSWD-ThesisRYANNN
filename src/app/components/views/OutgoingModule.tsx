@@ -561,6 +561,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
   const approvedCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus === 'Approved').length;
   const activeReleaseCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus && ['Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus)).length;
   const acceptedCount = (outgoingReleasesList || []).filter(r => r?.deliveryStatus && (r.deliveryStatus === 'Accepted' || r.deliveryStatus === 'Distributed')).length;
+  const outgoingDiscrepancies = (discrepancyReports || []).filter(report => report.reportType === 'Outgoing');
   const renderTableContent = () => (
     <table className="w-full min-w-[1300px]">
       <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
