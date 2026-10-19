@@ -24,6 +24,7 @@ interface InventoryState {
   updateIncomingGoods: (id: string, patch: Partial<IncomingGoods>) => void;
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
+  cancelIncomingGoods?: (id: string) => Promise<{ ok: boolean; message?: string }> | void;
   requestIncomingCorrection: (id: string, note: string) => void;
 }
 
@@ -37,7 +38,8 @@ const statusStyles: Record<IncomingStatus, string> = {
   'Pending Verification': 'bg-yellow-100 text-yellow-800',
   Verified: 'bg-green-100 text-green-700',
   'Correction Requested': 'bg-orange-100 text-orange-700',
-  Rejected: 'bg-red-100 text-red-700'
+  Rejected: 'bg-red-100 text-red-700',
+  Cancelled: 'bg-gray-100 text-gray-500 line-through'
 };
 
 const statusLabels: Record<IncomingStatus, string> = {
@@ -45,7 +47,8 @@ const statusLabels: Record<IncomingStatus, string> = {
   'Pending Verification': 'For Verification',
   Verified: 'Verified & Stocked',
   'Correction Requested': 'Correction Filed',
-  Rejected: 'Rejected'
+  Rejected: 'Rejected',
+  Cancelled: 'Cancelled'
 };
 
 const canEdit = (status: IncomingStatus) => ['Draft', 'Pending Verification', 'Correction Requested'].includes(status);
@@ -60,7 +63,7 @@ const friendlyAuditDetails = (details = '') =>
     .replace(/Pre-tokenization record/gi, 'Draft receiving record')
     .replace(/manifest hash/gi, 'delivery reference');
 
-type IncomingAction = 'submit' | 'verify' | 'correction' | 'message';
+type IncomingAction = 'verify' | 'correction' | 'cancel' | 'message';
 
 interface IncomingActionModalState {
   type: IncomingAction;
@@ -76,8 +79,8 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     inventoryBatchesList = [],
     addIncomingGoods,
     updateIncomingGoods,
-    submitIncomingForVerification,
     verifyIncomingReceipt,
+    cancelIncomingGoods,
     requestIncomingCorrection,
     warehousesList = [],
     supplySourcesList = [],
@@ -185,15 +188,21 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     if (!actionModal?.item) return;
     const item = actionModal.item;
 
-    if (actionModal.type === 'submit') {
-      submitIncomingForVerification(item.id);
-      showResult(`Incoming record ${item.id} has been submitted for ${item.destinationType === 'LGU' ? item.destination + ' LGU' : 'warehouse'} checker review.`);
-      return;
-    }
-
     if (actionModal.type === 'verify') {
       verifyIncomingReceipt(item.id);
       showResult(`Physical receipt for ${item.id} (${item.quantity.toLocaleString()} ${item.unitType} of ${item.fnfiCategory}) confirmed and added to ${item.destinationType === 'LGU' ? item.destination + ' LGU' : 'warehouse'} stock.`);
+      return;
+    }
+
+    if (actionModal.type === 'cancel') {
+      if (item.status === 'Verified') {
+        showResult('Verified stock has already been added to inventory and cannot be cancelled.');
+        return;
+      }
+      if (cancelIncomingGoods) {
+        await cancelIncomingGoods(item.id);
+      }
+      showResult(`Incoming delivery record ${item.id} has been cancelled.`);
       return;
     }
 
@@ -239,7 +248,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   }, [filteredGoods, currentPage, pageSize]);
 
   const postedCount = incomingGoodsList.filter(item => item.status === 'Verified').length;
-  const pendingCount = incomingGoodsList.filter(item => item.status === 'Pending Verification').length;
+  const pendingCount = incomingGoodsList.filter(item => item.status === 'Pending Verification' || item.status === 'Draft').length;
   const warehouseTotalQty = incomingGoodsList
     .filter(item => item.destinationType === 'Warehouse' && item.status === 'Verified')
     .reduce((sum, item) => sum + item.quantity, 0);
@@ -312,10 +321,11 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   // Verification lifecycle pipeline counts
   const pipelineStats = useMemo(() => {
     const draft = incomingGoodsList.filter(i => i.status === 'Draft').length;
-    const pending = incomingGoodsList.filter(i => i.status === 'Pending Verification').length;
+    const pending = incomingGoodsList.filter(i => i.status === 'Pending Verification' || i.status === 'Draft').length;
     const verified = incomingGoodsList.filter(i => i.status === 'Verified').length;
     const correction = incomingGoodsList.filter(i => i.status === 'Correction Requested').length;
-    return { draft, pending, verified, correction };
+    const cancelled = incomingGoodsList.filter(i => i.status === 'Cancelled').length;
+    return { draft, pending, verified, correction, cancelled };
   }, [incomingGoodsList]);
 
   return (
@@ -504,12 +514,16 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                         </span>
                         <p className="text-xs text-gray-500">Verified: {item.dateReceived}</p>
                       </div>
-                    ) : item.status === 'Pending Verification' ? (
+                    ) : item.status === 'Pending Verification' || item.status === 'Draft' ? (
                       <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-50 text-yellow-700 border border-yellow-200">
                         Awaiting Physical Check
                       </span>
+                    ) : item.status === 'Cancelled' ? (
+                      <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-500 border border-gray-200 line-through">
+                        Cancelled
+                      </span>
                     ) : (
-                      <p className="text-sm text-gray-400">Draft Record</p>
+                      <p className="text-sm text-gray-400">{item.status}</p>
                     )}
                   </td>
                   <td className="px-4 py-4">
@@ -531,14 +545,22 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           <Edit className="w-3 h-3" /> Edit
                         </button>
                       )}
-                      {item.status === 'Draft' && (
-                        <button onClick={() => openActionModal('submit', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-yellow-100 text-yellow-800 rounded-lg hover:bg-yellow-200">
-                          <FileCheck2 className="w-3 h-3" /> Submit
+                      {['Draft', 'Pending Verification'].includes(item.status) && (
+                        <button
+                          onClick={() => openActionModal('verify', item)}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-xs transition cursor-pointer"
+                          title="Stock and verify physical incoming delivery"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" /> Stock and Verify
                         </button>
                       )}
-                      {item.status === 'Pending Verification' && (
-                        <button onClick={() => openActionModal('verify', item)} className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200">
-                          <CheckCircle className="w-3 h-3" /> Verify & Stock
+                      {item.status !== 'Verified' && item.status !== 'Cancelled' && item.status !== 'Rejected' && (
+                        <button
+                          onClick={() => openActionModal('cancel', item)}
+                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg border border-rose-200 transition cursor-pointer"
+                          title="Cancel incoming stock delivery"
+                        >
+                          <X className="w-3.5 h-3.5" /> Cancel
                         </button>
                       )}
                       {['Verified', 'Correction Requested'].includes(item.status) && (
@@ -839,32 +861,47 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">
-                  {actionModal.type === 'submit' && 'Submit for Checking'}
-                  {actionModal.type === 'verify' && 'Confirm Physical Receipt & Stock'}
+                  {actionModal.type === 'verify' && 'Stock & Verify Physical Receipt'}
+                  {actionModal.type === 'cancel' && 'Cancel Incoming Stock Intake'}
                   {actionModal.type === 'correction' && 'File Correction Record'}
                 </h2>
                 {actionModal.item && <p className="text-sm text-gray-500 mt-1">{actionModal.item.id} | {actionModal.item.fnfiCategory}</p>}
               </div>
-              <button type="button" onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100">
+              <button type="button" onClick={closeActionModal} className="p-2 rounded-lg hover:bg-gray-100 cursor-pointer">
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
 
             <div className="p-6 space-y-4">
-              {actionModal.type === 'submit' && (
-                <p className="text-sm text-gray-700">
-                  {actionModal.item?.destinationType === 'LGU'
-                    ? `Send this direct incoming delivery for ${actionModal.item.destination} for review?`
-                    : 'Send this incoming delivery to the warehouse checker for review?'}
-                </p>
+              {actionModal.type === 'verify' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-700">
+                    {actionModal.item?.destinationType === 'LGU'
+                      ? `Confirm physical receipt of this delivery? Upon verification, ${actionModal.item.quantity.toLocaleString()} ${actionModal.item.unitType} of ${actionModal.item.fnfiCategory} will be immediately stocked into ${actionModal.item.destination} LGU inventory.`
+                      : `Confirm physical receipt of this delivery? Upon verification, ${actionModal.item?.quantity.toLocaleString()} ${actionModal.item?.unitType} of ${actionModal.item?.fnfiCategory} will be immediately stocked into warehouse inventory.`}
+                  </p>
+                  <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
+                    <p className="font-semibold">Single-step confirmation</p>
+                    <p className="mt-0.5 text-blue-700">This intake will be permanently verified and recorded into inventory ledger.</p>
+                  </div>
+                </div>
               )}
 
-              {actionModal.type === 'verify' && (
-                <p className="text-sm text-gray-700">
-                  {actionModal.item?.destinationType === 'LGU'
-                    ? `Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into ${actionModal.item.destination} LGU inventory.`
-                    : 'Confirm physical receipt of this delivery? Upon verification, this quantity will be immediately stocked into warehouse inventory.'}
-                </p>
+              {actionModal.type === 'cancel' && (
+                <div className="space-y-3">
+                  <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2.5">
+                    <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-bold text-rose-900">Confirm Stock Intake Cancellation</p>
+                      <p className="text-xs text-rose-700 mt-1">
+                        Are you sure you want to cancel incoming delivery <span className="font-semibold">{actionModal.item?.id}</span> ({actionModal.item?.quantity.toLocaleString()} {actionModal.item?.unitType} of {actionModal.item?.fnfiCategory}) for {actionModal.item?.destination}?
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    This incoming record will be marked as Cancelled and will not be stocked into inventory. Note: Once verified and stocked, inventory records cannot be cancelled.
+                  </p>
+                </div>
               )}
 
               {actionModal.type === 'correction' && (
@@ -884,16 +921,20 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
               <button
                 type="button"
                 onClick={closeActionModal}
-                className="flex-1 px-5 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50"
+                className="flex-1 px-5 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm cursor-pointer"
               >
-                Cancel
+                {actionModal.type === 'cancel' ? 'Keep Delivery' : 'Cancel'}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmAction}
-                className="flex-1 px-5 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700"
+                className={`flex-1 px-5 py-2.5 font-semibold rounded-lg text-sm text-white shadow-xs cursor-pointer ${
+                  actionModal.type === 'cancel'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                Confirm
+                {actionModal.type === 'cancel' ? 'Confirm Cancellation' : actionModal.type === 'verify' ? 'Stock and Verify' : 'Confirm'}
               </button>
             </div>
           </div>

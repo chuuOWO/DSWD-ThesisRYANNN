@@ -41,7 +41,7 @@ export interface InventoryItem {
 export type UserRole = 'Admin' | 'Receiver' | 'LGUReceiver' | 'Unregistered';
 
 export type WarehouseName = string;
-export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected';
+export type IncomingStatus = 'Draft' | 'Pending Verification' | 'Verified' | 'Correction Requested' | 'Rejected' | 'Cancelled';
 export type OutgoingStatus = 'Draft' | 'Allocating' | 'Approved' | 'Packed' | 'Released' | 'In Transit' | 'Delivered' | 'Accepted' | 'Distributed' | 'Correction Requested' | 'Cancelled';
 export type { PriorityColor, PriorityLevel };
 
@@ -209,7 +209,7 @@ const isMainWarehouse = (warehouse: string): warehouse is WarehouseName =>
   normalizeWarehouseName(warehouse) !== null;
 
 const isIncomingStatus = (status: unknown): status is IncomingStatus =>
-  typeof status === 'string' && ['Draft', 'Pending Verification', 'Verified', 'Correction Requested', 'Rejected'].includes(status);
+  typeof status === 'string' && ['Draft', 'Pending Verification', 'Verified', 'Correction Requested', 'Rejected', 'Cancelled'].includes(status);
 
 const isOutgoingStatus = (status: unknown): status is OutgoingStatus =>
   typeof status === 'string' && ['Draft', 'Allocating', 'Approved', 'Packed', 'Released', 'In Transit', 'Delivered', 'Accepted', 'Distributed', 'Correction Requested', 'Cancelled'].includes(status);
@@ -1143,10 +1143,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }
     const cleanId = rawRis.toUpperCase();
     const isLgu = newGoods.destinationType === 'LGU';
-    const initialStatus: IncomingStatus = 'Draft';
+    const initialStatus: IncomingStatus = 'Pending Verification';
     const auditMessage = isLgu
-      ? `Incoming direct delivery to ${newGoods.destination} recorded under ${cleanId} as editable draft awaiting confirmation.`
-      : `Incoming manifest ${cleanId} saved as editable draft awaiting physical warehouse inspection.`;
+      ? `Incoming direct delivery to ${newGoods.destination} recorded under ${cleanId} awaiting physical verification & stock.`
+      : `Incoming manifest ${cleanId} recorded awaiting physical warehouse verification & stock.`;
 
     const goodsWithId: IncomingGoods = {
       ...newGoods,
@@ -1317,8 +1317,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }).catch(err => console.warn('appendStockLedger error:', err));
     }
 
-    setIncomingGoodsList(prev => prev.map(item => item.id === id && item.status === 'Pending Verification'
-      ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified', `Physical count and manifest details verified by ${currentActor.name}.`), ...item.auditTrail] }
+    setIncomingGoodsList(prev => prev.map(item => item.id === id && (item.status === 'Pending Verification' || item.status === 'Draft')
+      ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified & Stocked', `Physical count and manifest details verified and stocked into inventory by ${currentActor.name}.`), ...item.auditTrail] }
       : item));
     backendApi.updateIncoming(id, {
       status: 'Verified',
@@ -1341,6 +1341,43 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       details: `Verified physical incoming manifest ${id} by ${currentActor.name}. Physical count and warehouse inventory verified.`,
       metadata: { manifestNumber: id, verifiedBy: currentActor.name }
     }).catch(() => {});
+  };
+
+  const cancelIncomingGoods = async (id: string): Promise<{ ok: boolean; message?: string }> => {
+    const target = incomingGoodsList.find(item => item.id === id);
+    if (!target) return { ok: false, message: 'Incoming delivery record not found.' };
+    if (target.status === 'Verified') {
+      return { ok: false, message: 'Verified and stocked inventory cannot be cancelled.' };
+    }
+
+    setIncomingGoodsList(prev => prev.map(item => item.id === id
+      ? {
+          ...item,
+          status: 'Cancelled' as IncomingStatus,
+          auditTrail: [audit('Cancelled', `Incoming delivery intake cancelled by ${currentActor.name}.`), ...item.auditTrail]
+        }
+      : item
+    ));
+
+    try {
+      await backendApi.updateIncoming(id, { status: 'Cancelled' });
+      backendApi.logActivity({
+        action: 'INCOMING_CANCELLED',
+        entityType: 'IncomingGoods',
+        entityId: id,
+        actorId: currentActor.id,
+        actorName: currentActor.name,
+        actorEmail: currentActor.email,
+        actorRole: currentActor.role,
+        actorWallet: currentActor.wallet,
+        details: `Cancelled incoming delivery ${id} by ${currentActor.name}.`,
+        metadata: { manifestNumber: target.manifestNumber || id, quantity: target.quantity }
+      }).catch(() => {});
+      return { ok: true };
+    } catch (err: any) {
+      logBackendError('Cancel incoming manifest')(err);
+      return { ok: false, message: err?.message || 'Failed to update cancellation in database.' };
+    }
   };
 
   const mintBatchToken = async (_id: string, _actorRole: UserRole = 'Admin') => {
@@ -2414,6 +2451,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     updateIncomingGoods,
     submitIncomingForVerification,
     verifyIncomingReceipt,
+    cancelIncomingGoods,
     mintBatchToken,
     requestIncomingCorrection,
     addOutgoingRelease,

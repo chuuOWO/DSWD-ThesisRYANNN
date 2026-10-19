@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { X, Calendar, Package, AlertCircle, Building2, Truck } from 'lucide-react';
+import { X, Calendar, Package, AlertCircle, Building2 } from 'lucide-react';
 import { sanitizeNumbersOnly, sanitizeSlipReference } from '../../lib/inputValidation';
 import type { SupplySourceRecord, WarehouseRecord, KitTypeRecord, LguRecord, ProvinceRecord } from '../../services/backendApi';
 import { DEFAULT_KIT_NAMES, DEFAULT_WAREHOUSES, DEFAULT_SUPPLY_SOURCES, DEFAULT_PANAY_LGUS, REGIONAL_PROVINCES } from '../../lib/lguMatching';
@@ -519,44 +519,6 @@ export function AddIncomingGoodsModal({
                 {errors.source}
               </p>
             )}
-          </div>
-
-          {/* Transportation Mode */}
-          <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">
-              Transportation Mode
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => handleChange('transportMode', 'Delivery')}
-                className={`px-4 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-                  (formData.transportMode || 'Delivery') === 'Delivery'
-                    ? 'bg-[#2500ba] text-white shadow-xs'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Truck className="w-4 h-4" />
-                <span>Supplier Delivery</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleChange('transportMode', 'Pick up')}
-                className={`px-4 py-2.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
-                  formData.transportMode === 'Pick up'
-                    ? 'bg-[#2500ba] text-white shadow-xs'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Package className="w-4 h-4" />
-                <span>DSWD Pick-up</span>
-              </button>
-            </div>
-            <p className="text-[11px] text-gray-500 mt-1">
-              {formData.transportMode === 'Pick up'
-                ? 'DSWD logistics fleet retrieved goods from donor/vendor source location.'
-                : 'Freight shipment delivered directly to warehouse/facility by donor or vendor.'}
-            </p>
           </div>
 
           {/* Destination Selection (Then destination is picked) */}
