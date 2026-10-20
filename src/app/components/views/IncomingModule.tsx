@@ -694,7 +694,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           <X className="w-3.5 h-3.5" /> Cancel
                         </button>
                       )}
-                      {(inventoryState.adminActionsEnabled || currentRole === 'regional_admin' || currentRole === 'warehouse_staff') && item.status !== 'Cancelled' && item.status !== 'Rejected' && (
+                      {(inventoryState.adminActionsEnabled || currentRole === 'Admin') && item.status !== 'Cancelled' && item.status !== 'Rejected' && (
                         <button
                           onClick={() => openActionModal('correction', item)}
                           className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer"
