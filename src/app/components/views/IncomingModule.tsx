@@ -620,7 +620,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                       </span>
                     </div>
                     {item.verifiedBy && <p className="text-xs text-gray-500 mt-1.5">Verified by {item.verifiedBy}</p>}
-                    {item.correctionNote && (
+                    {item.status !== 'Verified' && item.correctionNote && (
                       <div className="mt-2 p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs shadow-xs max-w-xs">
                         <div className="flex items-center gap-1.5 font-bold text-amber-800">
                           <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />

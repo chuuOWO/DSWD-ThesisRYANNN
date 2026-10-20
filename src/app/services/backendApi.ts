@@ -2167,7 +2167,7 @@ export const backendApi = {
 
     const query = isUuid(manifestNumber)
       ? supabase.from('incoming_manifests').update(updates).eq('id', manifestNumber)
-      : supabase.from('incoming_manifests').update(updates).or(`manifest_number.eq.${manifestNumber},id.eq.${manifestNumber}`);
+      : supabase.from('incoming_manifests').update(updates).eq('manifest_number', manifestNumber);
 
     const { error } = await query;
 

@@ -237,6 +237,7 @@ type IncomingManifestRow = {
   minted_at?: string | null;
   wallet_address?: string | null;
   correction_note?: string | null;
+  verified_by?: string | null;
   created_at?: string | null;
   supply_source_id?: string | null;
   kit_type_id?: string | null;
@@ -310,7 +311,8 @@ type OutgoingRequestRow = {
 
 export const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => {
   const item = {
-    id: row.manifest_number ?? row.id,
+    id: row.id || row.manifest_number || `INC-${Date.now()}`,
+    manifestNumber: row.manifest_number ?? row.id,
     dateReceived: row.date_received ?? '',
     fnfiCategory: row.category ?? '',
     quantity: row.quantity ?? 0,
@@ -326,6 +328,7 @@ export const mapIncomingManifest = (row: IncomingManifestRow): IncomingGoods => 
     blockchainTxHash: row.tx_hash ?? undefined,
     mintedAt: row.minted_at ?? undefined,
     correctionNote: row.correction_note ?? undefined,
+    verifiedBy: row.verified_by ?? undefined,
     supplySourceId: row.supply_source_id ?? undefined,
     kitTypeId: row.kit_type_id ?? undefined,
     destinationWarehouseId: row.destination_warehouse_id ?? undefined,
@@ -1551,7 +1554,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   };
 
   const verifyIncomingReceipt = (id: string) => {
-    const target = incomingGoodsList.find(item => item.id === id);
+    const target = incomingGoodsList.find(item => item.id === id || item.manifestNumber === id);
     const wasAlreadyVerified = Boolean(target?.auditTrail?.some(a => a.action === 'Verified & Stocked'));
 
     if (target && !wasAlreadyVerified) {
@@ -1592,10 +1595,18 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }).catch(err => console.warn('appendStockLedger error:', err));
     }
 
-    setIncomingGoodsList(prev => prev.map(item => (item.id === id || item.manifestNumber === id) && (item.status === 'Pending Verification' || item.status === 'Draft' || item.status === 'Correction Requested')
-      ? { ...item, status: 'Verified', correctionNote: undefined, verifiedBy: currentActor.name, auditTrail: [audit('Verified & Stocked', `Physical count and manifest details verified and stocked into inventory by ${currentActor.name}.`), ...item.auditTrail] }
+    setIncomingGoodsList(prev => prev.map(item => (item.id === id || item.manifestNumber === id)
+      ? {
+          ...item,
+          status: 'Verified',
+          correctionNote: undefined,
+          verifiedBy: currentActor.name,
+          auditTrail: [audit('Verified & Stocked', `Physical count and manifest details verified and stocked into inventory by ${currentActor.name}.`), ...item.auditTrail]
+        }
       : item));
-    backendApi.updateIncoming(id, {
+
+    const targetKey = target?.id || id;
+    backendApi.updateIncoming(targetKey, {
       status: 'Verified',
       verifiedBy: currentActor.name,
       verifiedByProfileId: currentActor.id,
@@ -1604,6 +1615,15 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       logBackendError('Verify incoming manifest')(error);
       setIntegrationMode('mock');
     });
+
+    if (target?.manifestNumber && target.manifestNumber !== targetKey) {
+      backendApi.updateIncoming(target.manifestNumber, {
+        status: 'Verified',
+        verifiedBy: currentActor.name,
+        verifiedByProfileId: currentActor.id,
+        correctionNote: null as any
+      }).catch(() => {});
+    }
 
     backendApi.logActivity({
       action: 'INCOMING_VERIFIED',
@@ -2668,7 +2688,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         if (batches) setInventoryBatchesList(batches);
         setIncomingGoodsList(incoming.map(row => {
           const mapped = mapIncomingManifest(row);
-          if (!mapped.correctionNote) {
+          if (!mapped.correctionNote && mapped.status === 'Correction Requested') {
             const matchedDisc = discList.find(d => d.reportType === 'Incoming' && (d.manifestNumber === mapped.id || d.manifestNumber === row.manifest_number));
             if (matchedDisc) mapped.correctionNote = matchedDisc.note;
           }
@@ -2676,7 +2696,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         }));
         setOutgoingReleasesList(outgoing.map(row => {
           const mapped = mapOutgoingRequest(row);
-          if (!mapped.correctionNote) {
+          if (!mapped.correctionNote && mapped.status === 'Correction Requested') {
             const matchedDisc = discList.find(d => d.reportType === 'Outgoing' && (d.drNumber === mapped.drNumber || d.drNumber === row.dr_number));
             if (matchedDisc) mapped.correctionNote = matchedDisc.note;
           }
