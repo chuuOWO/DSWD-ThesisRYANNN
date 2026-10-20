@@ -1233,9 +1233,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       ? `Incoming direct delivery to ${newGoods.destination} recorded under ${cleanId} awaiting physical verification & stock.`
       : `Incoming manifest ${cleanId} recorded awaiting physical warehouse verification & stock.`;
 
+    const uniqueLocalId = `INC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const goodsWithId: IncomingGoods = {
       ...newGoods,
-      id: cleanId,
+      id: uniqueLocalId,
       manifestNumber: cleanId,
       status: initialStatus,
       manifestHash: makeManifestHash(newGoods),
@@ -1254,7 +1255,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       kitTypeId: newGoods.kitTypeId,
       destinationWarehouseId: newGoods.destinationWarehouseId,
       destinationLguId: newGoods.destinationLguId
-    }).then(() => {
+    }).then((created) => {
+      if (created?.id) {
+        setIncomingGoodsList(prev => prev.map(item => item.id === uniqueLocalId ? { ...item, id: created.id } : item));
+      }
       setIntegrationMode('backend');
     }).catch(error => {
       logBackendError('Create incoming manifest')(error);
@@ -1478,8 +1482,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       };
     }));
 
-    // Adjust stock difference if quantity changed on verified manifest
-    if (existing && existing.status === 'Verified' && patch.quantity !== undefined && patch.quantity !== existing.quantity) {
+    // Adjust stock difference if quantity changed on verified manifest (or corrected manifest previously verified)
+    const wasVerified = existing && (existing.status === 'Verified' || existing.auditTrail?.some(a => a.action === 'Verified & Stocked'));
+    if (existing && wasVerified && patch.quantity !== undefined && patch.quantity !== existing.quantity) {
       const diff = patch.quantity - existing.quantity;
       const cat = patch.fnfiCategory || existing.fnfiCategory;
       const dest = patch.destination || existing.destination;
@@ -1547,16 +1552,18 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
 
   const verifyIncomingReceipt = (id: string) => {
     const target = incomingGoodsList.find(item => item.id === id);
-    if (target && target.destinationType === 'LGU') {
-      addLguStock(target.destination, target.fnfiCategory, target.quantity);
-    } else if (target && target.destinationType === 'Warehouse') {
-      const whName = isMainWarehouse(target.destination)
-        ? target.destination
-        : (normalizeWarehouseName(target.destination) || 'Oton Main Warehouse');
-      addStock(target.fnfiCategory, whName as WarehouseName, target.quantity);
-    }
+    const wasAlreadyVerified = Boolean(target?.auditTrail?.some(a => a.action === 'Verified & Stocked'));
 
-    if (target) {
+    if (target && !wasAlreadyVerified) {
+      if (target.destinationType === 'LGU') {
+        addLguStock(target.destination, target.fnfiCategory, target.quantity);
+      } else if (target.destinationType === 'Warehouse') {
+        const whName = isMainWarehouse(target.destination)
+          ? target.destination
+          : (normalizeWarehouseName(target.destination) || 'Oton Main Warehouse');
+        addStock(target.fnfiCategory, whName as WarehouseName, target.quantity);
+      }
+
       backendApi.createInventoryBatch({
         batchTokenId: `BATCH-${target.manifestNumber || target.id}`,
         incomingManifestId: target.id,
@@ -1585,7 +1592,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }).catch(err => console.warn('appendStockLedger error:', err));
     }
 
-    setIncomingGoodsList(prev => prev.map(item => item.id === id && (item.status === 'Pending Verification' || item.status === 'Draft')
+    setIncomingGoodsList(prev => prev.map(item => item.id === id && (item.status === 'Pending Verification' || item.status === 'Draft' || item.status === 'Correction Requested')
       ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified & Stocked', `Physical count and manifest details verified and stocked into inventory by ${currentActor.name}.`), ...item.auditTrail] }
       : item));
     backendApi.updateIncoming(id, {

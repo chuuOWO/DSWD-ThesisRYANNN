@@ -2165,10 +2165,11 @@ export const backendApi = {
       verified_by_profile_id: isUuid(payload.verifiedByProfileId) ? payload.verifiedByProfileId : undefined
     });
 
-    const { error } = await supabase
-      .from('incoming_manifests')
-      .update(updates)
-      .eq('manifest_number', manifestNumber);
+    const query = isUuid(manifestNumber)
+      ? supabase.from('incoming_manifests').update(updates).eq('id', manifestNumber)
+      : supabase.from('incoming_manifests').update(updates).or(`manifest_number.eq.${manifestNumber},id.eq.${manifestNumber}`);
+
+    const { error } = await query;
 
     throwIfError(error, 'Failed to update incoming manifest');
     return { ok: true };

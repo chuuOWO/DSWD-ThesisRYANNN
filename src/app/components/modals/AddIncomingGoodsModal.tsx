@@ -290,8 +290,20 @@ export function AddIncomingGoodsModal({
               <Package className="w-6 h-6 text-blue-600" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{mode === 'edit' ? 'Edit Incoming Delivery' : 'Add Incoming Goods'}</h2>
-              <p className="text-sm text-gray-600">{mode === 'edit' ? 'Update incoming FNFI delivery details' : 'Add new FNFI items to warehouse or LGU inventory'}</p>
+              <h2 className="text-xl font-bold text-gray-900">
+                {mode === 'edit'
+                  ? 'Edit Incoming Delivery'
+                  : initialData?.manifestNumber
+                  ? 'Add Additional Lot / Item (Same RIS)'
+                  : 'Add Incoming Goods'}
+              </h2>
+              <p className="text-sm text-gray-600">
+                {mode === 'edit'
+                  ? 'Update incoming FNFI delivery details'
+                  : initialData?.manifestNumber
+                  ? `Register another commodity lot under RIS #${initialData.manifestNumber}`
+                  : 'Add new FNFI items to warehouse or LGU inventory'}
+              </p>
             </div>
           </div>
           <button
@@ -341,16 +353,27 @@ export function AddIncomingGoodsModal({
             <input
               type="text"
               value={formData.manifestNumber || ''}
+              disabled={mode === 'edit' || Boolean(initialData?.manifestNumber && mode === 'add')}
               onChange={(e) => handleChange('manifestNumber', sanitizeSlipReference(e.target.value.toUpperCase()))}
               placeholder="e.g., RIS-1171-290, RIS-2026-001"
               className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm ${
-                errors.manifestNumber ? 'border-red-500 bg-red-50/40' : 'border-gray-300'
+                (mode === 'edit' || (initialData?.manifestNumber && mode === 'add'))
+                  ? 'bg-gray-100 text-gray-700 cursor-not-allowed border-gray-200 font-bold'
+                  : errors.manifestNumber ? 'border-red-500 bg-red-50/40' : 'border-gray-300'
               }`}
             />
             {errors.manifestNumber ? (
               <p className="text-red-500 text-xs mt-1 flex items-center gap-1 font-medium">
                 <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                 {errors.manifestNumber}
+              </p>
+            ) : mode === 'edit' ? (
+              <p className="text-xs text-blue-600 mt-1 font-medium">
+                RIS control number is locked to preserve official document reference integrity.
+              </p>
+            ) : initialData?.manifestNumber ? (
+              <p className="text-xs text-emerald-700 mt-1 font-medium">
+                Linked to existing RIS document #{initialData.manifestNumber}. New item will be recorded under this slip.
               </p>
             ) : (
               <p className="text-xs text-gray-500 mt-1">
