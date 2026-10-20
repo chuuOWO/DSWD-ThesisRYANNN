@@ -34,6 +34,7 @@ import { FiveDotsLoadingModal } from '../design/FiveDotsLoadingModal';
 import { MobileSettingsModal } from '../modals/MobileSettingsModal';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import { formatUserErrorMessage } from '../../lib/errorUtils';
+import { createQrDetector } from '../../lib/qrDetector';
 import { formatShipmentReference, formatOutgoingReference, isReplenishCode, formatReplenishReference } from '../../lib/referenceCodeHelper';
 
 interface LGUReceiverPageProps {
@@ -883,13 +884,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
-      const Detector = (window as BarcodeDetectorWindow).BarcodeDetector;
-      if (!Detector) {
-        setCameraMessage('Point camera at shipment QR code.');
-        return;
-      }
-
-      detectorRef.current = new Detector({ formats: ['qr_code'] });
+      detectorRef.current = createQrDetector();
       let isDetecting = false;
       let lastScanTime = 0;
       const scan = async () => {

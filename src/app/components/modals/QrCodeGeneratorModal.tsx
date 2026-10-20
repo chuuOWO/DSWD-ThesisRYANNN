@@ -162,17 +162,25 @@ export function QrCodeGeneratorModal({
 
   const jsonString = useMemo(() => (payload ? JSON.stringify(payload, null, 2) : ''), [payload]);
 
+  // Compact payload for the scannable QR image: no indentation and no blockchain metadata
+  // (the receiver app does not read it), keeping the QR sparse enough for phone cameras.
+  const qrString = useMemo(() => {
+    if (!payload) return '';
+    const { blockchain: _blockchain, ...scanPayload } = payload;
+    return JSON.stringify(scanPayload);
+  }, [payload]);
+
   // Generate QR Code image from manifest JSON
   useEffect(() => {
-    if (!jsonString) {
+    if (!qrString) {
       setQrDataUrl('');
       return;
     }
     let isCancelled = false;
-    QRCode.toDataURL(jsonString, {
+    QRCode.toDataURL(qrString, {
       width: 400,
       margin: 2,
-      errorCorrectionLevel: 'M',
+      errorCorrectionLevel: 'L',
       color: {
         dark: '#111827',
         light: '#ffffff'
@@ -188,7 +196,7 @@ export function QrCodeGeneratorModal({
     return () => {
       isCancelled = true;
     };
-  }, [jsonString]);
+  }, [qrString]);
 
   const handleCopy = () => {
     if (!jsonString) return;

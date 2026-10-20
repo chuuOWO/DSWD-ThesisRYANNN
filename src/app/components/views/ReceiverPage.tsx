@@ -46,6 +46,7 @@ import { MobileSettingsModal } from '../modals/MobileSettingsModal';
 import { sanitizeNumbersOnly } from '../../lib/inputValidation';
 import { MAP_TILE_CONFIG } from '../../lib/mapConfig';
 import { formatUserErrorMessage } from '../../lib/errorUtils';
+import { createQrDetector } from '../../lib/qrDetector';
 
 interface BarcodeDetectorResult {
   rawValue?: string;
@@ -2111,13 +2112,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
-      const Detector = (window as BarcodeDetectorWindow).BarcodeDetector;
-      if (!Detector) {
-        setCameraMessage('Point camera at QR code.');
-        return;
-      }
-
-      detectorRef.current = new Detector({ formats: ['qr_code'] });
+      detectorRef.current = createQrDetector();
       let isDetecting = false;
       let lastScanTime = 0;
       const scan = async () => {
