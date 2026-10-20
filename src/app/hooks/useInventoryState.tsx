@@ -2696,7 +2696,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
         }));
         setOutgoingReleasesList(outgoing.map(row => {
           const mapped = mapOutgoingRequest(row);
-          if (!mapped.correctionNote && mapped.status === 'Correction Requested') {
+          if (!mapped.correctionNote && mapped.deliveryStatus === 'Correction Requested') {
             const matchedDisc = discList.find(d => d.reportType === 'Outgoing' && (d.drNumber === mapped.drNumber || d.drNumber === row.dr_number));
             if (matchedDisc) mapped.correctionNote = matchedDisc.note;
           }
