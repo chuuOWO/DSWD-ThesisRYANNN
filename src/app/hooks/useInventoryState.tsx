@@ -1592,13 +1592,14 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
       }).catch(err => console.warn('appendStockLedger error:', err));
     }
 
-    setIncomingGoodsList(prev => prev.map(item => item.id === id && (item.status === 'Pending Verification' || item.status === 'Draft' || item.status === 'Correction Requested')
-      ? { ...item, status: 'Verified', verifiedBy: currentActor.name, auditTrail: [audit('Verified & Stocked', `Physical count and manifest details verified and stocked into inventory by ${currentActor.name}.`), ...item.auditTrail] }
+    setIncomingGoodsList(prev => prev.map(item => (item.id === id || item.manifestNumber === id) && (item.status === 'Pending Verification' || item.status === 'Draft' || item.status === 'Correction Requested')
+      ? { ...item, status: 'Verified', correctionNote: undefined, verifiedBy: currentActor.name, auditTrail: [audit('Verified & Stocked', `Physical count and manifest details verified and stocked into inventory by ${currentActor.name}.`), ...item.auditTrail] }
       : item));
     backendApi.updateIncoming(id, {
       status: 'Verified',
       verifiedBy: currentActor.name,
-      verifiedByProfileId: currentActor.id
+      verifiedByProfileId: currentActor.id,
+      correctionNote: null as any
     }).catch(error => {
       logBackendError('Verify incoming manifest')(error);
       setIntegrationMode('mock');

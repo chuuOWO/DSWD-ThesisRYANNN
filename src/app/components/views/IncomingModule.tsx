@@ -62,6 +62,7 @@ const statusLabels: Record<IncomingStatus, string> = {
 };
 
 const canEdit = (status: IncomingStatus, adminActionsEnabled = false) => {
+  if (status === 'Verified' || status === 'Cancelled' || status === 'Rejected') return false;
   if (adminActionsEnabled) return true;
   return ['Draft', 'Pending Verification', 'Correction Requested'].includes(status);
 };
@@ -657,53 +658,63 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                     )}
                   </td>
                   <td className="px-4 py-4">
-                    <div className="flex flex-wrap gap-2">
-                      {canEdit(item.status, inventoryState.adminActionsEnabled) && (
-                        <button
-                          onClick={() => setEditingIncoming(item)}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer"
-                          title="Edit incoming transaction details (preserves same RIS code)"
-                        >
-                          <Edit className="w-3 h-3" /> Edit Details
-                        </button>
-                      )}
-                      {item.status === 'Correction Requested' && (
-                        <button
-                          onClick={() => handleMakeAnotherSameRis(item)}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer shadow-xs"
-                          title="Create another incoming commodity line under the exact same RIS code"
-                        >
-                          <PlusCircle className="w-3 h-3" /> Make Another (Same RIS)
-                        </button>
-                      )}
-                      {['Draft', 'Pending Verification', 'Correction Requested'].includes(item.status) && (
-                        <button
-                          onClick={() => openActionModal('verify', item)}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-xs transition cursor-pointer"
-                          title="Stock and verify physical incoming delivery"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5" /> Stock and Verify
-                        </button>
-                      )}
-                      {item.status !== 'Verified' && item.status !== 'Cancelled' && item.status !== 'Rejected' && (
-                        <button
-                          onClick={() => openActionModal('cancel', item)}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg border border-rose-200 transition cursor-pointer"
-                          title="Cancel incoming stock delivery"
-                        >
-                          <X className="w-3.5 h-3.5" /> Cancel
-                        </button>
-                      )}
-                      {(inventoryState.adminActionsEnabled || currentRole === 'Admin') && item.status !== 'Cancelled' && item.status !== 'Rejected' && (
-                        <button
-                          onClick={() => openActionModal('correction', item)}
-                          className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer"
-                          title="File an administrative correction record"
-                        >
-                          <RotateCcw className="w-3 h-3" /> Correction
-                        </button>
-                      )}
-                    </div>
+                    {item.status === 'Verified' ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Verified &amp; Stocked
+                      </span>
+                    ) : item.status === 'Cancelled' ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-500 border border-gray-200 line-through">
+                        Cancelled
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {canEdit(item.status, inventoryState.adminActionsEnabled) && (
+                          <button
+                            onClick={() => setEditingIncoming(item)}
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer"
+                            title="Edit incoming transaction details (preserves same RIS code)"
+                          >
+                            <Edit className="w-3 h-3" /> Edit Details
+                          </button>
+                        )}
+                        {item.status === 'Correction Requested' && (
+                          <button
+                            onClick={() => handleMakeAnotherSameRis(item)}
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer shadow-xs"
+                            title="Create another incoming commodity line under the exact same RIS code"
+                          >
+                            <PlusCircle className="w-3 h-3" /> Make Another (Same RIS)
+                          </button>
+                        )}
+                        {['Draft', 'Pending Verification', 'Correction Requested'].includes(item.status) && (
+                          <button
+                            onClick={() => openActionModal('verify', item)}
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-xs transition cursor-pointer"
+                            title="Stock and verify physical incoming delivery"
+                          >
+                            <CheckCircle className="w-3.5 h-3.5" /> Stock and Verify
+                          </button>
+                        )}
+                        {item.status !== 'Verified' && item.status !== 'Cancelled' && item.status !== 'Rejected' && (
+                          <button
+                            onClick={() => openActionModal('cancel', item)}
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg border border-rose-200 transition cursor-pointer"
+                            title="Cancel incoming stock delivery"
+                          >
+                            <X className="w-3.5 h-3.5" /> Cancel
+                          </button>
+                        )}
+                        {(inventoryState.adminActionsEnabled || currentRole === 'Admin') && ['Draft', 'Pending Verification'].includes(item.status) && (
+                          <button
+                            onClick={() => openActionModal('correction', item)}
+                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer"
+                            title="File an administrative correction record"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Correction
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
