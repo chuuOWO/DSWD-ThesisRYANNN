@@ -1737,9 +1737,6 @@ export function DashboardView({ inventoryState, onNavigate, adminProfile, onRefr
 
                         <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-600">
                           <span>Food Packs: <strong className="text-gray-900 font-mono">{report.foodPacks} / {(report.maxStock ?? 3000).toLocaleString()} Max</strong></span>
-                          {report.affectedFamilies > 0 && (
-                            <span>Families: <strong className="text-gray-900 font-mono">{report.affectedFamilies.toLocaleString()}</strong></span>
-                          )}
                         </div>
                       </div>
 
