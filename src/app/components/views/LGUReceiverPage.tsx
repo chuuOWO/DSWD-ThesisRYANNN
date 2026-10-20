@@ -1029,7 +1029,10 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               deliveryMode: liveMatch.delivery_mode || '',
               deliveryStatus: liveMatch.delivery_status as any,
               incidentCode: liveMatch.incident_code || '',
-              allocatedBatches: liveMatch.allocated_batches || [],
+              allocatedBatches: (liveMatch.allocated_batches || []).flatMap((b: any) => {
+                const tokenId = b?.batchTokenId || b?.batch_token_id;
+                return tokenId ? [{ batchTokenId: String(tokenId), quantity: Number(b?.quantity || 0) }] : [];
+              }),
               handoverContractId: liveMatch.handover_contract_id || undefined,
               receiverGps: liveMatch.receiver_gps || undefined,
               destinationAddress: liveMatch.destination_address || undefined,
