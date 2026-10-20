@@ -1910,7 +1910,8 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     try {
       await blockchain.requireConnectedWalletRole('Admin');
       // Mint authentic allocated batches onto Sepolia
-      for (const batch of allocations) {
+      for (let i = 0; i < allocations.length; i++) {
+        const batch = allocations[i];
         proof = await blockchain.mintAndAuthorizeRelease({
           drNumber: release.drNumber,
           batchTokenId: batch.batchTokenId,
@@ -1919,6 +1920,9 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
           warehouseSource: release.warehouseSource,
           lguName: release.lguName
         });
+        if (proof?.batchTokenId) {
+          allocations[i].batchTokenId = proof.batchTokenId;
+        }
       }
     } catch (error) {
       logBackendError('Mint and authorize release on blockchain')(error);
@@ -2093,8 +2097,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }
   };
 
-  const senderSignAndRelease = async (drNumber: string, actorRole: UserRole = 'Receiver') => {
-    if (actorRole !== 'Receiver') return { ok: false, message: 'RBAC: only Receiver can sign warehouse release.' };
+  const senderSignAndRelease = async (drNumber: string, actorRole: UserRole = 'Admin') => {
+    if (actorRole !== 'Admin' && actorRole !== 'Receiver') {
+      return { ok: false, message: 'RBAC: Admin or Escort privileges required to sign warehouse release.' };
+    }
     const release = outgoingReleasesList.find(item => item.drNumber === drNumber);
     if (!release || !['Approved', 'Packed'].includes(release.deliveryStatus)) return { ok: false, message: 'Only approved/packed releases can be signed by sender.' };
     if (release.allocatedBatches.length === 0) {
@@ -2109,7 +2115,7 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     let proof;
 
     try {
-      await blockchain.requireConnectedWalletRole('Receiver');
+      await blockchain.requireConnectedWalletRole(actorRole === 'Admin' ? 'Admin' : 'Receiver');
       await blockchain.assertBatchTokensExist(release.allocatedBatches.map(batch => batch.batchTokenId));
       proof = await blockchain.signRelease({
         drNumber,
@@ -2130,16 +2136,16 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     setOutgoingReleasesList(prev => prev.map(item => item.drNumber === drNumber
       ? {
           ...item,
-          deliveryStatus: 'Released',
+          deliveryStatus: 'In Transit',
           handoverContractId,
           senderSignature: proof.hash,
           senderGps,
           blockchainTxHash: proof.hash,
-          auditTrail: [audit('Sender Signed Handover', 'Warehouse signed release; GPS origin captured and custody transfer opened.', proof.hash), ...item.auditTrail]
+          auditTrail: [audit('Dispatched & Signed on Sepolia', 'Warehouse dispatch authorized; GPS origin captured and custody handover broadcast to Sepolia.', proof.hash), ...item.auditTrail]
         }
       : item));
     backendApi.updateOutgoing(drNumber, {
-      deliveryStatus: 'Released',
+      deliveryStatus: 'In Transit',
       senderGps,
       txHash: proof.hash,
       handoverContractId,

@@ -834,6 +834,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   // 5. Camera QR Scanner & Direct Inventory Acceptance
   const [isScanning, setIsScanning] = useState(false);
   const [cameraMessage, setCameraMessage] = useState('Align camera with shipment QR code');
+  const [manualCodeInput, setManualCodeInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string; txHash?: string } | null>(null);
 
@@ -1138,15 +1139,20 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         WAREHOUSE_COORDINATES[1]
       );
 
-      const isWithinDropoff = distToDropoff !== null && distToDropoff <= GEOFENCE_RADIUS_METERS;
-      const isWithinWarehouse = distToWarehouse <= GEOFENCE_RADIUS_METERS;
+      const isGeofenceBypassed =
+        typeof window !== 'undefined' &&
+        (localStorage.getItem('dswd_geofence_simulation') === 'true' ||
+          localStorage.getItem('dswd_admin_actions_enabled') === 'true');
+
+      const isWithinDropoff = (distToDropoff !== null && distToDropoff <= GEOFENCE_RADIUS_METERS) || isGeofenceBypassed;
+      const isWithinWarehouse = distToWarehouse <= GEOFENCE_RADIUS_METERS || isGeofenceBypassed;
       const isWithinGeofence = isWithinDropoff || isWithinWarehouse;
 
       if (!isWithinGeofence) {
         const designatedFacility = matchingRelease?.destinationAddress || matchingRelease?.municipality || finalMuni;
         const closestDistance = distToDropoff !== null ? Math.min(distToDropoff, distToWarehouse) : distToWarehouse;
         throw new Error(
-          `Geofence Location Check Failed: You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated area (${designatedFacility}) or warehouse pickup site to scan and accept this shipment. Current distance: ${Math.round(closestDistance)} meters.`
+          `Geofence Location Check Failed: You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated area (${designatedFacility}) or warehouse pickup site. Current distance: ${Math.round(closestDistance)} meters. (Tip: Turn on Geofence Simulation in Settings or Admin Mode for indoor presentation tests).`
         );
       }
 
@@ -1793,12 +1799,41 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
               </div>
             </div>
 
-            <div className="space-y-3 pb-2 text-center">
+            <div className="space-y-2.5 pb-2 text-center">
               <p className="text-xs font-medium text-white/80">{cameraMessage}</p>
+
+              {/* Manual Entry Fallback for Presentation & Camera Restrictions */}
+              <div className="bg-white/10 p-2.5 rounded-xl border border-white/20 space-y-1.5 text-left">
+                <label className="text-[10px] font-bold text-white/90 uppercase tracking-wider block">
+                  Manual INC Code / QR Payload
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={manualCodeInput}
+                    onChange={(e) => setManualCodeInput(e.target.value)}
+                    placeholder="e.g. INC-2026-019"
+                    className="flex-1 px-3 py-1.5 bg-black/40 border border-white/30 rounded-lg text-xs text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-amber-400 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (manualCodeInput.trim()) {
+                        handleScannedPayload(manualCodeInput.trim());
+                      }
+                    }}
+                    disabled={!manualCodeInput.trim() || isProcessing}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-black font-bold rounded-lg text-xs transition cursor-pointer"
+                  >
+                    Process
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="button"
                 onClick={stopCamera}
-                className="w-full rounded-xl bg-white/15 py-2.5 text-xs font-bold text-white hover:bg-white/25 transition border border-white/20"
+                className="w-full rounded-xl bg-white/15 py-2 text-xs font-bold text-white hover:bg-white/25 transition border border-white/20"
               >
                 Cancel Scanner
               </button>

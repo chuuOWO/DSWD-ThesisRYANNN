@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { AlertCircle, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Edit, Filter, Loader2, MapPin, Maximize2, Minimize2, PackageCheck, Plus, QrCode, RotateCcw, Search, ShieldAlert, ShieldCheck, TruckIcon, X } from 'lucide-react';
+import { AlertCircle, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Edit, ExternalLink, Filter, Loader2, MapPin, Maximize2, Minimize2, PackageCheck, Plus, QrCode, RotateCcw, Search, Send, ShieldAlert, ShieldCheck, TruckIcon, X } from 'lucide-react';
 import { AddReleaseModal, type ReleaseForm } from '../modals/AddReleaseModal';
 import { parseIncidentInfo, resolveDisasterReason, getDisasterReasonStyle, DISASTER_REPORT_REASONS } from '../../lib/incidentHelper';
 import { QrCodeGeneratorModal } from '../modals/QrCodeGeneratorModal';
@@ -751,6 +751,19 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                       Pending drop-off GPS
                     </span>
                   )}
+                  {release.blockchainTxHash && release.blockchainTxHash.startsWith('0x') ? (
+                    <a
+                      href={`https://sepolia.etherscan.io/tx/${release.blockchainTxHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2 py-0.5 text-[10px] font-bold border border-indigo-200 transition"
+                      title={`View Sepolia transaction ${release.blockchainTxHash} on Etherscan`}
+                    >
+                      <ExternalLink className="w-2.5 h-2.5 text-indigo-600" />
+                      <span>Sepolia Verified</span>
+                    </a>
+                  ) : null}
                 </div>
                 {release.correctionNote && (
                   <p className="text-[11px] text-red-600 font-medium mt-1 truncate" title={release.correctionNote}>
@@ -839,10 +852,26 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     </>
                   )}
                   {['Approved', 'Packed'].includes(release.deliveryStatus) && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200">
-                      <QrCode className="w-3 h-3 text-amber-600" />
-                      <span>Awaiting Escort Scan</span>
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {currentRole === 'Admin' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openReleaseAction('senderSign', release);
+                          }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition cursor-pointer shadow-xs active:scale-95"
+                          title="Authorize warehouse dispatch and broadcast custody handover to Ethereum Sepolia"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>Dispatch &amp; Sign (Sepolia)</span>
+                        </button>
+                      ) : null}
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-1 rounded-lg border border-amber-200" title="Can also be scanned at warehouse gate by Escort">
+                        <QrCode className="w-3 h-3 text-amber-600" />
+                        <span>Awaiting Escort Scan</span>
+                      </span>
+                    </div>
                   )}
                   {['In Transit', 'Delivered'].includes(release.deliveryStatus) && (
                     <>
@@ -1800,7 +1829,7 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">
-                  {actionModal.type === 'senderSign' && 'Sign Warehouse Release'}
+                  {actionModal.type === 'senderSign' && 'Dispatch & Sign on Ethereum Sepolia'}
                   {actionModal.type === 'inTransit' && 'Mark as In Transit'}
                   {actionModal.type === 'receiverAccept' && 'Confirm LGU Receipt'}
                   {actionModal.type === 'adminBypass' && 'Emergency Administrative Bypass'}
@@ -1819,7 +1848,20 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
 
             <div className="p-6 space-y-4">
               {actionModal.type === 'senderSign' && (
-                <p className="text-sm text-gray-700">Confirm that this warehouse release is ready for dispatch and record the sender signature?</p>
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-700">
+                    Authorize dispatch and record cryptographic custody handover on the <strong>Ethereum Sepolia Testnet</strong>?
+                  </p>
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-xs space-y-1">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-blue-600" />
+                      Blockchain Custody Handover (ERC-1155)
+                    </p>
+                    <p className="text-blue-700 leading-relaxed">
+                      This action signs the handover contract with origin warehouse GPS coordinates and broadcasts the release transaction to Ethereum Sepolia. The status will immediately advance to <strong>In Transit</strong>.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {actionModal.type === 'inTransit' && (
@@ -1881,7 +1923,11 @@ export function OutgoingModule({ inventoryState, currentRole }: OutgoingModulePr
                     <span>Processing...</span>
                   </>
                 ) : (
-                  actionModal.type === 'adminBypass' ? 'Confirm Emergency Bypass' : 'Confirm'
+                  actionModal.type === 'adminBypass'
+                    ? 'Confirm Emergency Bypass'
+                    : actionModal.type === 'senderSign'
+                    ? 'Sign & Dispatch (Sepolia)'
+                    : 'Confirm'
                 )}
               </button>
             </div>

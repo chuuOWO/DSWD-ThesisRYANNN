@@ -7,6 +7,8 @@ export interface BlockchainProof {
   hash: string;
   walletAddress: string;
   mode: 'contract' | 'signature';
+  batchTokenId?: string;
+  newBatchTokenId?: string;
 }
 
 export interface MintBatchInput {
@@ -472,16 +474,24 @@ export const blockchain = {
       const walletAddress = await signer.getAddress();
       const contract = new Contract(batchTokenContractAddress, batchTokenAbi, signer);
 
-      // Pre-flight check: if batch is already registered on-chain, skip re-minting safely
+      let batchTokenToMint = input.batchTokenId;
+      let manifestNumberToMint = input.manifestNumber;
+      let manifestHashToMint = input.manifestHash;
+
+      // Ensure that if the batch token already exists on Sepolia, we create a fresh new batch instead
       try {
-        const existingBatchId = await contract.batchIdByTokenId(input.batchTokenId);
+        const existingBatchId = await contract.batchIdByTokenId(batchTokenToMint);
         if (existingBatchId > 0n) {
-          console.log(`[Blockchain] Batch token ${input.batchTokenId} is already minted on Sepolia (ID #${existingBatchId.toString()}).`);
-          return {
-            hash: `existing-batch-${existingBatchId.toString()}`,
-            walletAddress,
-            mode: 'contract'
-          };
+          console.log(`[Blockchain] Batch token ${batchTokenToMint} already exists on Sepolia (ID #${existingBatchId.toString()}). Creating a brand new batch on-chain...`);
+          const now = new Date();
+          const yyyy = now.getFullYear();
+          const mm = String(now.getMonth() + 1).padStart(2, '0');
+          const dd = String(now.getDate()).padStart(2, '0');
+          const random10 = Math.floor(1000000000 + Math.random() * 9000000000);
+          batchTokenToMint = `BATCH-${yyyy}-${mm}${dd}-${random10}`;
+          manifestNumberToMint = `MNF-${yyyy}-${mm}${dd}-${random10}`;
+          const manifestPayload = `${manifestNumberToMint}|${batchTokenToMint}|${input.category}|${input.quantity}|${input.destination}|${Date.now()}`;
+          manifestHashToMint = ethers.keccak256(ethers.toUtf8Bytes(manifestPayload));
         }
       } catch (checkErr) {
         console.warn('[Blockchain] Batch pre-flight existence check warning:', checkErr);
@@ -490,9 +500,9 @@ export const blockchain = {
       onStage?.('mining');
       try {
         const tx = await contract.mintBatchToken(
-          input.manifestNumber,
-          input.batchTokenId,
-          input.manifestHash,
+          manifestNumberToMint,
+          batchTokenToMint,
+          manifestHashToMint,
           input.category,
           BigInt(input.quantity),
           input.destination
@@ -504,26 +514,37 @@ export const blockchain = {
         return {
           hash,
           walletAddress,
-          mode: 'contract'
+          mode: 'contract',
+          batchTokenId: batchTokenToMint,
+          newBatchTokenId: batchTokenToMint
         };
       } catch (mintErr: any) {
         const errStr = String(mintErr?.message || mintErr?.reason || mintErr || '');
-        if (errStr.includes('Batch exists')) {
-          console.log(`[Blockchain] Batch token ${input.batchTokenId} is already minted on Sepolia. Reusing on-chain registration.`);
-          try {
-            const onChainId = await contract.batchIdByTokenId(input.batchTokenId);
-            return {
-              hash: `existing-batch-${onChainId?.toString() || Date.now()}`,
-              walletAddress,
-              mode: 'contract'
-            };
-          } catch {
-            return {
-              hash: `existing-batch-${input.batchTokenId}`,
-              walletAddress,
-              mode: 'contract'
-            };
-          }
+        if (errStr.includes('Batch exists') || errStr.includes('Manifest minted')) {
+          console.log(`[Blockchain] Collision detected on Sepolia for ${batchTokenToMint}. Minting with guaranteed unique batch ID...`);
+          const random10 = Math.floor(1000000000 + Math.random() * 9000000000);
+          const freshBatchTokenId = `BATCH-${Date.now()}-${random10}`;
+          const freshManifestNumber = `MNF-${Date.now()}-${random10}`;
+          const freshPayload = `${freshManifestNumber}|${freshBatchTokenId}|${input.category}|${input.quantity}|${input.destination}|${Date.now()}`;
+          const freshHash = ethers.keccak256(ethers.toUtf8Bytes(freshPayload));
+
+          const retryTx = await contract.mintBatchToken(
+            freshManifestNumber,
+            freshBatchTokenId,
+            freshHash,
+            input.category,
+            BigInt(input.quantity),
+            input.destination
+          );
+          onStage?.('mining', retryTx.hash);
+          const { hash } = await waitForTxOrFastBroadcast(retryTx, 3500);
+          return {
+            hash,
+            walletAddress,
+            mode: 'contract',
+            batchTokenId: freshBatchTokenId,
+            newBatchTokenId: freshBatchTokenId
+          };
         }
         throw mintErr;
       }
