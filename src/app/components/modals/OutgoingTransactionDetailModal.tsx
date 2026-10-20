@@ -642,16 +642,10 @@ export function OutgoingTransactionDetailModal({
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
                     <span className="text-gray-500 block text-[11px]">1. Admin Authorization Signature</span>
                     <p className="font-mono text-[11px] text-gray-900 font-semibold mt-1 truncate" title={release.adminSignature || release.blockchainTxHash || 'Pending'}>
-                      {release.adminSignature && release.adminSignature.startsWith('0x')
-                        ? `${release.adminSignature.slice(0, 16)}...`
-                        : release.blockchainTxHash && release.blockchainTxHash.startsWith('0x')
-                        ? `${release.blockchainTxHash.slice(0, 16)}...`
-                        : 'Awaiting On-Chain Minting'}
+                      {release.adminSignature || release.blockchainTxHash ? `${(release.adminSignature || release.blockchainTxHash)!.slice(0, 16)}...` : 'Not recorded'}
                     </p>
                     <p className="text-[10px] text-green-700 mt-1 font-medium">
-                      {(release.adminSignature && release.adminSignature.startsWith('0x')) || (release.blockchainTxHash && release.blockchainTxHash.startsWith('0x'))
-                        ? 'Digitally Signed & Minted'
-                        : 'Awaiting Authorization'}
+                      {release.adminSignature || release.blockchainTxHash ? 'Digitally Signed & Minted' : 'Awaiting Authorization'}
                     </p>
                   </div>
 
@@ -676,7 +670,7 @@ export function OutgoingTransactionDetailModal({
                   </div>
                 </div>
 
-                {release.blockchainTxHash && release.blockchainTxHash.startsWith('0x') && (
+                {release.blockchainTxHash && (
                   <div className="mt-3 p-3 bg-purple-50/70 border border-purple-200 rounded-lg flex items-center justify-between text-xs">
                     <div className="min-w-0">
                       <span className="text-purple-900 font-bold block">Sepolia Testnet Smart Contract Transaction</span>

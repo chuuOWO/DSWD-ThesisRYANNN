@@ -1439,14 +1439,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
     if (!dropOffTarget) return;
     const { payload, location: nextLoc, matchingRelease, distanceMeters } = dropOffTarget;
 
-    const isGeofenceBypassed =
-      typeof window !== 'undefined' &&
-      (localStorage.getItem('dswd_geofence_simulation') === 'true' ||
-        localStorage.getItem('dswd_admin_actions_enabled') === 'true');
-
-    // Strict 500m Geofence Check: Must be within designated drop-off radius unless simulated
-    if (!isGeofenceBypassed && distanceMeters !== undefined && distanceMeters > GEOFENCE_RADIUS_METERS) {
-      setSignError(`Geofence Location Check Failed: You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated area to complete drop-off. Current distance is ${Math.round(distanceMeters)}m. (Tip: Turn on Geofence Simulation in Settings or Admin Mode).`);
+    // Strict 500m Geofence Check: Must be within designated drop-off radius
+    if (distanceMeters !== undefined && distanceMeters > GEOFENCE_RADIUS_METERS) {
+      setSignError(`Geofence Location Check Failed: You must be within ${GEOFENCE_RADIUS_METERS} meters of the designated area to complete drop-off. Current distance is ${Math.round(distanceMeters)}m.`);
       setIsSubmittingProof(false);
       setStep('verify_dropoff');
       return;
@@ -1644,12 +1639,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
         distToDropoff = getDistanceMeters(curPos[0], curPos[1], payload.destinationCoords[0], payload.destinationCoords[1]);
       }
 
-      const isGeofenceBypassed =
-        typeof window !== 'undefined' &&
-        (localStorage.getItem('dswd_geofence_simulation') === 'true' ||
-          localStorage.getItem('dswd_admin_actions_enabled') === 'true');
-
-      const isInsideDropoffGeofence = (distToDropoff !== null && distToDropoff <= GEOFENCE_RADIUS_METERS) || isNearActiveDropoff || isGeofenceBypassed;
+      const isInsideDropoffGeofence = (distToDropoff !== null && distToDropoff <= GEOFENCE_RADIUS_METERS) || isNearActiveDropoff;
       const isAlreadyInActiveCargo = activePackages.some((p) => p.drNumber.toUpperCase() === payload.drNumber.toUpperCase());
 
       // If inside geofence OR if already carrying this package near drop-off: TRIGGER DROP-OFF FLOW
@@ -2648,7 +2638,6 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
               isSigning={isSigning}
               isDropOff={isNearActiveDropoff}
               destinationName={destinationName}
-              onManualScan={(val) => handleQrValue(val)}
             />
           )}
 
@@ -3436,8 +3425,7 @@ function ScanModal({
   message,
   isSigning,
   isDropOff,
-  destinationName,
-  onManualScan
+  destinationName
 }: {
   onClose: () => void;
   onStart: () => void;
@@ -3448,10 +3436,7 @@ function ScanModal({
   isSigning: boolean;
   isDropOff?: boolean;
   destinationName?: string;
-  onManualScan?: (value: string) => void;
 }) {
-  const [manualCode, setManualCode] = useState('');
-
   useEffect(() => {
     if (!cameraOpen) {
       onStart();
@@ -3517,44 +3502,15 @@ function ScanModal({
         </div>
       </div>
 
-      <div className="space-y-2.5 pb-2 text-center">
+      <div className="space-y-3 pb-2 text-center">
         <p className="text-xs font-medium text-white/80">
           {message || (isDropOff ? `Within Drop-Off Geofence: Point camera at package QR to verify drop-off.` : 'Point your camera at the QR code.')}
         </p>
-
-        {/* Manual Code Entry for Escort Testing & Camera Fallback */}
-        <div className="bg-white/10 p-2.5 rounded-xl border border-white/20 space-y-1.5 text-left">
-          <label className="text-[10px] font-bold text-white/90 uppercase tracking-wider block">
-            Manual INC Code / QR Payload
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={manualCode}
-              onChange={(e) => setManualCode(e.target.value)}
-              placeholder="e.g. INC-2026-019"
-              className="flex-1 px-3 py-1.5 bg-black/40 border border-white/30 rounded-lg text-xs text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-amber-400 font-mono"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                if (manualCode.trim() && onManualScan) {
-                  onManualScan(manualCode.trim());
-                }
-              }}
-              disabled={!manualCode.trim() || isSigning}
-              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-black font-bold rounded-lg text-xs transition cursor-pointer"
-            >
-              Process
-            </button>
-          </div>
-        </div>
-
         <button
           type="button"
           onClick={handleCancel}
           disabled={isSigning}
-          className="w-full rounded-xl bg-white/15 py-2 text-xs font-bold text-white hover:bg-white/25 transition border border-white/20 disabled:opacity-50"
+          className="w-full rounded-xl bg-white/15 py-2.5 text-xs font-bold text-white hover:bg-white/25 transition border border-white/20 disabled:opacity-50"
         >
           Cancel Scanner
         </button>
