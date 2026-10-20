@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, PlusCircle, RotateCcw, Search, ShieldCheck, TruckIcon, X, AlertTriangle, ArrowRight, Clock } from 'lucide-react';
+import { Calendar, CheckCircle, ChevronLeft, ChevronRight, Edit, FileCheck2, Package, Plus, Search, ShieldCheck, TruckIcon, X, AlertTriangle, ArrowRight, Clock } from 'lucide-react';
 import { AddIncomingGoodsModal, type IncomingGoodsForm } from '../modals/AddIncomingGoodsModal';
 import { ReplenishLguModal, type LguReplenishPayload } from '../modals/ReplenishLguModal';
 import { SuccessModal } from '../modals/SuccessModal';
@@ -34,7 +34,7 @@ interface InventoryState {
   submitIncomingForVerification: (id: string) => void;
   verifyIncomingReceipt: (id: string) => void;
   cancelIncomingGoods?: (id: string) => Promise<{ ok: boolean; message?: string }> | void;
-  requestIncomingCorrection: (id: string, note: string) => void;
+  requestIncomingCorrection?: (id: string, note: string) => void;
   adminActionsEnabled?: boolean;
 }
 
@@ -64,7 +64,7 @@ const statusLabels: Record<IncomingStatus, string> = {
 const canEdit = (status: IncomingStatus, adminActionsEnabled = false) => {
   if (status === 'Verified' || status === 'Cancelled' || status === 'Rejected') return false;
   if (adminActionsEnabled) return true;
-  return ['Draft', 'Pending Verification', 'Correction Requested'].includes(status);
+  return ['Draft', 'Pending Verification'].includes(status);
 };
 
 const friendlyResult = (message: string) =>
@@ -77,7 +77,7 @@ const friendlyAuditDetails = (details = '') =>
     .replace(/Pre-tokenization record/gi, 'Draft receiving record')
     .replace(/manifest hash/gi, 'delivery reference');
 
-type IncomingAction = 'verify' | 'correction' | 'cancel' | 'message';
+type IncomingAction = 'verify' | 'cancel' | 'message';
 
 interface IncomingActionModalState {
   type: IncomingAction;
@@ -98,7 +98,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     updateIncomingGoods,
     verifyIncomingReceipt,
     cancelIncomingGoods,
-    requestIncomingCorrection,
     warehousesList = [],
     supplySourcesList = [],
     kitTypesList = [],
@@ -109,8 +108,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
   const [showAddModal, setShowAddModal] = useState(false);
   const [showReplenishModal, setShowReplenishModal] = useState(false);
   const [editingIncoming, setEditingIncoming] = useState<IncomingGoods | null>(null);
-  const [addPrefillData, setAddPrefillData] = useState<IncomingGoodsForm | undefined>(undefined);
-  const [postCorrectionTarget, setPostCorrectionTarget] = useState<IncomingGoods | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [commodityTypeFilter, setCommodityTypeFilter] = useState<CommodityTypeFilter>('All');
@@ -159,11 +156,10 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     return Array.from(set).sort();
   }, [kitTypesList, incomingGoodsList]);
 
-  const handleAddGoods = (newGoods: IncomingGoodsForm) => {
-    addIncomingGoods(newGoods as Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>);
+  const handleAddGoods = (newGoods: Omit<IncomingGoods, 'id' | 'status' | 'manifestHash' | 'auditTrail'>) => {
+    addIncomingGoods(newGoods);
     setShowAddModal(false);
-    setAddPrefillData(undefined);
-    showResult(`Incoming shipment of ${newGoods.quantity.toLocaleString()} ${newGoods.unitType} of ${newGoods.fnfiCategory} under RIS #${newGoods.manifestNumber || 'N/A'} has been recorded successfully.`);
+    showResult(`Incoming shipment of ${newGoods.quantity.toLocaleString()} ${newGoods.unitType} of ${newGoods.fnfiCategory} has been recorded successfully.`);
   };
 
   const handleReplenishSubmit = async (payload: LguReplenishPayload) => {
@@ -199,43 +195,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
     });
     setEditingIncoming(null);
     showResult(`Incoming record ${itemTarget.manifestNumber || itemTarget.id} updated successfully.`);
-  };
-
-  const handleMakeAnotherSameRis = (item: IncomingGoods) => {
-    const risCode = item.manifestNumber || item.incidentCode || item.id;
-    setAddPrefillData({
-      manifestNumber: risCode,
-      dateReceived: item.dateReceived || new Date().toISOString().split('T')[0],
-      fnfiCategory: item.fnfiCategory || '',
-      quantity: 0,
-      unitType: item.unitType || 'packs',
-      expirationDate: '',
-      source: item.source || '',
-      transportMode: 'Delivery',
-      destinationType: item.destinationType,
-      destination: item.destination,
-      supplySourceId: item.supplySourceId,
-      destinationWarehouseId: item.destinationWarehouseId,
-      destinationLguId: item.destinationLguId
-    });
-    setShowAddModal(true);
-  };
-
-  const handleConfirmCorrectionWithAction = (nextAction: 'edit' | 'make_another' | 'prompt') => {
-    if (!actionModal?.item) return;
-    const item = actionModal.item;
-    const note = (actionModal.note || '').trim() || 'Discrepancy correction requested';
-
-    requestIncomingCorrection(item.id, note);
-    closeActionModal();
-
-    if (nextAction === 'edit') {
-      setEditingIncoming(item);
-    } else if (nextAction === 'make_another') {
-      handleMakeAnotherSameRis(item);
-    } else {
-      setPostCorrectionTarget(item);
-    }
   };
 
   const openActionModal = (type: IncomingAction, item: IncomingGoods) => {
@@ -279,14 +238,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
         await cancelIncomingGoods(item.id);
       }
       showResult(`Incoming delivery record ${item.id} has been cancelled.`);
-      return;
-    }
-
-    if (actionModal.type === 'correction') {
-      const note = (actionModal.note || '').trim() || 'Discrepancy correction requested';
-      requestIncomingCorrection(item.id, note);
-      closeActionModal();
-      setPostCorrectionTarget(item);
       return;
     }
   };
@@ -620,15 +571,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                       </span>
                     </div>
                     {item.verifiedBy && <p className="text-xs text-gray-500 mt-1.5">Verified by {item.verifiedBy}</p>}
-                    {item.status !== 'Verified' && item.correctionNote && (
-                      <div className="mt-2 p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs shadow-xs max-w-xs">
-                        <div className="flex items-center gap-1.5 font-bold text-amber-800">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                          <span>Correction Note:</span>
-                        </div>
-                        <p className="mt-1 text-amber-900 font-medium whitespace-pre-wrap leading-relaxed">{item.correctionNote}</p>
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-4">
                     {item.status === 'Verified' ? (
@@ -638,14 +580,7 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                         </span>
                         <p className="text-xs text-gray-500">Verified: {item.dateReceived}</p>
                       </div>
-                    ) : item.status === 'Correction Requested' ? (
-                      <div className="space-y-1">
-                        <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-700 border border-orange-200">
-                          Correction Pending Action
-                        </span>
-                        <p className="text-xs text-gray-500">Edit details or add lot under same RIS</p>
-                      </div>
-                    ) : item.status === 'Pending Verification' || item.status === 'Draft' ? (
+                    ) : item.status === 'Pending Verification' || item.status === 'Draft' || item.status === 'Correction Requested' ? (
                       <span className="inline-block px-2.5 py-1 rounded-full text-xs font-semibold bg-yellow-50 text-yellow-700 border border-yellow-200">
                         Awaiting Physical Check
                       </span>
@@ -672,18 +607,9 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                           <button
                             onClick={() => setEditingIncoming(item)}
                             className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer"
-                            title="Edit incoming transaction details (preserves same RIS code)"
+                            title="Edit incoming transaction details"
                           >
-                            <Edit className="w-3 h-3" /> Edit Details
-                          </button>
-                        )}
-                        {item.status === 'Correction Requested' && (
-                          <button
-                            onClick={() => handleMakeAnotherSameRis(item)}
-                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-100 cursor-pointer shadow-xs"
-                            title="Create another incoming commodity line under the exact same RIS code"
-                          >
-                            <PlusCircle className="w-3 h-3" /> Make Another (Same RIS)
+                            <Edit className="w-3 h-3" /> Edit
                           </button>
                         )}
                         {['Draft', 'Pending Verification', 'Correction Requested'].includes(item.status) && (
@@ -702,15 +628,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                             title="Cancel incoming stock delivery"
                           >
                             <X className="w-3.5 h-3.5" /> Cancel
-                          </button>
-                        )}
-                        {(inventoryState.adminActionsEnabled || currentRole === 'Admin') && ['Draft', 'Pending Verification'].includes(item.status) && (
-                          <button
-                            onClick={() => openActionModal('correction', item)}
-                            className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 cursor-pointer"
-                            title="File an administrative correction record"
-                          >
-                            <RotateCcw className="w-3 h-3" /> Correction
                           </button>
                         )}
                       </div>
@@ -973,18 +890,13 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
 
       {showAddModal && (
         <AddIncomingGoodsModal
-          onClose={() => {
-            setShowAddModal(false);
-            setAddPrefillData(undefined);
-          }}
+          onClose={() => setShowAddModal(false)}
           onSubmit={handleAddGoods}
           onSwitchToReplenish={() => {
             setShowAddModal(false);
-            setAddPrefillData(undefined);
             setShowReplenishModal(true);
           }}
           mode="add"
-          initialData={addPrefillData}
           supplySourcesList={supplySourcesList}
           warehousesList={warehousesList}
           kitTypesList={kitTypesList}
@@ -1039,7 +951,6 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                 <h2 className="text-lg font-bold text-gray-900">
                   {actionModal.type === 'verify' && 'Stock & Verify Physical Receipt'}
                   {actionModal.type === 'cancel' && 'Cancel Incoming Stock Intake'}
-                  {actionModal.type === 'correction' && 'File Correction Record'}
                 </h2>
                 {actionModal.item && <p className="text-sm text-gray-500 mt-1">{actionModal.item.id} | {actionModal.item.fnfiCategory}</p>}
               </div>
@@ -1079,141 +990,26 @@ export function IncomingModule({ inventoryState, currentRole }: IncomingModulePr
                   </p>
                 </div>
               )}
-
-              {actionModal.type === 'correction' && (
-                <div className="space-y-3">
-                  <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-xs text-orange-900 space-y-1">
-                    <p className="font-bold flex items-center gap-1.5">
-                      <RotateCcw className="w-3.5 h-3.5 text-orange-600" />
-                      RIS Document Reference: <span className="font-mono text-orange-950 font-bold">{actionModal.item?.manifestNumber || actionModal.item?.id}</span>
-                    </p>
-                    <p className="text-orange-700 leading-relaxed">
-                      Filing a correction preserves this official RIS reference. You can immediately modify this intake's details or register an additional companion item under the exact same RIS code.
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Correction Details &amp; Discrepancy Note</label>
-                    <textarea
-                      value={actionModal.note || ''}
-                      onChange={(e) => setActionModal({ ...actionModal, note: e.target.value })}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-24 text-sm"
-                      placeholder="Describe the discrepancy, damaged quantities, or encoding mistake."
-                    />
-                  </div>
-                </div>
-              )}
             </div>
 
-            {actionModal.type === 'correction' ? (
-              <div className="px-6 pb-6 space-y-2.5">
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Confirm Correction &amp; Next Action</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmCorrectionWithAction('edit')}
-                    className="px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition"
-                    title="Confirm correction and change the details of this item while locking the same RIS code"
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                    Change Details
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmCorrectionWithAction('make_another')}
-                    className="px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition"
-                    title="Confirm correction and register another item/lot under the same RIS code"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    Make Another
-                  </button>
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={closeActionModal}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-xs cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmCorrectionWithAction('prompt')}
-                    className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg text-xs cursor-pointer shadow-xs transition"
-                  >
-                    Confirm Correction Only
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex gap-3 px-6 pb-6">
-                <button
-                  type="button"
-                  onClick={closeActionModal}
-                  className="flex-1 px-5 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm cursor-pointer"
-                >
-                  {actionModal.type === 'cancel' ? 'Keep Delivery' : 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmAction}
-                  className={`flex-1 px-5 py-2.5 font-semibold rounded-lg text-sm text-white shadow-xs cursor-pointer ${
-                    actionModal.type === 'cancel'
-                      ? 'bg-rose-600 hover:bg-rose-700'
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
-                >
-                  {actionModal.type === 'cancel' ? 'Confirm Cancellation' : actionModal.type === 'verify' ? 'Stock and Verify' : 'Confirm'}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {postCorrectionTarget && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 shrink-0">
-                <CheckCircle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-gray-900">Correction Report Filed</h3>
-                <p className="text-xs text-gray-500 font-mono">RIS #{postCorrectionTarget.manifestNumber || postCorrectionTarget.id}</p>
-              </div>
-            </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Discrepancy report recorded. You can now change the details of this item or register another commodity lot under the exact same RIS code.
-            </p>
-            <div className="space-y-2 pt-1">
+            <div className="flex gap-3 px-6 pb-6">
               <button
                 type="button"
-                onClick={() => {
-                  const target = postCorrectionTarget;
-                  setPostCorrectionTarget(null);
-                  setEditingIncoming(target);
-                }}
-                className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs transition"
+                onClick={closeActionModal}
+                className="flex-1 px-5 py-2.5 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 text-sm cursor-pointer"
               >
-                <Edit className="w-4 h-4" /> Change Details (Same RIS)
+                {actionModal.type === 'cancel' ? 'Keep Delivery' : 'Cancel'}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  const target = postCorrectionTarget;
-                  setPostCorrectionTarget(null);
-                  handleMakeAnotherSameRis(target);
-                }}
-                className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer shadow-xs transition"
+                onClick={handleConfirmAction}
+                className={`flex-1 px-5 py-2.5 font-semibold rounded-lg text-sm text-white shadow-xs cursor-pointer ${
+                  actionModal.type === 'cancel'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
               >
-                <PlusCircle className="w-4 h-4" /> Make Another Item (Same RIS)
-              </button>
-              <button
-                type="button"
-                onClick={() => setPostCorrectionTarget(null)}
-                className="w-full py-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-lg text-xs cursor-pointer border border-gray-200 transition"
-              >
-                Done / Return to List
+                {actionModal.type === 'cancel' ? 'Confirm Cancellation' : 'Stock and Verify'}
               </button>
             </div>
           </div>
