@@ -437,7 +437,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   // 2. Incoming Releases strictly destined for this LGU (excluding accepted)
   const upcomingReleases = useMemo(() => {
     return releases.filter((r) => {
-      if (locallyAcceptedDrs.includes(r.drNumber.trim().toUpperCase())) return false;
+      if (r.deliveryStatus !== 'Delivered' && locallyAcceptedDrs.includes(r.drNumber.trim().toUpperCase())) return false;
       const matchesLgu = isReleaseForThisLgu(r);
       const isUpcoming = ['Approved', 'Packed', 'Released', 'In Transit', 'Delivered'].includes(r.deliveryStatus);
       return matchesLgu && isUpcoming;
@@ -447,7 +447,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
   const acceptedReleases = useMemo(() => {
     return releases.filter((r) => {
       const matchesLgu = isReleaseForThisLgu(r);
-      const isAccepted = r.deliveryStatus === 'Accepted' || locallyAcceptedDrs.includes(r.drNumber.trim().toUpperCase());
+      const isAccepted = r.deliveryStatus === 'Accepted' || (r.deliveryStatus !== 'Delivered' && locallyAcceptedDrs.includes(r.drNumber.trim().toUpperCase()));
       return matchesLgu && isAccepted;
     });
   }, [releases, targetMuni, locallyAcceptedDrs]);
@@ -940,6 +940,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       let category = 'Relief Goods';
       let quantity = 0;
       let rawTo = '';
+      let handoverContractId = '';
 
       try {
         const parsed = JSON.parse(rawPayload);
@@ -949,6 +950,9 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
           quantity = Number(parsed.quantity);
         }
         rawTo = parsed.to || '';
+        if (parsed.handoverContractId) {
+          handoverContractId = String(parsed.handoverContractId).trim();
+        }
       } catch {
         const upperPayload = rawPayload.trim().toUpperCase();
         if (upperPayload.startsWith('INC-') || upperPayload.startsWith('DR-')) {
@@ -965,10 +969,77 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       // Find matching release in the system (from props or active upcoming)
       const cleanUpper = drNumber.toUpperCase();
       const altUpper = cleanUpper.startsWith('INC-') ? `DR-${cleanUpper.slice(4)}` : (cleanUpper.startsWith('DR-') ? `INC-${cleanUpper.slice(3)}` : cleanUpper);
-      const matchingRelease = releases.find((r) => {
-        const rUpper = r.drNumber.toUpperCase();
-        return rUpper === cleanUpper || rUpper === altUpper;
-      }) || ((currentRelease && (currentRelease.drNumber.toUpperCase() === cleanUpper || currentRelease.drNumber.toUpperCase() === altUpper)) ? currentRelease : null);
+      // Match candidate releases by DR number, raw DR number, UUID id, incident code, or handover contract ID
+      const isCandidate = (r: OutgoingRelease) => {
+        const rDr = (r.drNumber || '').trim().toUpperCase();
+        const rRaw = (r.rawDrNumber || '').trim().toUpperCase();
+        const rId = (r.id || '').trim().toUpperCase();
+        const rInc = (r.incidentCode || '').trim().toUpperCase();
+        const rContract = (r.handoverContractId || '').trim().toUpperCase();
+        return (
+          rDr === cleanUpper || rDr === altUpper ||
+          rRaw === cleanUpper || rRaw === altUpper ||
+          rId === cleanUpper || rId === altUpper ||
+          (rInc && (rInc === cleanUpper || rInc === altUpper)) ||
+          (Boolean(handoverContractId) && rContract === handoverContractId.toUpperCase())
+        );
+      };
+
+      const candidates = releases.filter(isCandidate);
+      const activeTransitStatuses = ['Delivered', 'In Transit', 'Released', 'Approved', 'Packed'];
+
+      // Prioritize active and pending-intake releases first (especially 'Delivered' which was dropped off by escort)
+      let matchingRelease: OutgoingRelease | null =
+        candidates.find((r) => isReleaseForThisLgu(r) && r.deliveryStatus === 'Delivered') ||
+        candidates.find((r) => r.deliveryStatus === 'Delivered') ||
+        candidates.find((r) => isReleaseForThisLgu(r) && activeTransitStatuses.includes(r.deliveryStatus)) ||
+        candidates.find((r) => activeTransitStatuses.includes(r.deliveryStatus)) ||
+        (currentRelease && isCandidate(currentRelease) ? currentRelease : null) ||
+        candidates.find((r) => isReleaseForThisLgu(r)) ||
+        candidates[0] ||
+        null;
+
+      // If no active candidate is found in memory, query live releases from Supabase to catch fast transitions
+      if (!matchingRelease || matchingRelease.deliveryStatus === 'Accepted') {
+        try {
+          const liveRows = await backendApi.getReceiverReleases();
+          const liveMatch = liveRows.find((r) => {
+            const rDr = (r.dr_number || '').trim().toUpperCase();
+            const rId = (r.id || '').trim().toUpperCase();
+            const rInc = (r.incident_code || '').trim().toUpperCase();
+            const matchesCode = rDr === cleanUpper || rDr === altUpper || rId === cleanUpper || rId === altUpper || rInc === cleanUpper || rInc === altUpper;
+            return matchesCode && activeTransitStatuses.includes(r.delivery_status);
+          });
+          if (liveMatch) {
+            matchingRelease = {
+              id: liveMatch.id,
+              drNumber: liveMatch.dr_number,
+              rawDrNumber: liveMatch.dr_number,
+              dateAllocated: liveMatch.date_allocated || '',
+              dateRequested: liveMatch.date_allocated || '',
+              lguName: liveMatch.lgu_name || '',
+              province: liveMatch.province || '',
+              municipality: liveMatch.municipality || '',
+              destination: liveMatch.destination_address || liveMatch.municipality || liveMatch.lgu_name || '',
+              fnfiCategory: liveMatch.category || category,
+              amountRequested: Number(liveMatch.amount_requested || 0),
+              amountApproved: Number(liveMatch.amount_approved || 0),
+              warehouseSource: liveMatch.warehouse_source || '',
+              sourceType: 'Warehouse',
+              deliveryMode: liveMatch.delivery_mode || '',
+              deliveryStatus: liveMatch.delivery_status as any,
+              incidentCode: liveMatch.incident_code || '',
+              allocatedBatches: liveMatch.allocated_batches || [],
+              handoverContractId: liveMatch.handover_contract_id || undefined,
+              receiverGps: liveMatch.receiver_gps || undefined,
+              destinationAddress: liveMatch.destination_address || undefined,
+              assignedTruckId: liveMatch.assigned_truck_id || undefined,
+              auditTrail: []
+            };
+          }
+        } catch {}
+      }
+
       const canonicalDrNumber = (matchingRelease?.drNumber || drNumber).trim();
 
       if (matchingRelease) {
@@ -985,12 +1056,15 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
         throw new Error(`Unable to determine verified shipment quantity for ${canonicalDrNumber}. QR payload and registered release record are missing a valid positive quantity.`);
       }
 
-      // Check if already accepted or delivered (double-scan protection & endpoint finality)
-      if (
-        matchingRelease?.deliveryStatus === 'Accepted' ||
-        matchingRelease?.deliveryStatus === 'Distributed' ||
-        locallyAcceptedDrs.includes(canonicalDrNumber.toUpperCase())
-      ) {
+      // Check if already completed and accepted into inventory
+      // NOTE: 'Delivered' shipments are dropped off by escort and waiting for LGU intake. They must NEVER be blocked!
+      const isDelivered = matchingRelease?.deliveryStatus === 'Delivered';
+      const isAccepted = matchingRelease?.deliveryStatus === 'Accepted' || matchingRelease?.deliveryStatus === 'Distributed';
+
+      if (isDelivered) {
+        // Clear any stale local optimistic flags for this shipment
+        setLocallyAcceptedDrs((prev) => prev.filter((d) => d !== canonicalDrNumber.toUpperCase() && d !== cleanUpper && d !== altUpper));
+      } else if (isAccepted || locallyAcceptedDrs.includes(canonicalDrNumber.toUpperCase())) {
         setIsProcessing(false);
         setToastMessage({
           type: 'error',
@@ -1120,14 +1194,14 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
     setIsProcessing(true);
 
     try {
-      // Mark DR as locally accepted so UI immediately reflects handover
-      setLocallyAcceptedDrs((prev) => [...prev, drNumber.toUpperCase()]);
-
       // Execute on-chain acceptance through inventory state
       const acceptResult = await onAccept(drNumber, 'LGUReceiver', finalMuni, receiverGpsString);
       if (!acceptResult.ok) {
         throw new Error(acceptResult.message || 'Digital verification receipt failed.');
       }
+
+      // Mark DR as locally accepted only after acceptance is confirmed
+      setLocallyAcceptedDrs((prev) => [...prev, drNumber.toUpperCase()]);
 
       const receiptTxHash = (acceptResult as any)?.txHash || '';
 
@@ -1215,6 +1289,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       setPendingVerification(null);
     } catch (err) {
       console.error('Acceptance execution failed:', err);
+      setLocallyAcceptedDrs((prev) => prev.filter((d) => d !== drNumber.toUpperCase()));
       setToastMessage({
         type: 'error',
         text: formatUserErrorMessage(err, 'Failed to complete receipt verification.')

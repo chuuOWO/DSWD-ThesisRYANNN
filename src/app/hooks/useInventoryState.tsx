@@ -2177,7 +2177,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
   ) => {
     if (actorRole !== 'LGUReceiver') return { ok: false, message: 'RBAC: only LGUReceiver can confirm receipt.' };
     const targetDrUpper = drNumber.trim().toUpperCase();
-    const release = outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
+    const release = outgoingReleasesList.find(item =>
+      item.drNumber.trim().toUpperCase() === targetDrUpper &&
+      ['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'].includes(item.deliveryStatus)
+    ) || outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
     if (!release) return { ok: false, message: 'Release not found.' };
     const canonicalDr = release.drNumber;
 
@@ -2290,7 +2293,10 @@ export function useInventoryState(enabled = true, actorProfile?: ActorProfile | 
     }
 
     const targetDrUpper = drNumber.trim().toUpperCase();
-    const release = outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
+    const release = outgoingReleasesList.find(item =>
+      item.drNumber.trim().toUpperCase() === targetDrUpper &&
+      ['In Transit', 'Delivered', 'Released', 'Approved', 'Packed'].includes(item.deliveryStatus)
+    ) || outgoingReleasesList.find(item => item.drNumber.trim().toUpperCase() === targetDrUpper);
     if (!release) return { ok: false, message: 'Release not found.' };
     const canonicalDr = release.drNumber;
 

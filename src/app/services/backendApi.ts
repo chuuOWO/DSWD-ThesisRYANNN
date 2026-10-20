@@ -2313,14 +2313,27 @@ export const backendApi = {
     });
 
     const [cleanDr, altDr] = getDrVariants(drNumber);
-    const { data: matched } = await supabase
-      .from('outgoing_requests')
-      .select('id')
-      .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr}`)
-      .maybeSingle();
+    let targetId: string | null = null;
+    if (isUuid(drNumber)) {
+      const { data: byId } = await supabase.from('outgoing_requests').select('id').eq('id', drNumber).maybeSingle();
+      if (byId?.id) targetId = byId.id;
+    }
+    if (!targetId) {
+      const { data: rows } = await supabase
+        .from('outgoing_requests')
+        .select('id, delivery_status')
+        .or(`dr_number.eq.${cleanDr},dr_number.eq.${altDr},dr_number.ilike.${cleanDr}`)
+        .order('created_at', { ascending: false })
+        .limit(5);
 
-    const { error } = matched?.id
-      ? await supabase.from('outgoing_requests').update(updates).eq('id', matched.id)
+      if (rows && rows.length > 0) {
+        const activeRow = rows.find((r) => ['Delivered', 'In Transit', 'Released', 'Approved', 'Packed', 'Allocating', 'Draft'].includes(r.delivery_status));
+        targetId = activeRow?.id || rows[0].id;
+      }
+    }
+
+    const { error } = targetId
+      ? await supabase.from('outgoing_requests').update(updates).eq('id', targetId)
       : await supabase.from('outgoing_requests').update(updates).ilike('dr_number', cleanDr);
 
     throwIfError(error, 'Failed to update outgoing request');
