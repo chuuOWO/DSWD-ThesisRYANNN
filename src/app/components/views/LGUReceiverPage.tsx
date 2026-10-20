@@ -237,7 +237,7 @@ const getDeviceGpsCoords = (): Promise<{ latitude: number; longitude: number } |
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
+      { enableHighAccuracy: true, timeout: 3500, maximumAge: 60000 }
     );
   });
 
@@ -881,15 +881,25 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
       }
 
       detectorRef.current = new Detector({ formats: ['qr_code'] });
+      let isDetecting = false;
+      let lastScanTime = 0;
       const scan = async () => {
         if (!videoRef.current || !cameraOpenRef.current || !detectorRef.current || isProcessing) return;
-        try {
-          const codes = await detectorRef.current.detect(videoRef.current);
-          if (codes[0]?.rawValue) {
-            handleScannedPayload(codes[0].rawValue);
+        const now = performance.now();
+        if (now - lastScanTime >= 150 && !isDetecting) {
+          lastScanTime = now;
+          isDetecting = true;
+          try {
+            const codes = await detectorRef.current.detect(videoRef.current);
+            if (codes[0]?.rawValue) {
+              handleScannedPayload(codes[0].rawValue);
+              return;
+            }
+          } catch {
+            setCameraMessage('Keep the QR centered in the viewfinder.');
+          } finally {
+            isDetecting = false;
           }
-        } catch {
-          setCameraMessage('Keep the QR centered in the viewfinder.');
         }
         if (cameraOpenRef.current) requestAnimationFrame(scan);
       };

@@ -308,8 +308,12 @@ const parseQrPayload = (value: string, releases?: ReceiverReleaseRecord[]): QrPa
   }
 };
 
-const getBrowserLocation = () =>
+const getBrowserLocation = (cachedLocation?: PhoneLocation | null) =>
   new Promise<PhoneLocation>((resolve, reject) => {
+    if (cachedLocation && typeof cachedLocation.latitude === 'number' && !isNaN(cachedLocation.latitude)) {
+      return resolve(cachedLocation);
+    }
+
     if (!navigator.geolocation) {
       reject(new Error('This browser does not support GPS location.'));
       return;
@@ -331,7 +335,7 @@ const getBrowserLocation = () =>
         });
       },
       (error) => reject(new Error(error.message || 'GPS permission denied on mobile device.')),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 3500 }
     );
   });
 
@@ -1587,7 +1591,9 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       let matchingDbRelease = allReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
       if (!matchingDbRelease) {
         try {
-          const freshReleases = await backendApi.getReceiverReleases();
+          const freshPromise = backendApi.getReceiverReleases();
+          const timeoutPromise = new Promise<ReceiverReleaseRecord[]>((res) => setTimeout(() => res([]), 1500));
+          const freshReleases = await Promise.race([freshPromise, timeoutPromise]);
           matchingDbRelease = freshReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
         } catch {}
       }
@@ -1706,7 +1712,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
 
       let nextLocation: PhoneLocation;
       try {
-        nextLocation = await getBrowserLocation();
+        nextLocation = await getBrowserLocation(location);
       } catch (gpsErr) {
         console.warn('GPS lookup in handleInitiateCustody:', gpsErr);
         if (location && isValidCoordinate([location.latitude, location.longitude])) {
@@ -2113,13 +2119,25 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       }
 
       detectorRef.current = new Detector({ formats: ['qr_code'] });
+      let isDetecting = false;
+      let lastScanTime = 0;
       const scan = async () => {
         if (!videoRef.current || !cameraOpenRef.current || !detectorRef.current || isSigning) return;
-        try {
-          const codes = await detectorRef.current.detect(videoRef.current);
-          if (codes[0]?.rawValue) handleQrValue(codes[0].rawValue);
-        } catch {
-          setCameraMessage('Keep the QR centered in the frame.');
+        const now = performance.now();
+        if (now - lastScanTime >= 150 && !isDetecting) {
+          lastScanTime = now;
+          isDetecting = true;
+          try {
+            const codes = await detectorRef.current.detect(videoRef.current);
+            if (codes[0]?.rawValue) {
+              handleQrValue(codes[0].rawValue);
+              return;
+            }
+          } catch {
+            setCameraMessage('Keep the QR centered in the frame.');
+          } finally {
+            isDetecting = false;
+          }
         }
         if (cameraOpenRef.current) requestAnimationFrame(scan);
       };
