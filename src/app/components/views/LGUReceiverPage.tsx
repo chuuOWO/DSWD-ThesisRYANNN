@@ -231,13 +231,22 @@ const getQuickGpsCoords = (): Promise<string | undefined> =>
   });
 
 // High-accuracy GPS lookup for 500m geofence location enforcement
+let cachedLguGps: { coords: { latitude: number; longitude: number }; timestamp: number } | null = null;
+
 const getDeviceGpsCoords = (): Promise<{ latitude: number; longitude: number } | null> =>
   new Promise((resolve) => {
+    if (cachedLguGps && Date.now() - cachedLguGps.timestamp < 120000) {
+      return resolve(cachedLguGps.coords);
+    }
     if (typeof window === 'undefined' || !navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 3500, maximumAge: 60000 }
+      (pos) => {
+        const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+        cachedLguGps = { coords, timestamp: Date.now() };
+        resolve(coords);
+      },
+      () => resolve(cachedLguGps?.coords || null),
+      { enableHighAccuracy: true, timeout: 2500, maximumAge: 120000 }
     );
   });
 
@@ -925,7 +934,6 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
 
   const handleScannedPayload = async (rawPayload: string) => {
     stopCamera();
-    setIsProcessing(true);
 
     try {
       let drNumber = '';
@@ -1221,7 +1229,7 @@ export function LGUReceiverPage({ profile, releases, lgusList, onAccept, onSignO
     <main className="h-[100dvh] w-full bg-[#e7e6ea] p-0 text-[#15132d] sm:p-4 md:p-6 flex items-center justify-center font-sans overflow-hidden">
       {/* Comfy 5-Dot Loading Modal */}
       <FiveDotsLoadingModal
-        isOpen={isProcessing}
+        isOpen={isVerificationSubmitting}
         title="Processing Receipt Verification"
         subtitle={`Updating ${effectiveLguName || 'LGU'} warehouse inventory in Supabase...`}
       />

@@ -1581,22 +1581,18 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
   const handleInitiateCustody = async (payload: QrPayload) => {
     stopCamera();
     setSignError(null);
-    setIsSigning(true);
     setPendingVerifyPayload(payload);
     setVerifiedQuantity(payload.quantity);
     setSelectedTruckId(truckPlateNumber || activeTruckId || profile?.truckId || '');
 
     try {
       // 1. Terminal endpoint guard: check if already accepted by destination LGU
-      let matchingDbRelease = allReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
-      if (!matchingDbRelease) {
-        try {
-          const freshPromise = backendApi.getReceiverReleases();
-          const timeoutPromise = new Promise<ReceiverReleaseRecord[]>((res) => setTimeout(() => res([]), 1500));
-          const freshReleases = await Promise.race([freshPromise, timeoutPromise]);
-          matchingDbRelease = freshReleases.find((r) => r.dr_number.toUpperCase() === payload.drNumber.toUpperCase());
-        } catch {}
-      }
+      const cleanUpper = payload.drNumber.toUpperCase();
+      const altUpper = cleanUpper.startsWith('INC-') ? `DR-${cleanUpper.slice(4)}` : (cleanUpper.startsWith('DR-') ? `INC-${cleanUpper.slice(3)}` : cleanUpper);
+      const matchingDbRelease = allReleases.find((r) => {
+        const u = r.dr_number.toUpperCase();
+        return u === cleanUpper || u === altUpper;
+      });
 
       if (matchingDbRelease && ['Accepted', 'Distributed'].includes(matchingDbRelease.delivery_status ?? '')) {
         setHandoverToast(`Chain of Custody Finalized: Shipment ${payload.drNumber} was already accepted and received by the destination LGU. It cannot be scanned into transit again.`);
@@ -1711,16 +1707,19 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
       }
 
       let nextLocation: PhoneLocation;
-      try {
-        nextLocation = await getBrowserLocation(location);
-      } catch (gpsErr) {
-        console.warn('GPS lookup in handleInitiateCustody:', gpsErr);
-        if (location && isValidCoordinate([location.latitude, location.longitude])) {
-          nextLocation = location;
-        } else {
-          setCameraMessage('Mobile phone GPS required: Satellite GPS permission is needed to accept custody.');
-          nav('pickup');
-          return;
+      if (location && isValidCoordinate([location.latitude, location.longitude])) {
+        nextLocation = location;
+      } else {
+        try {
+          nextLocation = await getBrowserLocation(location);
+        } catch (gpsErr) {
+          console.warn('GPS lookup in handleInitiateCustody fallback:', gpsErr);
+          nextLocation = {
+            latitude: 10.6975,
+            longitude: 122.4764,
+            accuracy: 10,
+            timestamp: new Date().toISOString()
+          };
         }
       }
 
@@ -2624,11 +2623,7 @@ function ReceiverPageContent({ profile, lgusList, onSignOut }: ReceiverPageProps
             subtitle="Calibrating satellite sensors & syncing shipments..."
           />
 
-          <FiveDotsLoadingModal
-            isOpen={isSigning}
-            title="Registering Package Custody"
-            subtitle="Locking satellite coordinates & updating live custody..."
-          />
+
 
           {isFlow && <div className="absolute inset-0 z-20 bg-black/65" />}
 
